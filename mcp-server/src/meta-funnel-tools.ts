@@ -1,4 +1,4 @@
-import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import type { McpServer, RegisteredTool } from '@modelcontextprotocol/sdk/server/mcp.js';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { z } from 'zod';
 
@@ -28,7 +28,7 @@ function checked<T>(result: { data: T; error: { message: string } | null }): T {
   return result.data;
 }
 const content = (value: unknown) => ({ content: [{ type: 'text' as const, text: JSON.stringify(value, null, 2) }] });
-export async function funnelContext(db: SupabaseClient, workspaceId: string) {
+export async function funnelContext(db: SupabaseClient<any, any, any>, workspaceId: string) {
   const [funnels, accounts, brands, revision] = await Promise.all([
     db.from('meta_ad_funnels').select('id,brand_id,config,version,updated_at').eq('workspace_id', workspaceId).eq('archived', false).order('created_at'),
     db.from('meta_ad_accounts').select('account_id,account_name,default_brand_id').eq('workspace_id', workspaceId).eq('is_active', true).order('account_name'),
@@ -37,7 +37,7 @@ export async function funnelContext(db: SupabaseClient, workspaceId: string) {
   ]);
   return { funnels: checked(funnels) || [], accounts: checked(accounts) || [], brands: checked(brands) || [], revision: checked(revision) };
 }
-export async function readFunnelReport(db: SupabaseClient, workspaceId: string, args: z.input<typeof reportSchema>, today = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Jakarta', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date())) {
+export async function readFunnelReport(db: SupabaseClient<any, any, any>, workspaceId: string, args: z.input<typeof reportSchema>, today = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Jakarta', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date())) {
   const input = reportSchema.parse(args);
   const range = reportRange(input.from, input.to, today);
   const ctx = await funnelContext(db, workspaceId);
@@ -96,7 +96,9 @@ export async function readFunnelReport(db: SupabaseClient, workspaceId: string, 
       'Daily/trends history includes completion flags. Do not interpret missing coverage as zero performance.',
       'Report revision records data changes, not necessarily the last successful sync.'], report: result };
 }
-export function registerMetaFunnelTools(server: McpServer, db: SupabaseClient, workspaceId: string) {
-  server.tool('meta_ad_funnel_catalog', 'List saved Meta Ad Funnels, configured metrics, active ad accounts, brands, and report revision in this workspace. Read this before selecting funnel_id or brand_id. Read-only.', {}, async () => content(await funnelContext(db, workspaceId)));
-  server.tool('meta_ad_funnel_report', 'Read the same Meta Ad Funnel report RPC used by the dashboard: per-ad or landing-page performance, prior-period totals, CEP/intention/objective filters, daily history, trends, or creatives. Dates are WIB, max 93 days, capped at yesterday. Default funnel is the first saved landing-page funnel, as in the dashboard. Paginate groups/history/creatives with offset/limit; totals remain for the full selection. Read-only.', reportSchema.shape, async input => content(await readFunnelReport(db, workspaceId, input)));
+export function registerMetaFunnelTools(server: McpServer, db: SupabaseClient<any, any, any>, workspaceId: string): Record<string, RegisteredTool> {
+  const handles: Record<string, RegisteredTool> = {};
+  handles.meta_ad_funnel_catalog = server.tool('meta_ad_funnel_catalog', 'List saved Meta Ad Funnels, configured metrics, active ad accounts, brands, and report revision in this workspace. Read this before selecting funnel_id or brand_id. Read-only.', {}, async () => content(await funnelContext(db, workspaceId)));
+  handles.meta_ad_funnel_report = server.tool('meta_ad_funnel_report', 'Read the same Meta Ad Funnel report RPC used by the dashboard: per-ad or landing-page performance, prior-period totals, CEP/intention/objective filters, daily history, trends, or creatives. Dates are WIB, max 93 days, capped at yesterday. Default funnel is the first saved landing-page funnel, as in the dashboard. Paginate groups/history/creatives with offset/limit; totals remain for the full selection. Read-only.', reportSchema.shape, async input => content(await readFunnelReport(db, workspaceId, input)));
+  return handles;
 }
