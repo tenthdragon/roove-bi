@@ -5,16 +5,17 @@ import { metaBrandOptions, type MetaAccountBrand, type MetaBrand } from './meta-
 import { parseRooveAdName } from './meta-ad-naming';
 import type { CtwaDestination } from './meta-ctwa-destinations';
 import { parseCepKey } from './meta-cep-key';
+import type { MetaAnalysisFilters, AnalysisFacet, AnalysisDimension } from './meta-analysis-filters';
 
-export type MetaReportInput = { from: string; to: string; channel?: MetaAdChannel; funnelId?: string; brandId?: string; groupKey?: string; filters?: AdDimensionFilters; groupBy?: ReportGroupBy };
+export type MetaReportInput = { from: string; to: string; channel?: MetaAdChannel; funnelId?: string; brandId?: string; groupKey?: string; filters?: MetaAnalysisFilters; groupBy?: ReportGroupBy };
 export type ReportGroupBy = 'ad' | 'landing_page' | 'cep_intention';
 export type ReportQuery = {
-  from: string; to: string; config: Pick<FunnelConfig, 'account_ids' | 'name_filter' | 'match'> & { include_optimization?: boolean; include_matrix?: boolean };
-  filters: AdDimensionFilters; channel: MetaAdChannel | null; brand: string | null; groupBy: ReportGroupBy;
+  from: string; to: string; config: Pick<FunnelConfig, 'account_ids' | 'name_filter' | 'match'> & { include_optimization?: boolean; include_matrix?: boolean; include_analysis?: boolean };
+  filters: MetaAnalysisFilters; channel: MetaAdChannel | null; brand: string | null; groupBy: ReportGroupBy;
   view: 'overview' | 'daily' | 'trends' | 'creatives'; period: 'week' | 'month'; groupKey: string | null;
 };
 export type ReportBucket = { date: string; totals: Totals; complete: boolean; partial: boolean };
-export type RawMetaReport = { intentionLabels?: Record<string, string>;
+export type RawMetaReport = { analysisFacets?: AnalysisFacet[]; analysisFacetTotals?: Partial<Record<AnalysisDimension, number>>; intentionLabels?: Record<string, string>;
   cepLabels?: Record<string, string>; intentionTotals?: { intention: string; current: Totals }[]; multiCepAds?: number;
   currencies: string[]; summary: Totals; previous: Totals;
   groups: (Omit<GroupComparison, 'metrics' | 'creatives' | 'categories' | 'classified' | 'destination'> & { destination?: CtwaDestination | null; currencies?: string[]; partnership_breakdown?: import('./meta-funnel-templates').PartnershipBreakdown[]; matrix_metadata?: import('./meta-format-cep-matrix').MatrixAdMetadata; optimization_breakdown?: import('./meta-funnel-templates').OptimizationBreakdown[]; format_breakdown?: import('./meta-funnel-templates').FormatBreakdown[] })[];
@@ -26,7 +27,7 @@ export type RawMetaReport = { intentionLabels?: Record<string, string>;
 };
 export function metaReportQuery(input: MetaReportInput, config: FunnelConfig, view: ReportQuery['view'] = 'overview', period: ReportQuery['period'] = 'week'): ReportQuery {
   return { from: input.from, to: input.to, config: { account_ids: [...config.account_ids].sort(), name_filter: config.name_filter, match: config.match },
-    filters: { cep: input.filters?.cep, intention: input.filters?.intention, objective: input.filters?.objective },
+    filters: { cep: input.filters?.cep, intention: input.filters?.intention, objective: input.filters?.objective, optimization: input.filters?.optimization, format: input.filters?.format, partnership: input.filters?.partnership },
     channel: input.channel || null, brand: input.brandId || null, groupBy: input.groupBy || 'landing_page', view, period,
     groupKey: view === 'overview' ? null : input.groupKey || null };
 }

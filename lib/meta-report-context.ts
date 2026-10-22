@@ -6,7 +6,7 @@ import { loadFunnels } from './meta-funnel-store';
 import { getTodayWIB } from './sync-schedule';
 import { isWorkspaceModuleEnabled } from './workspaces';
 import { validateMetaAdChannel } from './meta-ad-channels';
-import { validateDimensionFilters } from './meta-ad-dimensions';
+import { validateAnalysisFilters } from './meta-analysis-filters';
 import { metaBrandAccountIds, metaBrandOptions, validateMetaBrandFilter } from './meta-ad-brands';
 import { completedMetaRange } from './meta-report-status';
 import type { MetaReportInput } from './meta-ad-report';
@@ -48,7 +48,7 @@ export async function reportContext(input: MetaReportInput, includeJobs = false)
   if (input.funnelId !== undefined && input.funnelId !== '') uuid(input.funnelId);
   const channel = validateMetaAdChannel(input.channel);
   const reportRange = completedMetaRange(input, getTodayWIB());
-  const filters = validateDimensionFilters(input.filters), brandId = validateMetaBrandFilter(input.brandId);
+  const filters = validateAnalysisFilters(input.filters), brandId = validateMetaBrandFilter(input.brandId);
   assertMetaBrand(access, brandId);
   const svc = createServiceSupabase();
   const [version, funnels, accountsResult, brandsResult, jobsResult, channelSchema] = await Promise.all([

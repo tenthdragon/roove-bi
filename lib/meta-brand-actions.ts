@@ -20,6 +20,7 @@ import { assignTemplateSections, compareMetrics, cpasSection, defaultLeadFunnel,
 import { ctwaLabel } from './meta-ctwa-destinations';
 import { brandHealth, brandHighlights, type Highlight } from './meta-ad-highlights';
 import { buildCepView, cepHighlights } from './meta-cep-view';
+import { analysisFilterOptions } from './meta-analysis-filters';
 import { editAccess, reportContext, reportingAccess, uuid } from './meta-report-context';
 import { defaultFunnel } from './meta-funnel-domain';
 import { saveMetaFunnel } from './meta-funnel-actions';
@@ -85,6 +86,7 @@ export async function getMetaBrandOverview(input: BrandInput & { workspaceId?: s
   return metaReportResponse(() => loadMetaBrandOverview(input));
 }
 async function loadMetaBrandOverview(input: BrandInput & { workspaceId?: string }) {
+  if (input.filters?.optimization || input.filters?.format || input.filters?.partnership) throw new Error('Gunakan filter analisis pada detail brand.');
   const ctx = await reportContext({ from: input.from, to: input.to, filters: input.filters }, true);
   if (!ctx.schemaReady) return ctx;
   if (input.workspaceId && input.workspaceId !== ctx.workspaceId) throw new Error('Workspace berubah. Muat ulang halaman.');
@@ -170,6 +172,7 @@ async function loadMetaBrandDetail(input: BrandInput & { brandId: string; world:
     summary: active.summary, previous: active.previous, response: compareMetrics(active.summary, active.previous, responseMetrics(world)), responseMetrics: responseMetrics(world),
     sections: world === 'website' ? web.sections : [cpas.section], unassigned: world === 'website' ? web.unassigned : [],
     highlights, cep, coverageGaps: active.coverageGaps, destinations: activeRaw.destinations, objectiveUnknownAds: activeRaw.objectiveUnknownAds,
+    analysisOptions: analysisFilterOptions(activeRaw), analysisReady: Array.isArray(activeRaw.analysisFacets),
     dimensionOptions: metaReportOptions(activeRaw, ctx.accounts, ctx.brands).dimensionOptions, dimensionsReady: true, rulesReady: rules.ready, verifiedDestinationsReady: true,
     templates: ctx.funnels.map(f => ({ id: f.id, brand_id: f.brand_id, name: f.name, kind: templateKind(f) })) };
 }

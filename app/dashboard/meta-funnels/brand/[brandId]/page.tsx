@@ -17,14 +17,14 @@ import { getMetaBrandDetail, getMetaFormatCepMatrix, saveMetaTemplateRule } from
 import { MEASURES, metricValue, type FunnelMetric, type Totals } from '@/lib/meta-funnel-domain';
 import { templateDestinationRule } from '@/lib/meta-ctwa-destinations';
 import { WORLD_CHANNEL, WORLD_LABELS, type MetaBrandWorld, type TemplateGroup, type TemplateSection } from '@/lib/meta-funnel-templates';
-import type { AdDimensionFilters } from '@/lib/meta-ad-dimensions';
+import type { MetaAnalysisFilters as AnalysisFilters } from '@/lib/meta-analysis-filters';
 import { formatChange, formatCompactMoney, formatDate, formatMetric } from '@/lib/meta-format';
 import MetaAdsNav from '@/components/MetaAdsNav';
 import MetaTemplateResults from '@/components/MetaTemplateResults';
 import { getMetaColumnPreferences, saveMetaColumnPreference, saveMetaTableSort, type MetaColumnPreferences } from '@/lib/meta-column-preference-actions';
 import type { MetaTableSort } from '@/lib/meta-table-sorting';
 import type { MetaColumnPreference, MetaTablePreference } from '@/lib/meta-column-preferences';
-import MetaAdDimensionFilters from '@/components/MetaAdDimensionFilters';
+import MetaAnalysisFilters, { MetaActiveFilters, activeMetaFilters } from '@/components/MetaAnalysisFilters';
 import { brandMetricHighlights, metaDataNotes } from '@/lib/meta-inline-highlights';
 import { MetaDataNotesTrigger, MetaHighlightValue } from '@/components/MetaInsightPopover';
 import MetaSparkline from '@/components/MetaSparkline';
@@ -85,7 +85,7 @@ export default function MetaBrandDetailPage() {
   const brandId = params.brandId;
   const world: MetaBrandWorld = search.get('world') === 'cpas' ? 'cpas' : 'website';
   const view = search.get('view') === 'matrix' ? 'matrix' : search.get('view') === 'cep' ? 'cep' : 'destinations';
-  const [filters, setFilters] = useState<AdDimensionFilters>({});
+  const [filters, setFilters] = useState<AnalysisFilters>({});
   const [schemaReady, setSchemaReady] = useState(true);
   const [notice, setNotice] = useState('');
   const [busy, setBusy] = useState(false);
@@ -196,10 +196,10 @@ export default function MetaBrandDetailPage() {
   const dataNotes = data ? metaDataNotes(data) : [];
   const noteCount = dataNotes.length;
   const highlightPeriod = data ? { ...data.reportRange, prevFrom: data.prevFrom, prevTo: data.prevTo } : undefined;
-  const hasFilters = !!(filters.cep || filters.intention || filters.objective);
+  const filterCount = activeMetaFilters(filters).length;
   return <div className={styles.page} aria-busy={loading}>
     <MetaAdsNav />
-    <div className={styles.toolbar}>
+    <div className={`${styles.toolbar} ${styles.analysisToolbar}`}>
       <div className={styles.toolbarGroup}>
         <Link href="/dashboard/meta-funnels" className={styles.backLink}>← Ringkasan</Link>
         <select className={styles.brandSwitch} aria-label="Pilih brand" value={brandId} onChange={e => router.push(`/dashboard/meta-funnels/brand/${e.target.value}?world=${world}`)}>
@@ -213,12 +213,13 @@ export default function MetaBrandDetailPage() {
       </div>
       <div className={styles.toolbarGroup}>
         {data && <span className={styles.muted}>{data.matchingAds} ad · {data.accounts.length} akun</span>}
-        <details className={styles.filterDetails}><summary>Filter{hasFilters ? ' · aktif' : ''}</summary>
-          <div className={styles.filterPanel}>{data && <MetaAdDimensionFilters value={filters} options={data.dimensionOptions} ready={data.dimensionsReady} onChange={setFilters} onReset={() => setFilters({})} />}</div>
+        <details className={styles.filterDetails}><summary>Filter{filterCount ? ` · ${filterCount}` : ''}</summary>
+          <div className={styles.filterPanel}><MetaAnalysisFilters value={filters} dimensions={data?.dimensionOptions} analysis={data?.analysisOptions} ready={!!data?.dimensionsReady} analysisReady={!!data?.analysisReady} loading={loading} onChange={setFilters} /></div>
         </details>
         <MetaDataNotesTrigger notes={dataNotes} onOpen={() => setNotesOpen(true)} disabled={!data} />
       </div>
     </div>
+    <MetaActiveFilters value={filters} options={data?.dimensionOptions} onChange={setFilters} />
     {(session.error || error) && <div role="alert" className={styles.error}>{session.error || error}</div>}
     {notice && <div role="status" className={styles.info}>{notice}</div>}
     {!schemaReady ? <div className={styles.card}>Pengelompokan iklan belum tersedia. Hubungi admin untuk mengaktifkannya.</div> : <>
@@ -252,10 +253,11 @@ export default function MetaBrandDetailPage() {
           </>}
           {view === 'destinations' && world === 'website' && breakdown.error && <p role="status" className={styles.muted}>{breakdown.error}</p>}
           {view === 'cep' && <MetaCepView view={data.cep} currency={currency} onOpenCep={setCepDrawer} highlights={data.highlights} period={highlightPeriod} />}
-          {view === 'destinations' && world === 'website' && !data.sections.some(s => s.groups.length) && <div className={styles.card}>{data.sections.length ? 'Belum ada landing page yang terpetakan ke template pada periode ini.' : 'Belum ada template funnel.'} Tetapkan template di <Link href="/dashboard/meta-funnels/templates">Template funnel</Link>.</div>}
+          {view === 'destinations' && world === 'website' && data.matchingAds > 0 && !data.sections.some(s => s.groups.length) && <div className={styles.card}>{data.sections.length ? 'Belum ada landing page yang terpetakan ke template pada periode ini.' : 'Belum ada template funnel.'} Tetapkan template di <Link href="/dashboard/meta-funnels/templates">Template funnel</Link>.</div>}
           {view === 'destinations' && world === 'website' && (columnError || columnPreferences?.ready === false) && <div className={styles.info} role="status">
             {columnError || 'Pengaturan tabel belum tersedia. Tampilan default digunakan.'} <button type="button" className={styles.button} onClick={() => void reloadColumns(true)}>Coba lagi</button>
           </div>}
+          {view === 'destinations' && world === 'website' && !data.matchingAds && !data.reportingError && <p className={styles.card}>Tidak ada iklan yang cocok dengan periode dan filter ini.</p>}
           {view === 'destinations' && data.sections.filter(s => s.groups.length || world === 'cpas').map(section => <MetaTemplateResults
             key={JSON.stringify([session.key, section.key])} breakdown={breakdown.value} breakdownReady={breakdown.ready} onBreakdownChange={breakdown.select} section={section} world={world} currency={currency} highlights={data.highlights} period={highlightPeriod}
             preferencesReady={!!columnPreferences?.ready && !columnError && !columnLoading} preference={section.funnelId ? columnPreferences?.preferences[section.funnelId] : null}

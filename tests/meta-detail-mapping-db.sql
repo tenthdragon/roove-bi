@@ -11,7 +11,8 @@ BEGIN
    r:=jsonb_set(r,ARRAY[k],a);
   END IF;
  END LOOP;
- RETURN r;
+ -- New analysis facets are additive UI options; all pre-existing report fields must match.
+ RETURN r-'analysisFacets'-'analysisFacetTotals';
 END $$;
 DO $$ DECLARE w uuid:='00000000-0000-4000-8000-000000000001'; a text; b text; f jsonb; g text; v text; period text; focus text; old jsonb; fresh jsonb; batch jsonb; config jsonb; n int:=0; t timestamptz; BEGIN
  SELECT s.account_id INTO a FROM ctwa_scope s WHERE s.n=1;
