@@ -1,7 +1,7 @@
 'use client';
 
 import { Fragment, useEffect, useMemo, useRef, useState } from 'react';
-import { ArrowDown, ArrowUp, ArrowUpDown, SlidersHorizontal } from 'lucide-react';
+import { ArrowDown, ArrowUp, ArrowUpDown, Info, RotateCcw, SlidersHorizontal } from 'lucide-react';
 import { MEASURES, type Measure } from '@/lib/meta-funnel-domain';
 import { creativeFormatGroups, optimizationGroups, partnershipGroups, TEMPLATE_KIND_LABELS, WORLD_LABELS, type MetaBrandWorld, type TemplateGroup, type TemplateSection } from '@/lib/meta-funnel-templates';
 import { formatChange, formatCompactMoney, formatCount, formatMetric } from '@/lib/meta-format';
@@ -9,7 +9,7 @@ import { metaResultColumns, visibleMetaColumns, type MetaColumnPreference } from
 import { metaStageValue, sortMetaGroups, type MetaTableSort } from '@/lib/meta-table-sorting';
 import type { Highlight } from '@/lib/meta-ad-highlights';
 import { destinationHighlights, highlightsForMetric, type HighlightPeriod } from '@/lib/meta-inline-highlights';
-import { MetaHighlightValue } from '@/components/MetaInsightPopover';
+import { MetaHighlightValue, MetaInsightPopover } from '@/components/MetaInsightPopover';
 import MetaColumnEditor from '@/components/MetaColumnEditor';
 import type { MetaBreakdown } from '@/lib/useMetaBreakdownPreference';
 import { PARTNERSHIP_DESCRIPTIONS } from '@/lib/meta-ad-partnership';
@@ -71,17 +71,24 @@ export default function MetaTemplateResults({ section, world, currency, preferen
   }
   const close = () => { setEditing(false); trigger.current?.focus(); };
   return <div className={styles.sectionCard}>
-    <div className={styles.sectionHead}>
-      <div><span className={`${styles.templateTag} ${world === 'cpas' ? styles.templateTagCpas : ''}`}>{world === 'cpas' ? 'CPAS' : 'TEMPLATE'}</span><strong>{section.name}</strong><span>{section.config.stages.filter(s => s !== 'spend').map(s => MEASURES[s]).join(' → ')} · {section.groups.length} {world === 'website' ? 'tujuan' : 'ad'} · {formatCompactMoney(section.summary.spend, currency)}</span></div>
-      <div><span>{section.mainMetric && section.mainMedian !== null ? `Median ${section.mainMetric.label} ${formatMetric(section.mainMedian, section.mainMetric, currency)}` : TEMPLATE_KIND_LABELS[section.kind]}</span>
-        {activeSort && <button type="button" className={styles.button} disabled={sortDisabled} onClick={() => void changeSort(null)}>Urutan awal</button>}
+    <div className={styles.templateHeader}>
+      <div className={styles.templateSummary}>
+        <div className={styles.templateIdentity}><strong>{section.name}</strong>
+          <MetaInsightPopover label={`Alur funnel ${section.name}`} heading="Alur funnel" className={styles.funnelInfo} trigger={<Info size={15} aria-hidden="true" />}>
+            <p>{section.config.stages.filter(s => s !== 'spend').map(s => MEASURES[s]).join(' → ')}</p>
+          </MetaInsightPopover>
+        </div>
+        <span className={styles.muted}>{section.groups.length} {world === 'website' ? 'tujuan' : 'ad'} · {formatCompactMoney(section.summary.spend, currency)}</span>
+      </div>
+      <div className={styles.tableToolbar}><span className={styles.muted}>{section.mainMetric && section.mainMedian !== null ? `Median ${section.mainMetric.label} ${formatMetric(section.mainMedian, section.mainMetric, currency)}` : TEMPLATE_KIND_LABELS[section.kind]}</span>
         <div className={styles.tableViewControls}>
-          {onSave && <button ref={trigger} type="button" className={`${styles.button} ${styles.columnSettingsButton}`} disabled={!preferencesReady || savingSort} aria-haspopup="dialog" onClick={() => { setNotice(''); setEditing(true); }}><SlidersHorizontal size={14} />Atur kolom</button>}
+          {activeSort && <button type="button" className={styles.sortReset} disabled={sortDisabled} onClick={() => void changeSort(null)}><RotateCcw size={13} aria-hidden="true" />Reset urutan</button>}
           {world === 'website' && onBreakdownChange && <select className={styles.breakdownSelect} aria-label={`Rincian tabel ${section.name}`} disabled={!breakdownReady} value={breakdown}
             title={breakdown === 'optimization' ? 'Konfigurasi optimasi terbaru yang tersinkron.' : breakdown === 'partnership' ? 'Status berdasarkan metadata creative terbaru yang tersinkron.' : undefined}
             onChange={e => onBreakdownChange(e.target.value === 'partnership' ? 'partnership' : e.target.value === 'optimization' ? 'optimization' : 'format')}>
             <option value="format">Format iklan</option><option value="optimization">Optimasi</option><option value="partnership">Partnership</option>
           </select>}
+          {onSave && <button ref={trigger} type="button" className={`${styles.button} ${styles.columnSettingsButton}`} disabled={!preferencesReady || savingSort} aria-haspopup="dialog" onClick={() => { setNotice(''); setEditing(true); }}><SlidersHorizontal size={14} aria-hidden="true" />Atur kolom</button>}
         </div>
       </div>
     </div>

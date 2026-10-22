@@ -24,7 +24,7 @@ import MetaTemplateResults from '@/components/MetaTemplateResults';
 import { getMetaColumnPreferences, saveMetaColumnPreference, saveMetaTableSort, type MetaColumnPreferences } from '@/lib/meta-column-preference-actions';
 import type { MetaTableSort } from '@/lib/meta-table-sorting';
 import type { MetaColumnPreference, MetaTablePreference } from '@/lib/meta-column-preferences';
-import MetaAnalysisFilters, { MetaActiveFilters, activeMetaFilters } from '@/components/MetaAnalysisFilters';
+import MetaAnalysisFilters, { MetaActiveFilters } from '@/components/MetaAnalysisFilters';
 import { brandMetricHighlights, metaDataNotes } from '@/lib/meta-inline-highlights';
 import { MetaDataNotesTrigger, MetaHighlightValue } from '@/components/MetaInsightPopover';
 import MetaSparkline from '@/components/MetaSparkline';
@@ -196,10 +196,9 @@ export default function MetaBrandDetailPage() {
   const dataNotes = data ? metaDataNotes(data) : [];
   const noteCount = dataNotes.length;
   const highlightPeriod = data ? { ...data.reportRange, prevFrom: data.prevFrom, prevTo: data.prevTo } : undefined;
-  const filterCount = activeMetaFilters(filters).length;
   return <div className={styles.page} aria-busy={loading}>
     <MetaAdsNav />
-    <div className={`${styles.toolbar} ${styles.analysisToolbar}`}>
+    <div className={styles.toolbar}>
       <div className={styles.toolbarGroup}>
         <Link href="/dashboard/meta-funnels" className={styles.backLink}>← Ringkasan</Link>
         <select className={styles.brandSwitch} aria-label="Pilih brand" value={brandId} onChange={e => router.push(`/dashboard/meta-funnels/brand/${e.target.value}?world=${world}`)}>
@@ -212,24 +211,22 @@ export default function MetaBrandDetailPage() {
         </div>
       </div>
       <div className={styles.toolbarGroup}>
-        {data && <span className={styles.muted}>{data.matchingAds} ad · {data.accounts.length} akun</span>}
-        <details className={styles.filterDetails}><summary>Filter{filterCount ? ` · ${filterCount}` : ''}</summary>
-          <div className={styles.filterPanel}><MetaAnalysisFilters value={filters} dimensions={data?.dimensionOptions} analysis={data?.analysisOptions} ready={!!data?.dimensionsReady} analysisReady={!!data?.analysisReady} loading={loading} onChange={setFilters} /></div>
-        </details>
         <MetaDataNotesTrigger notes={dataNotes} onOpen={() => setNotesOpen(true)} disabled={!data} />
       </div>
     </div>
-    <MetaActiveFilters value={filters} options={data?.dimensionOptions} onChange={setFilters} />
     {(session.error || error) && <div role="alert" className={styles.error}>{session.error || error}</div>}
     {notice && <div role="status" className={styles.info}>{notice}</div>}
     {!schemaReady ? <div className={styles.card}>Pengelompokan iklan belum tersedia. Hubungi admin untuk mengaktifkannya.</div> : <>
       {loading && !session.error && !data && <p role="status" className={styles.muted}>Memuat detail brand…</p>}
       {data && <>
         {world === 'website' && !data.rulesReady && error !== META_TEMPLATE_SCHEMA_MESSAGE && <div role="alert" className={styles.error}>{META_TEMPLATE_SCHEMA_MESSAGE}</div>}
-        <p className={styles.period}>Periode {formatDate(data.reportRange.from)} – {formatDate(data.reportRange.to)} <span>vs {formatDate(data.prevFrom)} – {formatDate(data.prevTo)} · {currency}</span></p>
+        <div className={styles.reportScope}>
+          <p className={styles.period}>Periode {formatDate(data.reportRange.from)} – {formatDate(data.reportRange.to)} <span>vs {formatDate(data.prevFrom)} – {formatDate(data.prevTo)} · {currency}</span></p>
+          <span className={styles.muted}>{data.matchingAds} ad · {data.accounts.length} akun</span>
+        </div>
         {data.reportingError && <div role="alert" className={styles.error}>{data.reportingError}</div>}
         <section aria-label="Respon iklan" style={{ display: 'grid', gap: 10 }}>
-          <div className={styles.sectionTitle}><h2>Respon iklan</h2><span>Lapisan bersama · dinilai sama di Website dan CPAS · sparkline harian 30 hari</span></div>
+          <div className={styles.sectionTitle}><h2>Respon iklan</h2></div>
           <div className={styles.responseGrid}>{data.responseMetrics.map(m => { const c = data.response.find(r => r.id === m.id)!; return <div key={m.id} className={styles.kpi}>
             <span className={styles.muted} style={{ display: 'flex', justifyContent: 'space-between' }}><span>{m.label}</span><Delta value={c.change} direction={m.direction} /></span>
             <span className={styles.kpiValue}><MetaHighlightValue highlights={brandMetricHighlights(data.highlights, m)} currency={currency} period={highlightPeriod}>{formatMetric(c.current, m, currency)}</MetaHighlightValue></span>
@@ -237,14 +234,20 @@ export default function MetaBrandDetailPage() {
             <span className={styles.muted}>{m.denominator ? `${MEASURES[m.numerator]} ÷ ${MEASURES[m.denominator]}${m.multiplier ? ` × ${m.multiplier}` : ''}` : MEASURES[m.numerator]}</span>
           </div>; })}</div>
         </section>
-        <section aria-label={`Hasil ${WORLD_LABELS[world]}`} style={{ display: 'grid', gap: 12 }}>
-          <div className={styles.sectionTitle}><h2>Hasil · {WORLD_LABELS[world]}</h2><div className={styles.actions}>
-            <span className={styles.muted}>{view === 'matrix' ? 'CEP × format iklan · per optimasi' : view === 'cep' ? 'Per CEP · nuansa antar pintu masuk pada ad yang sama' : world === 'website' ? 'Per template · Website per URL, WhatsApp per brand dan nomor' : 'Per ad · purchase Shopee dengan atribusi Meta'}</span>
+      </>}
+        <section aria-label={`Hasil ${WORLD_LABELS[world]}`} className={styles.analysisResults}>
+          <div className={styles.analysisViews}>
             <div className={styles.viewSwitch} role="group" aria-label="Tampilan hasil">
               <button type="button" className={view === 'destinations' ? styles.viewActive : ''} aria-pressed={view === 'destinations'} onClick={() => setView('destinations')}>{world === 'website' ? 'Tujuan' : 'Ad'}</button>
               <button type="button" className={view === 'cep' ? styles.viewActive : ''} aria-pressed={view === 'cep'} onClick={() => setView('cep')}>CEP</button>
               <button type="button" className={view === 'matrix' ? styles.viewActive : ''} aria-pressed={view === 'matrix'} onClick={() => setView('matrix')}>Matrix</button>
-            </div></div></div>
+            </div>
+          </div>
+          <div className={styles.analysisFilters} role="group" aria-label="Filter analisis">
+            <MetaAnalysisFilters value={filters} dimensions={data?.dimensionOptions} analysis={data?.analysisOptions} ready={!!data?.dimensionsReady} analysisReady={!!data?.analysisReady} loading={loading} onChange={setFilters} />
+            <MetaActiveFilters value={filters} options={data?.dimensionOptions} onChange={setFilters} />
+          </div>
+          {data && <>
           {view === 'matrix' && !data.reportingError && <>
             {matrix.error && <div role="alert" className={styles.error}>{matrix.error} <button type="button" className={styles.button} onClick={() => void matrix.load(true)}>Coba lagi</button></div>}
             {(matrix.loading && !matrix.data || matrix.data && matrix.data.reportVersion !== data.reportVersion) && !matrix.error && <p role="status" className={styles.muted}>Memuat Matrix…</p>}
@@ -274,7 +277,9 @@ export default function MetaBrandDetailPage() {
             <Link href="/dashboard/meta-funnels/templates">Atur template dan tujuan →</Link>
           </div>}
           {view === 'destinations' && world === 'cpas' && <p className={styles.muted}>Metrik CPAS memakai atribusi Meta per adset. Purchase shared items 1 hari dan 7 hari belum dipisahkan; ROAS dibaca sebagai indikasi arah.</p>}
+          </>}
         </section>
+      {data && <>
         <section aria-label="Tren" style={{ display: 'grid', gap: 10 }}>
           <div className={styles.sectionTitle}><h2>Tren harian · 30 hari</h2><div className={styles.actions}><span className={styles.muted}>{formatDate(trendRange.from)} – {formatDate(trendRange.to)} · {WORLD_LABELS[world]}</span>
             <select aria-label="Metrik tren" value={trendMetric?.id || ''} onChange={e => setTrendMetricId(e.target.value)}>{trendMetrics.map(m => <option key={m.id} value={m.id}>{m.label}</option>)}</select></div></div>
