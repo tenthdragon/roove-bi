@@ -2,9 +2,8 @@
 'use client';
 import { createContext, useContext, useState, useEffect } from 'react';
 import { usePathname } from 'next/navigation';
-import { completedMetaRange, defaultMetaRange } from './meta-report-status';
+import { defaultMetaRange, selectedMetaRange } from './meta-report-status';
 import { getTodayWIB } from './sync-schedule';
-import { shiftDay } from './meta-funnel-domain';
 import { useSupabase } from '@/lib/supabase-browser';
 import { getDatePartsInTimeZone } from '@/lib/utils';
 import { useWorkspace } from '@/lib/WorkspaceContext';
@@ -91,16 +90,16 @@ export function DateRangeProvider({ children }: { children: React.ReactNode }) {
 
   const setDateRange = (from: string, to: string) => {
     setHasCustomRange(true);
-    setDateRangeState(isMetaReport ? completedMetaRange({ from, to }, today) : { from, to });
+    setDateRangeState(isMetaReport ? selectedMetaRange({ from, to }, today) : { from, to });
   };
 
   const visibleRange = isMetaReport && dateRange.from
-    ? hasCustomRange ? completedMetaRange(dateRange, today) : defaultMetaRange(today)
+    ? hasCustomRange ? selectedMetaRange(dateRange, today) : defaultMetaRange(today)
     : dateRange;
 
   return (
     <DateRangeContext.Provider value={{ dateRange: visibleRange,
-      dateExtent: isMetaReport ? { ...dateExtent, latest: shiftDay(today, -1) } : dateExtent, setDateRange, loading }}>
+      dateExtent: isMetaReport ? { ...dateExtent, latest: today } : dateExtent, setDateRange, loading }}>
       {children}
     </DateRangeContext.Provider>
   );

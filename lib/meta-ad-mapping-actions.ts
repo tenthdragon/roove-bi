@@ -13,7 +13,7 @@ import { mappingUnit, type AdMapping, type MappingUnit } from './meta-ad-mapping
 import { dimensionOptions, validateDimensionFilters, type AdDimensionFilters, type AdDimensions } from './meta-ad-dimensions';
 import { validateMetaAdChannel, type MetaAdChannel } from './meta-ad-channels';
 import { validateRange } from './meta-funnel-domain';
-import { completedMetaRange } from './meta-report-status';
+import { defaultMetaRange, selectedMetaRange } from './meta-report-status';
 import { getTodayWIB } from './sync-schedule';
 import { getMetaWorklistInventory, getMetaWorklistActivity } from './meta-worklist-data';
 import { metaReportResponse } from './meta-report-requests';
@@ -61,7 +61,7 @@ async function loadMetaAdWorklist(input: MetaWorklistInput) {
   const scopeAccess = await access(); const { workspaceId } = scopeAccess;
   if (input.workspaceId && input.workspaceId !== workspaceId) throw new Error('Workspace berubah. Muat ulang halaman.');
   const today = getTodayWIB();
-  const range = completedMetaRange(input.from && input.to ? { from: input.from, to: input.to } : { from: `${today.slice(0, 7)}-01`, to: today }, today);
+  const range = selectedMetaRange(input.from && input.to ? { from: input.from, to: input.to } : defaultMetaRange(today), today);
   validateRange(range.from, range.to);
   const issue = input.issue === undefined || input.issue === null || input.issue === '' ? null : (WORKLIST_ISSUES as readonly string[]).includes(String(input.issue)) ? input.issue as WorklistIssue : null;
   if (input.issue && !issue) throw new Error('Jenis masalah tidak valid.');

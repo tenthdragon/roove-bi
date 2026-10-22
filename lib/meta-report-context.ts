@@ -8,7 +8,7 @@ import { isWorkspaceModuleEnabled } from './workspaces';
 import { validateMetaAdChannel } from './meta-ad-channels';
 import { validateAnalysisFilters } from './meta-analysis-filters';
 import { metaBrandAccountIds, metaBrandOptions, validateMetaBrandFilter } from './meta-ad-brands';
-import { completedMetaRange } from './meta-report-status';
+import { selectedMetaRange } from './meta-report-status';
 import type { MetaReportInput } from './meta-ad-report';
 import { META_SYNC_JOB_FIELDS } from './meta-funnel-sync-status';
 import { loadMetaBrandScope, scopeMetaAccounts, scopeMetaBrands, scopeMetaAccountIds, assertMetaBrand } from './meta-brand-access';
@@ -47,7 +47,7 @@ export async function reportContext(input: MetaReportInput, includeJobs = false)
   if (input.groupKey !== undefined && (typeof input.groupKey !== 'string' || input.groupKey.length > 50000)) throw new Error('Pilihan breakdown tidak valid.');
   if (input.funnelId !== undefined && input.funnelId !== '') uuid(input.funnelId);
   const channel = validateMetaAdChannel(input.channel);
-  const reportRange = completedMetaRange(input, getTodayWIB());
+  const reportRange = selectedMetaRange(input, getTodayWIB());
   const filters = validateAnalysisFilters(input.filters), brandId = validateMetaBrandFilter(input.brandId);
   assertMetaBrand(access, brandId);
   const svc = createServiceSupabase();

@@ -14,10 +14,15 @@ export function completedMetaRange(range: { from: string; to: string }, today: s
   const to = range.to < today ? range.to : shiftDay(today, -1);
   return { from: range.from <= to ? range.from : to, to };
 }
+export function selectedMetaRange(range: { from: string; to: string }, today: string) {
+  if (!range.from || !range.to) return range;
+  const to = range.to <= today ? range.to : today;
+  return { from: range.from <= to ? range.from : to, to };
+}
 export function metaReportPresets(today: string) {
   const end = shiftDay(today, -1);
   return getPresetRanges(new Date(`${today}T12:00:00+07:00`)).flatMap(p => {
-    if (p.label === 'Hari Ini') return [{ label: 'Kemarin', from: end, to: end }];
+    if (p.label === 'Hari Ini') return [p, { label: 'Kemarin', from: end, to: end }];
     const lengths: Record<string, number> = { '7 Hari': 7, '30 Hari': 30, '90 Hari': 90 };
     const length = lengths[p.label];
     if (length) return [{ ...p, from: shiftDay(end, 1 - length), to: end }];
