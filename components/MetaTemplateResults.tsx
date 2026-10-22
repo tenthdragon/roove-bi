@@ -1,7 +1,7 @@
 'use client';
 
 import { Fragment, useEffect, useMemo, useRef, useState } from 'react';
-import { ArrowDown, ArrowUp, ArrowUpDown, Info, RotateCcw, SlidersHorizontal } from 'lucide-react';
+import { ArrowDown, ArrowUp, ArrowUpDown, ChevronDown, Info, RotateCcw, SlidersHorizontal } from 'lucide-react';
 import { MEASURES, type Measure } from '@/lib/meta-funnel-domain';
 import { creativeFormatGroups, optimizationGroups, partnershipGroups, TEMPLATE_KIND_LABELS, WORLD_LABELS, type MetaBrandWorld, type TemplateGroup, type TemplateSection } from '@/lib/meta-funnel-templates';
 import { formatChange, formatCompactMoney, formatCount, formatMetric } from '@/lib/meta-format';
@@ -81,13 +81,13 @@ export default function MetaTemplateResults({ section, world, currency, preferen
         <span className={styles.muted}>{section.groups.length} {world === 'website' ? 'tujuan' : 'ad'} · {formatCompactMoney(section.summary.spend, currency)}</span>
       </div>
       <div className={styles.tableToolbar}><span className={styles.muted}>{section.mainMetric && section.mainMedian !== null ? `Median ${section.mainMetric.label} ${formatMetric(section.mainMedian, section.mainMetric, currency)}` : TEMPLATE_KIND_LABELS[section.kind]}</span>
-        <div className={styles.tableViewControls}>
+        <div className={styles.tableViewControls} role="group" aria-label={`Tampilan tabel ${section.name}`}>
           {activeSort && <button type="button" className={styles.sortReset} disabled={sortDisabled} onClick={() => void changeSort(null)}><RotateCcw size={13} aria-hidden="true" />Reset urutan</button>}
-          {world === 'website' && onBreakdownChange && <select className={styles.breakdownSelect} aria-label={`Rincian tabel ${section.name}`} disabled={!breakdownReady} value={breakdown}
+          {world === 'website' && onBreakdownChange && <span className={styles.breakdownControl}><select className={styles.breakdownSelect} aria-label={`Breakdown tabel ${section.name}`} disabled={!breakdownReady} value={breakdown}
             title={breakdown === 'optimization' ? 'Konfigurasi optimasi terbaru yang tersinkron.' : breakdown === 'partnership' ? 'Status berdasarkan metadata creative terbaru yang tersinkron.' : undefined}
-            onChange={e => onBreakdownChange(e.target.value === 'partnership' ? 'partnership' : e.target.value === 'optimization' ? 'optimization' : 'format')}>
-            <option value="format">Format iklan</option><option value="optimization">Optimasi</option><option value="partnership">Partnership</option>
-          </select>}
+            onChange={e => onBreakdownChange(e.target.value === 'none' ? 'none' : e.target.value === 'partnership' ? 'partnership' : e.target.value === 'optimization' ? 'optimization' : 'format')}>
+            <option value="none">Breakdown: No breakdown</option><option value="format">Breakdown: Format</option><option value="optimization">Breakdown: Optimization</option><option value="partnership">Breakdown: Partnership</option>
+          </select><ChevronDown size={14} aria-hidden="true" /></span>}
           {onSave && <button ref={trigger} type="button" className={`${styles.button} ${styles.columnSettingsButton}`} disabled={!preferencesReady || savingSort} aria-haspopup="dialog" onClick={() => { setNotice(''); setEditing(true); }}><SlidersHorizontal size={14} aria-hidden="true" />Atur kolom</button>}
         </div>
       </div>
@@ -117,7 +117,7 @@ export default function MetaTemplateResults({ section, world, currency, preferen
             return <td key={column.key}><span style={section.mainMetric?.id === m.id ? { fontWeight: 650 } : undefined}><MetaHighlightValue highlights={highlightsForMetric(insights, m)} currency={currency} period={period} onDetail={() => onOpenGroup(g)}>{formatMetric(c.current, m, currency)}</MetaHighlightValue></span><small><Delta value={c.change} direction={m.direction} neutral={!m.monitor} /></small></td>;
           })}
         </tr>
-        {world === 'website' && (breakdown === 'partnership' ? partnershipGroups(g, section.config.metrics) : breakdown === 'optimization' ? optimizationGroups(g, section.config.metrics) : creativeFormatGroups(g, section.config.metrics)).map(child => <tr key={child.key} className={styles.formatSubrow}>
+        {world === 'website' && breakdown !== 'none' && (breakdown === 'partnership' ? partnershipGroups(g, section.config.metrics) : breakdown === 'optimization' ? optimizationGroups(g, section.config.metrics) : creativeFormatGroups(g, section.config.metrics)).map(child => <tr key={child.key} className={styles.formatSubrow}>
           <th scope="row"><span className={styles.formatLabel} title={child.partnership_status ? PARTNERSHIP_DESCRIPTIONS[child.partnership_status] : undefined}>{child.name}</span><small>{child.ad_ids.length} ads</small>{!!child.latest_metadata_ad_ids?.length && <small title="ID creative pada data historis belum tersedia. Tipe memakai creative terbaru yang cocok dengan inventori iklan.">{child.latest_metadata_ad_ids.length} memakai tipe terbaru</small>}</th>
           {visible.map(column => {
             const m = column.metric;
