@@ -1,3 +1,4 @@
+import { PARTNERSHIP_FIELDS, partnershipMetadata } from './meta-ad-partnership';
 import { classifyCreativeFormat, classifyCreativeMedia } from './meta-creative-format';
 import { emptyTotals, type Totals } from './meta-funnel-domain';
 import { selectPurchaseMetric, type MetaActionMetric } from './meta-marketing';
@@ -115,8 +116,17 @@ export async function fetchCreativeBatch(ids: string[], token: string) {
       catch { return null; }
     });
   }
-  const bodies = await readBatch(ids.map(id => `${id}?fields=id,name,creative{${fields}}`));
-  const rows = bodies.map((body, i) => body ? normalizeCreativeMetadata(ids[i], body.name || '', body.creative || {}) : { ad_id: ids[i], error: true as const });
+  const bodies = await readBatch(ids.map(id => `${id}?fields=id,name,creative{${fields},${PARTNERSHIP_FIELDS}}`));
+  const inspected = bodies.map((body, i) => body?.id === ids[i] && !!body?.creative?.id);
+  // Optional partnership fields must not break format/URL enrichment if a provider capability is unavailable.
+  const retry = bodies.flatMap((body, i) => body === null ? [i] : []);
+  if (retry.length) {
+    try {
+      const fallback = await readBatch(retry.map(i => `${ids[i]}?fields=id,name,creative{${fields}}`));
+      retry.forEach((i, n) => { bodies[i] = fallback[n]; });
+    } catch { /* Keep successful inspections if the fallback provider request fails. */ }
+  }
+  const rows = bodies.map((body, i) => body?.id === ids[i] ? normalizeCreativeMetadata(ids[i], body.name || '', body.creative || {}, inspected[i]) : { ad_id: ids[i], error: true as const });
   const resolved = new Map<string, ReturnType<typeof classifyCreativeMedia>>();
   for (const field of ['effective_instagram_media_id', 'source_instagram_media_id']) {
     const pending = rows.flatMap((row, i) => {
@@ -139,11 +149,11 @@ export async function fetchCreativeBatch(ids: string[], token: string) {
   return rows;
 }
 
-export function normalizeCreativeMetadata(adId: string, name: string, creative: Record<string, any>) {
+export function normalizeCreativeMetadata(adId: string, name: string, creative: Record<string, any>, partnershipInspected = false) {
   const story = creative.object_story_spec || {};
   return { ad_id: adId, creative_id: creative.id || null, name,
     thumbnail_url: creative.thumbnail_url || null, video_id: creative.video_id || story.video_data?.video_id || null,
-    creative_format: classifyCreativeFormat(creative),
+    creative_format: classifyCreativeFormat(creative), partnership_metadata: partnershipMetadata(creative, partnershipInspected),
     landing_page_urls: creativeLandingPages(creative),
     body: story.video_data?.message || story.link_data?.message || story.photo_data?.message || null };
 }

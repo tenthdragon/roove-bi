@@ -3,7 +3,7 @@
 import { Fragment, useEffect, useMemo, useRef, useState } from 'react';
 import { ArrowDown, ArrowUp, ArrowUpDown, SlidersHorizontal } from 'lucide-react';
 import { MEASURES, type Measure } from '@/lib/meta-funnel-domain';
-import { creativeFormatGroups, optimizationGroups, TEMPLATE_KIND_LABELS, WORLD_LABELS, type MetaBrandWorld, type TemplateGroup, type TemplateSection } from '@/lib/meta-funnel-templates';
+import { creativeFormatGroups, optimizationGroups, partnershipGroups, TEMPLATE_KIND_LABELS, WORLD_LABELS, type MetaBrandWorld, type TemplateGroup, type TemplateSection } from '@/lib/meta-funnel-templates';
 import { formatChange, formatCompactMoney, formatCount, formatMetric } from '@/lib/meta-format';
 import { metaResultColumns, visibleMetaColumns, type MetaColumnPreference } from '@/lib/meta-column-preferences';
 import { metaStageValue, sortMetaGroups, type MetaTableSort } from '@/lib/meta-table-sorting';
@@ -11,6 +11,8 @@ import type { Highlight } from '@/lib/meta-ad-highlights';
 import { destinationHighlights, highlightsForMetric, type HighlightPeriod } from '@/lib/meta-inline-highlights';
 import { MetaHighlightValue } from '@/components/MetaInsightPopover';
 import MetaColumnEditor from '@/components/MetaColumnEditor';
+import type { MetaBreakdown } from '@/lib/useMetaBreakdownPreference';
+import { PARTNERSHIP_DESCRIPTIONS } from '@/lib/meta-ad-partnership';
 import styles from '@/app/dashboard/meta-funnels/page.module.css';
 
 function Delta({ value, direction = 'higher', neutral = false }: { value: number | null; direction?: 'higher' | 'lower'; neutral?: boolean }) {
@@ -27,7 +29,7 @@ function StageChips({ group, stages, currency, highlights, period, onDetail }: {
 }
 
 export default function MetaTemplateResults({ section, world, currency, preference, preferencesReady, onSave, savedSort, onSaveSort, onOpenGroup, highlights = [], period, breakdown = 'format', breakdownReady = true, onBreakdownChange }: {
-  breakdown?: 'format' | 'optimization'; breakdownReady?: boolean; onBreakdownChange?: (value: 'format' | 'optimization') => void;
+  breakdown?: MetaBreakdown; breakdownReady?: boolean; onBreakdownChange?: (value: MetaBreakdown) => void;
   section: TemplateSection; world: MetaBrandWorld; currency: string; preference?: MetaColumnPreference | null;
   preferencesReady: boolean; onSave?: (value: MetaColumnPreference | null) => Promise<void>;
   savedSort?: MetaTableSort | null; onSaveSort?: (value: MetaTableSort | null) => Promise<void>;
@@ -76,9 +78,9 @@ export default function MetaTemplateResults({ section, world, currency, preferen
         <div className={styles.tableViewControls}>
           {onSave && <button ref={trigger} type="button" className={`${styles.button} ${styles.columnSettingsButton}`} disabled={!preferencesReady || savingSort} aria-haspopup="dialog" onClick={() => { setNotice(''); setEditing(true); }}><SlidersHorizontal size={14} />Atur kolom</button>}
           {world === 'website' && onBreakdownChange && <select className={styles.breakdownSelect} aria-label={`Rincian tabel ${section.name}`} disabled={!breakdownReady} value={breakdown}
-            title={breakdown === 'optimization' ? 'Konfigurasi optimasi terbaru yang tersinkron.' : undefined}
-            onChange={e => onBreakdownChange(e.target.value === 'optimization' ? 'optimization' : 'format')}>
-            <option value="format">Format iklan</option><option value="optimization">Optimasi</option>
+            title={breakdown === 'optimization' ? 'Konfigurasi optimasi terbaru yang tersinkron.' : breakdown === 'partnership' ? 'Status berdasarkan metadata creative terbaru yang tersinkron.' : undefined}
+            onChange={e => onBreakdownChange(e.target.value === 'partnership' ? 'partnership' : e.target.value === 'optimization' ? 'optimization' : 'format')}>
+            <option value="format">Format iklan</option><option value="optimization">Optimasi</option><option value="partnership">Partnership</option>
           </select>}
         </div>
       </div>
@@ -108,8 +110,8 @@ export default function MetaTemplateResults({ section, world, currency, preferen
             return <td key={column.key}><span style={section.mainMetric?.id === m.id ? { fontWeight: 650 } : undefined}><MetaHighlightValue highlights={highlightsForMetric(insights, m)} currency={currency} period={period} onDetail={() => onOpenGroup(g)}>{formatMetric(c.current, m, currency)}</MetaHighlightValue></span><small><Delta value={c.change} direction={m.direction} neutral={!m.monitor} /></small></td>;
           })}
         </tr>
-        {world === 'website' && (breakdown === 'optimization' ? optimizationGroups(g, section.config.metrics) : creativeFormatGroups(g, section.config.metrics)).map(child => <tr key={child.key} className={styles.formatSubrow}>
-          <th scope="row"><span className={styles.formatLabel}>{child.name}</span><small>{child.ad_ids.length} ads</small>{!!child.latest_metadata_ad_ids?.length && <small title="ID creative pada data historis belum tersedia. Tipe memakai creative terbaru yang cocok dengan inventori iklan.">{child.latest_metadata_ad_ids.length} memakai tipe terbaru</small>}</th>
+        {world === 'website' && (breakdown === 'partnership' ? partnershipGroups(g, section.config.metrics) : breakdown === 'optimization' ? optimizationGroups(g, section.config.metrics) : creativeFormatGroups(g, section.config.metrics)).map(child => <tr key={child.key} className={styles.formatSubrow}>
+          <th scope="row"><span className={styles.formatLabel} title={child.partnership_status ? PARTNERSHIP_DESCRIPTIONS[child.partnership_status] : undefined}>{child.name}</span><small>{child.ad_ids.length} ads</small>{!!child.latest_metadata_ad_ids?.length && <small title="ID creative pada data historis belum tersedia. Tipe memakai creative terbaru yang cocok dengan inventori iklan.">{child.latest_metadata_ad_ids.length} memakai tipe terbaru</small>}</th>
           {visible.map(column => {
             const m = column.metric;
             if (!m) return <td key={column.key} className={styles.funnelCell}><StageChips group={child} stages={section.config.stages} currency={currency} highlights={[]} onDetail={() => {}} /></td>;

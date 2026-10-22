@@ -2,7 +2,7 @@ CREATE FUNCTION pg_temp.normalize_meta_report(r jsonb) RETURNS jsonb LANGUAGE pl
 DECLARE k text; a jsonb;
 BEGIN
  IF jsonb_typeof(r->'groups')='array' THEN
-  SELECT coalesce(jsonb_agg(value-'format_breakdown'-'optimization_breakdown'),'[]') INTO a FROM jsonb_array_elements(r->'groups');
+  SELECT coalesce(jsonb_agg(value-'format_breakdown'-'optimization_breakdown'-'partnership_breakdown'),'[]') INTO a FROM jsonb_array_elements(r->'groups');
   r:=jsonb_set(r,'{groups}',a);
  END IF;
  FOREACH k IN ARRAY ARRAY['groups','coverage','facets','creatives','intentionTotals'] LOOP

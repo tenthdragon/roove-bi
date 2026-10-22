@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto';
 
 export type MetadataSource = { creative_id: string | null; adset_id: string | null; source_fingerprint: string; source_updated_at: string | null; adset_updated_at: string | null };
 export type MetadataState = MetadataSource & { ad_id: string; observed_at: string };
-export type MetadataCreativeCache = { ad_id: string; creative_id: string | null; creative_format?: string | null; updated_at?: string };
+export type MetadataCreativeCache = { ad_id: string; creative_id: string | null; creative_format?: string | null; partnership_metadata?: { version?: number; status?: string } | null; updated_at?: string };
 export type MetadataDestinationCache = { ad_id: string; creative_id: string | null; adset_id: string | null; observed_at: string; metadata?: { contact_identity_checked?: boolean; contact_identity?: { version?: number } } };
 function stable(value: unknown): unknown {
   if (Array.isArray(value)) return value.map(stable);
@@ -22,9 +22,11 @@ export function metaMetadataSource(ad: Record<string, any>): MetadataSource {
 export function metadataRefreshDecision(source: MetadataSource, state: MetadataState | undefined,
   creative: MetadataCreativeCache | undefined, destination: MetadataDestinationCache | undefined, now = Date.now()): 'refresh' | 'cached' | 'adopt' {
   if (!source.creative_id || !source.adset_id || !source.source_updated_at || !source.adset_updated_at
-    || !creative || !creative.creative_format || creative.creative_id !== source.creative_id || !destination || destination.creative_id !== source.creative_id
+    || !creative || creative.partnership_metadata?.version !== 1
+    || !['partnership', 'non_partnership', 'unknown'].includes(creative.partnership_metadata.status || '')
+    || !creative.creative_format || creative.creative_id !== source.creative_id || !destination || destination.creative_id !== source.creative_id
     || destination.adset_id !== source.adset_id || !(destination.metadata?.contact_identity?.version === 1 || destination.metadata?.contact_identity_checked)) return 'refresh';
-  if (creative.creative_format === 'unknown' && (!Number.isFinite(Date.parse(creative.updated_at || '')) || now - Date.parse(creative.updated_at || '') >= 24 * 60 * 60 * 1000)) return 'refresh';
+  if ((creative.creative_format === 'unknown' || creative.partnership_metadata?.status === 'unknown') && (!Number.isFinite(Date.parse(creative.updated_at || '')) || now - Date.parse(creative.updated_at || '') >= 24 * 60 * 60 * 1000)) return 'refresh';
   if (state) return state.source_fingerprint === source.source_fingerprint ? 'cached' : 'refresh';
   // Adopt successful pre-migration observations without another provider read.
   // Missing/older timestamps cannot certify a cache hit.

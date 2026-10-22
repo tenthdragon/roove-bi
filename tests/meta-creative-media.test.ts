@@ -11,6 +11,7 @@ test('creative media reads are bounded, deduplicated and preserve partial succes
   const responses = [
     [item({ id:'1',creative:{ id:'11',effective_instagram_media_id:'101' } }), item({ id:'2',creative:{ id:'12',effective_instagram_media_id:'101' } }),
       item({ id:'3',creative:{ id:'13',effective_instagram_media_id:'102',source_instagram_media_id:'103' } }),item({id:'4',creative:{id:'14',video_id:'900'}}),item({error:{code:100}},400)],
+    [item({error:{code:100}},400)],
     [item({ id:'101',media_type:'CAROUSEL_ALBUM' }),item({error:{code:100}},400)],
     [item({id:'103',media_type:'VIDEO'})],
   ];
@@ -18,7 +19,7 @@ test('creative media reads are bounded, deduplicated and preserve partial succes
   try {
     const rows = await fetchCreativeBatch(['1','2','3','4','5'],'secret');
     assert.deepEqual(rows.map(r => 'error' in r ? 'error' : r.creative_format), ['carousel','carousel','video','video','error']);
-    assert.equal(calls.length,3);assert.equal(calls[1].length,2);assert.equal(calls[2].length,1);
+    assert.equal(calls.length,4);assert.equal(calls[1].length,1);assert.equal(calls[2].length,2);assert.equal(calls[3].length,1);
     assert.ok(calls.flat().every(p=>!p.includes('secret')));
   } finally { globalThis.fetch = original; }
 });

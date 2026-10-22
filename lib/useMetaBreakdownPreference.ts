@@ -1,16 +1,16 @@
 'use client';
 import { useEffect, useState } from 'react';
-export type MetaBreakdown = 'format' | 'optimization';
+export type MetaBreakdown = 'format' | 'optimization' | 'partnership';
 export function useMetaBreakdownPreference(workspaceId: string, userId: string) {
   const key = workspaceId && userId ? `roove:meta-breakdown:${workspaceId}:${userId}` : '';
   const [state, setState] = useState<{ key: string; value: MetaBreakdown; error: string } | null>(null);
   useEffect(() => {
     if (!key) return;
-    try { setState({ key, value: window.localStorage.getItem(key) === 'optimization' ? 'optimization' : 'format', error: '' }); }
+    try { const saved = window.localStorage.getItem(key); setState({ key, value: saved === 'optimization' || saved === 'partnership' ? saved : 'format', error: '' }); }
     catch { setState({ key, value: 'format', error: '' }); }
   }, [key]);
   function select(value: MetaBreakdown) {
-    if (!key || state?.key !== key || !['format', 'optimization'].includes(value)) return;
+    if (!key || state?.key !== key || !['format', 'optimization', 'partnership'].includes(value)) return;
     let error = '';
     try { window.localStorage.setItem(key, value); }
     catch { error = 'Pilihan rincian tidak bisa disimpan di browser ini.'; }
