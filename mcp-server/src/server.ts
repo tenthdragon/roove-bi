@@ -252,7 +252,7 @@ export function createRooveServer(
           customer: [
             "customer_overview",
             "customer_cohort",
-            "customer_list",
+            ...(options.includePii ? ["customer_list"] : []),
             "customer_ltv",
             "customer_cac",
             "customer_brand_analysis",
@@ -1115,12 +1115,14 @@ export function createRooveServer(
     "Get multi-brand customer analysis — cross-brand overlap, brand journeys, bundled orders, and multi-brand stats",
     {},
     async () => {
-      const [crossMatrix, journey, summary, customerBrandMap] = await Promise.all([
+      const [crossMatrix, journey, summary] = await Promise.all([
         svc.rpc("workspace_cross_brand_matrix", { p_workspace_id: workspaceId }),
         svc.rpc("workspace_brand_journey", { p_workspace_id: workspaceId }),
         svc.rpc("workspace_brand_analysis_summary", { p_workspace_id: workspaceId }),
-        svc.rpc("workspace_customer_brand_map", { p_workspace_id: workspaceId }),
       ]);
+      const customerBrandMap = options.includePii
+        ? await svc.rpc("workspace_customer_brand_map", { p_workspace_id: workspaceId })
+        : null;
 
       return {
         content: [
@@ -1130,7 +1132,9 @@ export function createRooveServer(
               {
                 cross_brand_matrix: crossMatrix.data ?? [],
                 brand_journey_top20: (journey.data ?? []).slice(0, 20),
-                customer_brand_map: customerBrandMap.data ?? [],
+                ...(customerBrandMap
+                  ? { customer_brand_map: customerBrandMap.data ?? [] }
+                  : {}),
                 summary: summary.data ?? [],
               },
               null,

@@ -73,7 +73,9 @@ export default {
     const svc = createClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY, {
       auth: { autoRefreshToken: false, persistSession: false },
     });
-    const server = createRooveServer(svc, env.MCP_WORKSPACE_ID.trim());
+    const server = createRooveServer(svc, env.MCP_WORKSPACE_ID.trim(), {
+      includePii: false,
+    });
     const transport = new WebStandardStreamableHTTPServerTransport({
       sessionIdGenerator: undefined,
       enableJsonResponse: true,
