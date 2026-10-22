@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { defaultMetaRange, metaDailyTrendRange, completedMetaRange, metaReportPresets, metaCoverageGaps } from '../lib/meta-report-status';
+import { defaultMetaRange, metaDailyTrendRange, completedMetaRange, selectedMetaRange, metaReportPresets, metaCoverageGaps } from '../lib/meta-report-status';
 import { daysBetween, shiftDay, type Coverage } from '../lib/meta-funnel-domain';
 import { getTodayWIB } from '../lib/sync-schedule';
 import { getPresetRanges } from '../lib/utils';
@@ -27,11 +27,15 @@ test('an unfinished-only selection falls back to the last closed day across mont
   }
   assert.equal(getTodayWIB(new Date('2026-10-13T17:01:00Z')), today);
 });
-test('Meta presets use only completed dates and exactly 7, 30, or 90 days', () => {
+test('an explicitly selected Meta range can include today but never a future date', () => {
+  assert.deepEqual(selectedMetaRange({ from: today, to: today }, today), { from: today, to: today });
+  assert.deepEqual(selectedMetaRange({ from: '2026-10-01', to: '2026-10-15' }, today), { from: '2026-10-01', to: today });
+});
+test('Meta presets include today while completed-period shortcuts still end yesterday', () => {
   const presets = metaReportPresets(today);
+  assert.deepEqual(presets.find(p => p.label === 'Hari Ini'), { label: 'Hari Ini', from: today, to: today });
   assert.deepEqual(presets.find(p => p.label === 'Kemarin'), { label: 'Kemarin', from: '2026-10-13', to: '2026-10-13' });
-  assert.equal(presets.some(p => p.label === 'Hari Ini'), false);
-  for (const p of presets) assert.ok(p.from <= p.to && p.to < today);
+  for (const p of presets.filter(p => p.label !== 'Hari Ini')) assert.ok(p.from <= p.to && p.to < today);
   for (const n of [7, 30, 90]) { const p = presets.find(p => p.label === `${n} Hari`)!; assert.equal(daysBetween(p.from, p.to), n); }
   assert.deepEqual(presets.find(p => p.label === '90 Hari'), { label: '90 Hari', from: '2026-07-16', to: '2026-10-13' });
   assert.equal(metaReportPresets('2026-11-01').some(p => p.label === 'Bulan Ini'), false);
