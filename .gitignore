@@ -53,6 +53,7 @@ scripts/*
 # docs
 docs/*
 !docs/sync-scheduling.md
+!docs/meta-funnel-card-preview.md
 !docs/runbooks/
 docs/runbooks/*
 !docs/runbooks/marketplace-tracking-backfill.md

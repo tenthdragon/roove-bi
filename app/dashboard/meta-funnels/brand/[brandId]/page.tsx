@@ -27,6 +27,7 @@ import type { MetaColumnPreference, MetaTablePreference } from '@/lib/meta-colum
 import MetaAnalysisFilters, { MetaActiveFilters } from '@/components/MetaAnalysisFilters';
 import { brandMetricHighlights, metaDataNotes } from '@/lib/meta-inline-highlights';
 import { MetaDataNotesTrigger, MetaHighlightValue } from '@/components/MetaInsightPopover';
+import { MetaHighlightPreviewProvider } from '@/components/MetaHighlightPreviewContext';
 import MetaSparkline from '@/components/MetaSparkline';
 const MetaGroupDrawer = dynamic(() => import('@/components/MetaGroupDrawer'), { ssr: false });
 import MetaTemplateSuggestionButton from '@/components/MetaTemplateSuggestionButton';
@@ -235,6 +236,7 @@ export default function MetaBrandDetailPage() {
           </div>; })}</div>
         </section>
       </>}
+        <MetaHighlightPreviewProvider key={JSON.stringify([cacheKey, data?.reportVersion])} snapshots={data?.leakSnapshots || []}>
         <section aria-label={`Hasil ${WORLD_LABELS[world]}`} className={styles.analysisResults}>
           <div className={styles.analysisViews}>
             <div className={styles.viewSwitch} role="group" aria-label="Tampilan hasil">
@@ -279,6 +281,7 @@ export default function MetaBrandDetailPage() {
           {view === 'destinations' && world === 'cpas' && <p className={styles.muted}>Metrik CPAS memakai atribusi Meta per adset. Purchase shared items 1 hari dan 7 hari belum dipisahkan; ROAS dibaca sebagai indikasi arah.</p>}
           </>}
         </section>
+        </MetaHighlightPreviewProvider>
       {data && <>
         <section aria-label="Tren" style={{ display: 'grid', gap: 10 }}>
           <div className={styles.sectionTitle}><h2>Tren harian · 30 hari</h2><div className={styles.actions}><span className={styles.muted}>{formatDate(trendRange.from)} – {formatDate(trendRange.to)} · {WORLD_LABELS[world]}</span>
