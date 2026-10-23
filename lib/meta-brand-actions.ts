@@ -19,6 +19,7 @@ import { metaCoverageGaps } from './meta-report-status';
 import { assignTemplateSections, compareMetrics, cpasSection, defaultLeadFunnel, matchDestinationTemplate, responseMetrics, suggestTemplate, templateKind, templateMainMetric, validateTemplateRule, WORLD_CHANNEL, type MetaBrandWorld, type MetricComparison, type ReportGroup, type TemplateRule } from './meta-funnel-templates';
 import { ctwaLabel } from './meta-ctwa-destinations';
 import { brandHealth, brandHighlights, type Highlight } from './meta-ad-highlights';
+import { createMetaLeakSnapshots } from './meta-highlight-snapshot';
 import { buildCepView, cepHighlights } from './meta-cep-view';
 import { analysisFilterOptions } from './meta-analysis-filters';
 import { editAccess, reportContext, reportingAccess, uuid } from './meta-report-context';
@@ -164,7 +165,7 @@ async function loadMetaBrandDetail(input: BrandInput & { brandId: string; world:
   const highlights = mergeHighlights(active.highlights, cepHighlights(cep, active.currency).map(h => ({ ...h, world })));
   const { from, to } = ctx.reportRange;
   const brandOptions = metaBrandOptions(ctx.accounts, ctx.brands, []).choices.map(b => ({ value: b.value, label: b.label }));
-  return { schemaReady: true as const, workspaceId: ctx.workspaceId, world, brand: { id: brandId, name: brandOptions.find(b => b.value === brandId)?.label || brandId }, brandOptions,
+  const detail = { schemaReady: true as const, workspaceId: ctx.workspaceId, world, brand: { id: brandId, name: brandOptions.find(b => b.value === brandId)?.label || brandId }, brandOptions,
     reportRange: ctx.reportRange, prevFrom: shiftDay(from, -daysBetween(from, to)), prevTo: shiftDay(from, -1), reportVersion: ctx.reportVersion,
     currency: active.currency, reportingError: active.reportingError, matchingAds: active.matchingAds,
     worlds: { website: { spend: web.summary.spend, ads: web.matchingAds }, cpas: { spend: cpas.summary.spend, ads: cpas.matchingAds } },
@@ -175,6 +176,10 @@ async function loadMetaBrandDetail(input: BrandInput & { brandId: string; world:
     analysisOptions: analysisFilterOptions(activeRaw), analysisReady: Array.isArray(activeRaw.analysisFacets),
     dimensionOptions: metaReportOptions(activeRaw, ctx.accounts, ctx.brands).dimensionOptions, dimensionsReady: true, rulesReady: rules.ready, verifiedDestinationsReady: true,
     templates: ctx.funnels.map(f => ({ id: f.id, brand_id: f.brand_id, name: f.name, kind: templateKind(f) })) };
+  // Capture the already-authorized, full detail findings, not the overview's top 3
+  // or separately-windowed meta_funnel_alerts. No extra reads or writes.
+  return { ...detail, leakSnapshots: createMetaLeakSnapshots({ report: detail, workspaceName: ctx.workspaceName,
+    filters: ctx.filters, currencies: activeRaw.currencies, generatedAt: new Date().toISOString() }) };
 }
 
 /** Loaded only when the Matrix tab opens; reuse the report's scoped per-ad totals. */

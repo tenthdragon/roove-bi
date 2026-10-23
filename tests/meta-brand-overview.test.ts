@@ -36,7 +36,7 @@ function harness() {
   const api: any = {};
   new Function('require', 'exports', source)((name: string) => Object.hasOwn(stubs, name) ? stubs[name] : require(name), api);
   const overview = async () => (await api.getMetaBrandOverview({ ...ctx.reportRange, workspaceId: 'workspace', filters })).brands[0];
-  const detail = async () => api.getMetaBrandDetail({ ...ctx.reportRange, brandId: '1', world: 'website', workspaceId: 'workspace', filters });
+  const detail = async (workspaceId = 'workspace') => api.getMetaBrandDetail({ ...ctx.reportRange, brandId: '1', world: 'website', workspaceId, filters });
   return { website, overview, detail, ctx, rules };
 }
 
@@ -74,7 +74,18 @@ test('brand detail returns all row findings with metric evidence, while overview
   const report = await detail();
   const leaks = report.highlights.filter((h: any) => h.kind === 'leak');
   assert.equal(leaks.length, 8);
+  assert.equal(report.leakSnapshots.length, 8, 'Snapshots use every detail finding, not the overview top 3');
+  assert.ok(report.leakSnapshots.every((s: any) => s.scope.workspace.id === ctx.workspaceId && s.scope.brand.id === '1'
+    && s.scope.filters.intention === 'cons' && s.source.revision === ctx.reportVersion && s.mode === 'preview_only'));
   assert.ok(leaks.every((h: any) => h.metric.numerator === 'outbound_clicks' && h.comparison.basis === 'period'));
   assert.equal(report.highlights.some((h: any) => h.kind === 'stable'), false);
   assert.equal((await overview()).highlights.length, 3);
+});
+
+test('snapshot response follows the existing authenticated workspace check and mixed-currency suppression', async () => {
+  const { detail, website } = harness();
+  await assert.rejects(detail('other-workspace'), /Workspace berubah/);
+  website.currencies = ['IDR', 'USD'];
+  const report = await detail();
+  assert.ok(report.reportingError); assert.deepEqual(report.leakSnapshots, []);
 });

@@ -6,6 +6,7 @@ import type { Highlight } from '@/lib/meta-ad-highlights';
 import { highlightSymbol, type HighlightPeriod } from '@/lib/meta-inline-highlights';
 import { relativeChange } from '@/lib/meta-funnel-domain';
 import { formatChange, formatDate, formatMetric } from '@/lib/meta-format';
+import { useMetaHighlightPreview } from './MetaHighlightPreviewContext';
 import styles from '@/app/dashboard/meta-funnels/page.module.css';
 
 const severityClass = { bad: styles.bad, warn: styles.warn, good: styles.good, info: styles.neutral };
@@ -77,7 +78,7 @@ export function MetaInsightPopover({ label, trigger, children, className, onActi
         if (pinned.current) close(); else { pinned.current = true; cancelClose(); setOpen(true); }
       }}>{trigger}</button>
     {open && typeof document !== 'undefined' && createPortal(<div ref={panel} id={id} role="dialog" aria-label={label}
-      className={styles.insightPopover} style={position} onClick={e => { if ((e.target as HTMLElement).closest(`.${styles.insightDetail}`)) close(); }} onPointerEnter={cancelClose} onPointerLeave={leave}
+      className={styles.insightPopover} style={position} onClick={e => { if ((e.target as HTMLElement).closest(`.${styles.insightDetail}`)) close(!!(e.target as HTMLElement).closest('[data-meta-preview]')); }} onPointerEnter={cancelClose} onPointerLeave={leave}
       onKeyDown={e => {
         if (e.key !== 'Tab') return;
         const focusable = [...e.currentTarget.querySelectorAll<HTMLElement>('button:not(:disabled), a[href]')];
@@ -101,11 +102,12 @@ export function MetaHighlightValue({ highlights, children, currency, period, onD
   highlights: Highlight[]; children?: ReactNode; currency: string; period?: HighlightPeriod;
   onDetail?: (highlight: Highlight) => void; label?: string;
 }) {
+  const previewFor = useMetaHighlightPreview();
   if (!highlights.length) return <>{children}</>;
   const first = highlights[0];
   return <MetaInsightPopover key={JSON.stringify([highlights, period])} label={label || `${highlights.length} sorotan: ${highlights.map(h => h.title).join(', ')}`}
     trigger={<><span className={severityClass[first.severity]} aria-hidden="true">{highlightSymbol(first)}</span> {children ?? `${highlights.length} sorotan`}</>}>
-    {highlights.map((h, index) => <div key={index} className={styles.insightItem}>
+    {highlights.map((h, index) => { const preview = previewFor(h); return <div key={index} className={styles.insightItem}>
       <strong className={severityClass[h.severity]}>{highlightSymbol(h)} {h.title}</strong>
       {h.metric && h.comparison && <>
         <div className={styles.insightMetric}>{h.metric.label}{h.comparison.basis === 'period' && <> · {formatChange(relativeChange(h.comparison.current, h.comparison.reference))}</>}</div>
@@ -119,7 +121,8 @@ export function MetaHighlightValue({ highlights, children, currency, period, onD
       </>}
       <p>{h.text}</p>
       {onDetail && <button type="button" className={styles.insightDetail} onClick={() => onDetail(h)}>Lihat detail →</button>}
-    </div>)}
+      {preview && <button type="button" data-meta-preview className={styles.insightDetail} onClick={preview}>Pratinjau kartu Basecamp →</button>}
+    </div>; })}
   </MetaInsightPopover>;
 }
 

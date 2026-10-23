@@ -16,6 +16,7 @@
     "test:sync-queue-db": "node tests/sync-queue-database.mjs",
     "test:meta-report-db": "node --import tsx tests/meta-ad-report-database.mjs",
     "test:meta-overview": "node --import tsx --test tests/meta-overview-cache.test.ts tests/meta-worklist-cache.test.ts tests/meta-cached-load.test.tsx",
+    "test:meta-highlight-preview": "node --import tsx --test tests/meta-highlight-snapshot.test.ts tests/meta-highlight-preview.test.tsx tests/meta-brand-overview.test.ts",
     "test:meta-detail-mapping-db": "node tests/meta-detail-mapping-database.mjs",
     "test:meta-overview-db": "node tests/meta-brand-overview-database.mjs",
     "test:theme": "node --import tsx --test tests/theme-contrast.test.ts tests/theme-preference.test.ts",

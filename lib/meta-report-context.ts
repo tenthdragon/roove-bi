@@ -78,7 +78,7 @@ export async function reportContext(input: MetaReportInput, includeJobs = false)
     config.account_ids = ids.length ? ids : ['__no_authorized_meta_account__'];
   }
   const configuredAccounts = accounts.filter(a => !config.account_ids.length || config.account_ids.includes(a.account_id));
-  return { schemaReady: true as const, workspaceId, reportVersion: String(version.data?.revision || 0), reportRange, filters, brandId, channel,
+  return { schemaReady: true as const, workspaceId, workspaceName: access.workspace.name, reportVersion: String(version.data?.revision || 0), reportRange, filters, brandId, channel,
     brandIds: access.brandIds, accessKey: access.accessKey, funnels: visibleFunnels, selectedId: selected?.id || null, config, accounts, configuredAccounts, brands,
     scopedAccountIds: metaBrandAccountIds(configuredAccounts, brands, brandId), jobs: jobsResult.data || [],
     input: { ...input, ...reportRange, filters, brandId, channel } };

@@ -1,0 +1,23 @@
+.dialog { box-sizing: border-box; width: min(760px, calc(100vw - 32px)); max-height: calc(100dvh - 32px); margin: auto; padding: 24px; overflow-y: auto; color: var(--text); background: var(--bg); border: 1px solid var(--border); border-radius: 14px; box-shadow: 0 24px 80px #0006; font-size: 13px; line-height: 1.6; overflow-wrap: anywhere; }
+.dialog::backdrop { background: rgb(0 0 0 / 55%); }
+.header { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
+.header h2 { margin: 0; font-size: 21px; }
+.eyebrow { margin: 0; color: var(--dim); font-size: 11px; letter-spacing: .06em; }
+.button { padding: 8px 12px; color: var(--text); background: var(--card); border: 1px solid var(--border); border-radius: 8px; font: inherit; font-weight: 600; cursor: pointer; white-space: nowrap; }
+.button:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+.notice, .actions { color: var(--dim); }
+.quality, .blocked { padding: 12px 14px; margin: 16px 0; border: 1px solid var(--border); border-radius: 8px; background: var(--card); }
+.blocked { border-color: var(--red, #c2410c); color: var(--red, #c2410c); }
+.quality p, .blocked p, .card section p, .card footer p { margin: 4px 0; }
+.card { margin-top: 16px; padding: 24px; background: var(--card); border: 1px solid var(--border); border-radius: 10px; }
+.card h3 { margin: 0 0 16px; font-size: 19px; line-height: 1.45; }
+.card h4 { margin: 0 0 8px; font-size: 14px; }
+.card section, .card footer { margin-top: 20px; padding-top: 16px; border-top: 1px solid var(--border); }
+.card ul { margin: 8px 0; padding-left: 20px; }
+.card footer { color: var(--dim); font-size: 11px; }
+.tableWrap { overflow-x: auto; }
+.card table { width: 100%; border-collapse: collapse; text-align: left; }
+.card caption { text-align: left; font-weight: 600; padding-bottom: 8px; }
+.card th, .card td { padding: 8px; border-bottom: 1px solid var(--border); vertical-align: top; }
+.actions { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px; margin-top: 18px; font-size: 12px; }
+@media (max-width: 520px) { .dialog { padding: 16px; } .card { padding: 16px; } .card th, .card td { padding: 6px; } }

@@ -17,6 +17,11 @@ export type HighlightInput = {
   unassigned?: UnassignedGroup[]; coverageGaps?: { account_id: string; currentMissing: number; baselineMissing: number }[]; missingUrls?: number;
 };
 const severityRank: Record<HighlightSeverity, number> = { bad: 0, warn: 1, good: 2, info: 3 };
+// Versioned alongside the rule, so exported evidence never invents its thresholds.
+export const META_STAGE_LEAK_RULE = {
+  version: 'meta-stage-leak/v1', minDeclinePercent: 15, minDenominator: 30,
+  minSpendShare: 0.03, minSpend: 1,
+} as const;
 const percent = (v: number) => `${(v * 100).toFixed(1)}%`;
 const signed = (v: number) => `${v > 0 ? '+' : ''}${v.toFixed(0)}%`;
 export function formatMetric(value: number | null, m: FunnelMetric, currency: string) {
@@ -33,18 +38,18 @@ export function brandHighlights(input: HighlightInput): Highlight[] {
   for (const section of input.sections) {
     const stages = section.config.stages.filter(s => s !== 'spend');
     for (const g of section.groups) {
-      if (g.current.spend < Math.max(total * 0.03, 1) || g.previous.spend <= 0) continue;
+      if (g.current.spend < Math.max(total * META_STAGE_LEAK_RULE.minSpendShare, META_STAGE_LEAK_RULE.minSpend) || g.previous.spend <= 0) continue;
       let worst: { from: Measure; to: Measure; now: number; before: number; change: number } | null = null;
       for (let i = 1; i < stages.length; i++) {
         const from = stages[i - 1], to = stages[i];
         const nowFrom = g.current[from], beforeFrom = g.previous[from], nowTo = g.current[to], beforeTo = g.previous[to];
-        if (nowFrom == null || beforeFrom == null || nowTo == null || beforeTo == null || nowFrom < 30 || beforeFrom < 30) continue;
+        if (nowFrom == null || beforeFrom == null || nowTo == null || beforeTo == null || nowFrom < META_STAGE_LEAK_RULE.minDenominator || beforeFrom < META_STAGE_LEAK_RULE.minDenominator) continue;
         const now = nowTo / nowFrom, before = beforeTo / beforeFrom;
         const change = relativeChange(now, before);
-        if (change !== null && change <= -15 && (!worst || change < worst.change)) worst = { from, to, now, before, change };
+        if (change !== null && change <= -META_STAGE_LEAK_RULE.minDeclinePercent && (!worst || change < worst.change)) worst = { from, to, now, before, change };
       }
       if (worst) out.push({
-        metric: { id: `stage_${worst.to}`, label: `${MEASURES[worst.to]} ÷ ${MEASURES[worst.from]}`, numerator: worst.to, denominator: worst.from, format: 'percent', direction: 'higher', monitor: true, min_denominator: 30 },
+        metric: { id: `stage_${worst.to}`, label: `${MEASURES[worst.to]} ÷ ${MEASURES[worst.from]}`, numerator: worst.to, denominator: worst.from, format: 'percent', direction: 'higher', monitor: true, min_denominator: META_STAGE_LEAK_RULE.minDenominator },
         comparison: { basis: 'period', current: worst.now, reference: worst.before }, kind: 'leak', severity: 'bad', title: 'Kebocoran tahap', sectionKey: section.key, groupKey: g.key, weight: g.current.spend,
         text: `${MEASURES[worst.to]} ÷ ${MEASURES[worst.from]} di ${shortName(g.name)} turun dari ${percent(worst.before)} ke ${percent(worst.now)} (${signed(worst.change)}), spend ${formatMetric(g.current.spend, { id: 's', label: '', numerator: 'spend', denominator: null, format: 'money', direction: 'lower', monitor: false, min_denominator: 0 }, input.currency)}.` });
     }
