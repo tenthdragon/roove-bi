@@ -1,8 +1,8 @@
 'use client';
 
 import { useTheme } from 'next-themes';
-import { useEffect, useRef, useState } from 'react';
-import { APP_DEFAULT_THEME, resolveTheme, type ThemePreference } from '@/lib/theme-preference';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { APP_DEFAULT_THEME, resolveTheme, type AppTheme, type ThemePreference } from '@/lib/theme-preference';
 
 type SaveState = 'idle' | 'saving' | 'error';
 
@@ -31,15 +31,41 @@ export default function ThemeToggle({
   const [open, setOpen] = useState(false);
   const [saveState, setSaveState] = useState<SaveState>('idle');
   const [saveError, setSaveError] = useState('');
+  const [pendingPreference, setPendingPreference] = useState<ThemePreference | undefined>(undefined);
   const rootRef = useRef<HTMLDivElement>(null);
   const accountBacked = preference !== undefined;
 
+  const applyTheme = useCallback((theme: AppTheme) => {
+    setTheme(theme);
+
+    // next-themes owns this attribute during normal navigation. Applying the
+    // same value here also repairs a stale DOM after Fast Refresh or a restored
+    // tab, where its React state can be correct while <html> keeps the old
+    // palette attribute.
+    const root = document.documentElement;
+    if (root.dataset.theme !== theme) root.dataset.theme = theme;
+    if (root.style.colorScheme !== theme) root.style.colorScheme = theme;
+  }, [setTheme]);
+
   useEffect(() => setMounted(true), []);
 
-  // The saved account preference wins over whatever this browser used last.
+  // Once the profile is available, the account choice is authoritative. Keep
+  // checking the resolved DOM theme as well so a stale browser value or a dev
+  // hot reload cannot leave the menu and the rendered palette out of sync.
+  // During a save, the optimistic choice wins until the profile catches up.
   useEffect(() => {
-    if (accountBacked) setTheme(resolveTheme(preference));
-  }, [accountBacked, preference, setTheme]);
+    if (!mounted || !accountBacked) return;
+    const effectivePreference = pendingPreference !== undefined ? pendingPreference : preference;
+    const desiredTheme = resolveTheme(effectivePreference);
+    const documentTheme = document.documentElement.dataset.theme;
+    if (resolvedTheme !== desiredTheme || documentTheme !== desiredTheme) applyTheme(desiredTheme);
+  }, [accountBacked, applyTheme, mounted, pendingPreference, preference, resolvedTheme]);
+
+  useEffect(() => {
+    if (pendingPreference !== undefined && preference === pendingPreference && saveState === 'idle') {
+      setPendingPreference(undefined);
+    }
+  }, [pendingPreference, preference, saveState]);
 
   useEffect(() => {
     if (!open) return;
@@ -59,10 +85,18 @@ export default function ThemeToggle({
   if (!mounted) return <div style={{ width: 32, height: 32 }} />;
 
   const isDark = resolvedTheme === 'dark';
-  const selected: ThemePreference = accountBacked ? preference : isDark ? 'dark' : 'light';
+  const selected: ThemePreference = accountBacked
+    ? pendingPreference !== undefined
+      ? pendingPreference
+      : preference ?? null
+    : isDark
+      ? 'dark'
+      : 'light';
 
   async function choose(next: ThemePreference) {
-    setTheme(resolveTheme(next));
+    if (next === selected && saveState !== 'error') return;
+    if (accountBacked) setPendingPreference(next);
+    applyTheme(resolveTheme(next));
     setSaveError('');
     if (!accountBacked) {
       setSaveState('idle');
@@ -80,6 +114,8 @@ export default function ThemeToggle({
       setSaveState('idle');
       onPreferenceSaved?.(payload.theme_preference ?? null);
     } catch (error: any) {
+      setPendingPreference(undefined);
+      applyTheme(resolveTheme(preference));
       setSaveState('error');
       setSaveError(error?.message || 'Preferensi tema gagal disimpan.');
     }

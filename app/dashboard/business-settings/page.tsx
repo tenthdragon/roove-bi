@@ -427,7 +427,7 @@ export default function BusinessSettingsPage() {
     <div className="fade-in">
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
         <div>
-          <h2 style={{ margin: '0 0 4px', fontSize: 18, fontWeight: 700 }}>Business &amp; Fulfillment</h2>
+          <h1 style={{ margin: '0 0 4px', fontSize: 18, fontWeight: 700 }}>Business &amp; Fulfillment</h1>
           <div style={{ color: 'var(--dim)', fontSize: 12 }}>
             Satu tempat untuk identitas business, stores, external aliases, routing fulfillment, dan origin warehouse.
           </div>
@@ -509,14 +509,19 @@ export default function BusinessSettingsPage() {
             return (
               <div key={biz.id} style={{ background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 12, overflow: 'hidden' }}>
                 {/* Collapsed header */}
-                <div onClick={() => toggleExpand(biz.id)}
-                  style={{ padding: '14px 18px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+                <button
+                  type="button"
+                  onClick={() => toggleExpand(biz.id)}
+                  aria-expanded={isExpanded}
+                  aria-controls={`business-details-${biz.id}`}
+                  style={{ width:'100%', padding:'14px 18px', border:'none', background:'transparent', color:'inherit', textAlign:'left', cursor:'pointer', display:'flex', alignItems:'center', gap:12, flexWrap:'wrap' }}
+                >
                   {/* Code badge */}
                   <span style={{ fontFamily: 'monospace', fontWeight: 700, fontSize: 14, color: 'var(--accent)', minWidth: 60 }}>{biz.business_code}</span>
                   {/* Name */}
                   <span style={{ fontWeight: 600, color: 'var(--text)', flex: 1, minWidth: 150 }}>{biz.business_name}</span>
                   {/* Status badges */}
-                  <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                  <span style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
                     {/* Active */}
                     <span style={{ padding: '2px 8px', borderRadius: 4, fontSize: 10, fontWeight: 600, background: biz.is_active ? 'var(--badge-green-bg)' : 'var(--badge-red-bg)', color: biz.is_active ? 'var(--green)' : 'var(--red)' }}>
                       {biz.is_active ? 'Active' : 'Inactive'}
@@ -533,14 +538,14 @@ export default function BusinessSettingsPage() {
                     <span style={{ padding: '2px 8px', borderRadius: 4, fontSize: 10, fontWeight: 600, background: activeMappings.length > 0 ? 'var(--badge-green-bg)' : mappings.length > 0 ? 'var(--badge-yellow-bg)' : 'var(--badge-red-bg)', color: activeMappings.length > 0 ? 'var(--green)' : mappings.length > 0 ? 'var(--yellow)' : 'var(--red)' }}>
                       {formatWarehouseSummary(mappings)}
                     </span>
-                  </div>
+                  </span>
                   {/* Expand arrow */}
-                  <span style={{ fontSize: 12, color: 'var(--dim)', transform: isExpanded ? 'rotate(180deg)' : 'rotate(0deg)', transition: 'transform 0.2s' }}>&#9660;</span>
-                </div>
+                  <span aria-hidden="true" style={{ fontSize:12, color:'var(--dim)', transform:isExpanded ? 'rotate(180deg)' : 'rotate(0deg)', transition:'transform 0.2s' }}>&#9660;</span>
+                </button>
 
                 {/* Expanded detail */}
                 {isExpanded && (
-                  <div style={{ borderTop: '1px solid var(--border)', padding: '16px 18px' }}>
+                  <div id={`business-details-${biz.id}`} style={{ borderTop:'1px solid var(--border)', padding:'16px 18px' }}>
                     <div style={{ display: 'flex', gap: 4, marginBottom: 16, borderBottom: '1px solid var(--border)', overflowX: 'auto' }}>
                       {[
                         { id: 'identity', label: 'Identitas' },

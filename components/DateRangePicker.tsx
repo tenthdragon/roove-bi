@@ -18,15 +18,33 @@ interface DateRangePickerProps {
 export default function DateRangePicker({ from, to, onChange, earliest, latest, completedDaysOnly = false }: DateRangePickerProps) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
   const presets = completedDaysOnly ? metaReportPresets(getTodayWIB()) : getPresetRanges();
 
   useEffect(() => {
+    if (!open) return;
     function handleClick(e: MouseEvent) {
       if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
     }
+    function handleKeyDown(e: KeyboardEvent) {
+      if (e.key !== 'Escape') return;
+      e.preventDefault();
+      setOpen(false);
+      triggerRef.current?.focus();
+    }
     document.addEventListener('mousedown', handleClick);
-    return () => document.removeEventListener('mousedown', handleClick);
-  }, []);
+    document.addEventListener('keydown', handleKeyDown);
+    return () => {
+      document.removeEventListener('mousedown', handleClick);
+      document.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [open]);
+
+  const selectRange = (nextFrom: string, nextTo: string) => {
+    onChange(nextFrom, nextTo);
+    setOpen(false);
+    window.requestAnimationFrame(() => triggerRef.current?.focus());
+  };
 
   const displayText = () => {
     if (from === to) {
@@ -39,7 +57,7 @@ export default function DateRangePicker({ from, to, onChange, earliest, latest, 
 
   return (
     <div ref={ref} style={{ position: 'relative' }}>
-      <button onClick={() => setOpen(!open)} style={{
+      <button ref={triggerRef} type="button" aria-haspopup="dialog" aria-expanded={open} aria-controls="date-range-popover" onClick={() => setOpen(!open)} style={{
         display: 'flex', alignItems: 'center', gap: 8,
         padding: '8px 14px', borderRadius: 8,
         border: '1px solid var(--border)', background: 'var(--card)',
@@ -55,7 +73,7 @@ export default function DateRangePicker({ from, to, onChange, earliest, latest, 
       </button>
 
       {open && (
-        <div style={{
+        <div id="date-range-popover" role="dialog" aria-label="Pilih rentang tanggal" style={{
           position: 'absolute', top: '100%', right: 0, marginTop: 4, zIndex: 50,
           background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 12,
           padding: 16, minWidth: 280, boxShadow: 'var(--shadow)',
@@ -67,7 +85,7 @@ export default function DateRangePicker({ from, to, onChange, earliest, latest, 
             </div>
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
               {presets.map(p => (
-                <button key={p.label} onClick={() => { onChange(p.from, p.to); setOpen(false); }}
+                <button type="button" key={p.label} onClick={() => selectRange(p.from, p.to)}
                   style={{
                     padding: '5px 10px', borderRadius: 6, border: '1px solid var(--border)',
                     background: from === p.from && to === p.to ? 'var(--accent-solid)' : 'transparent',
@@ -85,7 +103,7 @@ export default function DateRangePicker({ from, to, onChange, earliest, latest, 
               Custom Range
             </div>
             <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-              <input type="date" value={from}
+              <input type="date" aria-label="Tanggal mulai" value={from}
                 min={earliest} max={latest}
                 onChange={e => onChange(e.target.value, to)}
                 style={{
@@ -94,7 +112,7 @@ export default function DateRangePicker({ from, to, onChange, earliest, latest, 
                   color: 'var(--text)', fontSize: 12,
                 }} />
               <span style={{ color: 'var(--dim)', fontSize: 12 }}>→</span>
-              <input type="date" value={to}
+              <input type="date" aria-label="Tanggal akhir" value={to}
                 min={earliest} max={latest}
                 onChange={e => onChange(from, e.target.value)}
                 style={{
@@ -107,7 +125,7 @@ export default function DateRangePicker({ from, to, onChange, earliest, latest, 
 
           {/* All time */}
           {earliest && latest && !completedDaysOnly && (
-            <button onClick={() => { onChange(earliest, latest); setOpen(false); }}
+            <button type="button" onClick={() => selectRange(earliest, latest)}
               style={{
                 marginTop: 8, width: '100%', padding: '6px 10px', borderRadius: 6,
                 border: '1px solid var(--border)', background: 'transparent',

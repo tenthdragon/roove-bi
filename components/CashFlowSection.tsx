@@ -168,12 +168,18 @@ export default function CashFlowSection({ netSales, periodStart }: Props) {
       {/* Channel breakdown collapsible */}
       {activeChannels.length > 0 && (
         <div style={{ padding:'10px 20px' }}>
-          <div onClick={() => setChannelOpen(!channelOpen)} style={{ fontSize:11, color:'var(--dim)', cursor:'pointer', userSelect:'none', display:'flex', alignItems:'center', gap:6 }}>
-            <span style={{ display:'inline-block', transition:'transform 0.2s', transform: channelOpen?'rotate(90deg)':'rotate(0deg)', fontSize:9 }}>&#9654;</span>
+          <button
+            type="button"
+            onClick={() => setChannelOpen(!channelOpen)}
+            aria-expanded={channelOpen}
+            aria-controls="cash-flow-channel-breakdown"
+            style={{ fontSize:11, color:'var(--dim)', cursor:'pointer', userSelect:'none', display:'flex', alignItems:'center', gap:6, border:'none', background:'transparent', padding:'4px 0' }}
+          >
+            <span aria-hidden="true" style={{ display:'inline-block', transition:'transform 0.2s', transform: channelOpen?'rotate(90deg)':'rotate(0deg)', fontSize:9 }}>&#9654;</span>
             Breakdown per Channel
-          </div>
+          </button>
           {channelOpen && (
-            <div style={{ overflowX:'auto', marginTop:10 }}>
+            <div id="cash-flow-channel-breakdown" style={{ overflowX:'auto', marginTop:10 }}>
               <table style={{ width:'100%', borderCollapse:'collapse', fontSize:11, tableLayout:'auto' }}>
                 <thead>
                   <tr>

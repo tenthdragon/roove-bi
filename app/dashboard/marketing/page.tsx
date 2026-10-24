@@ -1185,7 +1185,7 @@ export default function MarketingPage() {
   return (
     <div className="fade-in">
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16, flexWrap: 'wrap', gap: 12 }}>
-        <h2 style={{ margin: 0, fontSize: 18, fontWeight: 700 }}>Marketing</h2>
+        <h1 style={{ margin: 0, fontSize: 18, fontWeight: 700 }}>Marketing</h1>
         <select value={brandFilter} onChange={(e) => setBrandFilter(e.target.value)}
           style={{ background: 'var(--border)', border: `1px solid ${C.bdr}`, borderRadius: 8, padding: '7px 12px', color: C.txt, fontSize: 13, cursor: 'pointer', outline: 'none' }}>
           <option value="all">All Brands</option>

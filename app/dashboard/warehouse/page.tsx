@@ -578,7 +578,7 @@ function WarehousePageContent() {
     <div className="fade-in">
       {/* Header */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16, flexWrap: 'wrap', gap: 8 }}>
-        <h2 style={{ margin: 0, fontSize: 18, fontWeight: 700 }}>Gudang</h2>
+        <h1 style={{ margin: 0, fontSize: 18, fontWeight: 700 }}>Gudang</h1>
       </div>
 
       {/* Sub-tab navigation */}
@@ -3331,24 +3331,30 @@ function ConvertModal({ onClose, onSuccess }: { onClose: () => void; onSuccess: 
             <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--text)', marginBottom: 8 }}>Bahan Asal</div>
             <div style={{ position: 'relative', marginBottom: sources.length > 0 ? 8 : 14 }}>
               {/* Trigger button */}
-              <div onClick={() => setDropdownOpen(v => !v)}
-                style={{ ...inputStyle, cursor: 'pointer', display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-                  background: dropdownOpen ? 'var(--bg-deep)' : undefined, userSelect: 'none' }}>
+              <button
+                type="button"
+                onClick={() => setDropdownOpen(v => !v)}
+                aria-expanded={dropdownOpen}
+                aria-controls="warehouse-source-options"
+                style={{ ...inputStyle, cursor:'pointer', display:'flex', justifyContent:'space-between', alignItems:'center', textAlign:'left',
+                  background:dropdownOpen ? 'var(--bg-deep)' : undefined, userSelect:'none' }}
+              >
                 <span style={{ color: sources.length > 0 ? 'var(--text)' : 'var(--dim)', fontSize: 12 }}>
                   {sources.length > 0 ? `${sources.length} bahan dipilih` : 'Pilih bahan WIP / material...'}
                 </span>
                 <span style={{ color: 'var(--dim)', fontSize: 10 }}>{dropdownOpen ? '▲' : '▼'}</span>
-              </div>
+              </button>
 
               {/* Click-outside overlay */}
               {dropdownOpen && (
                 <div onClick={() => { setDropdownOpen(false); setSearch(''); }}
+                  aria-hidden="true"
                   style={{ position: 'fixed', inset: 0, zIndex: 49 }} />
               )}
 
               {/* Dropdown panel */}
               {dropdownOpen && (
-                <div style={{ position: 'absolute', top: '100%', left: 0, right: 0, zIndex: 50,
+                <div id="warehouse-source-options" role="group" aria-label="Pilihan bahan asal" style={{ position: 'absolute', top: '100%', left: 0, right: 0, zIndex: 50,
                   background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 8,
                   boxShadow: '0 4px 16px rgba(0,0,0,0.2)', marginTop: 4 }}>
                   {/* Search inside dropdown */}
@@ -3366,9 +3372,10 @@ function ConvertModal({ onClose, onSuccess }: { onClose: () => void; onSuccess: 
                       : filteredSource.map(p => {
                           const checked = sources.some(s => s.productId === p.id);
                           return (
-                            <div key={p.id}
+                            <button type="button" key={p.id}
                               onClick={(e) => { e.stopPropagation(); checked ? removeSource(p.id) : addSource(p); }}
-                              style={{ padding: '7px 12px', display: 'flex', alignItems: 'center', gap: 10, cursor: 'pointer',
+                              aria-pressed={checked}
+                              style={{ width:'100%', padding:'7px 12px', display:'flex', alignItems:'center', gap:10, cursor:'pointer', textAlign:'left', border:'none', color:'inherit',
                                 borderBottom: '1px solid var(--bg-deep)',
                                 background: checked ? 'rgba(139,92,246,0.08)' : 'transparent' }}>
                               <div style={{ width: 16, height: 16, borderRadius: 4, border: `2px solid ${checked ? '#7c3aed' : 'var(--border)'}`,
@@ -3380,7 +3387,7 @@ function ConvertModal({ onClose, onSuccess }: { onClose: () => void; onSuccess: 
                                 <div style={{ fontSize: 12, color: 'var(--text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{p.name}</div>
                                 <div style={{ fontSize: 10, color: 'var(--dim)' }}>{p.category}</div>
                               </div>
-                            </div>
+                            </button>
                           );
                         })
                     }
@@ -3455,14 +3462,14 @@ function ConvertModal({ onClose, onSuccess }: { onClose: () => void; onSuccess: 
                 </div>
               ) : (
                 <>
-                  <input type="text" placeholder="Cari produk FG tujuan..." value={targetSearch} onChange={(e) => setTargetSearch(e.target.value)} style={inputStyle} />
+                  <input type="text" role="combobox" aria-autocomplete="list" aria-expanded={Boolean(targetSearch)} aria-controls="warehouse-target-options" placeholder="Cari produk FG tujuan..." value={targetSearch} onChange={(e) => setTargetSearch(e.target.value)} style={inputStyle} />
                   {targetSearch && (
-                    <div style={{ maxHeight: 160, overflowY: 'auto', border: '1px solid var(--border)', borderRadius: 8, marginTop: 4 }}>
+                    <div id="warehouse-target-options" role="listbox" aria-label="Produk tujuan" style={{ maxHeight:160, overflowY:'auto', border:'1px solid var(--border)', borderRadius:8, marginTop:4 }}>
                       {filteredTarget.slice(0, 20).map(p => (
-                        <div key={p.id} onClick={() => selectTarget(p)}
-                          style={{ padding: '6px 10px', fontSize: 12, cursor: 'pointer', borderBottom: '1px solid var(--bg-deep)' }}>
+                        <button type="button" role="option" aria-selected={targetProduct === p.id} key={p.id} onClick={() => selectTarget(p)}
+                          style={{ display:'block', width:'100%', padding:'6px 10px', fontSize:12, cursor:'pointer', textAlign:'left', border:'none', borderBottom:'1px solid var(--bg-deep)', background:'transparent', color:'inherit' }}>
                           <span style={{ color: 'var(--text)' }}>{p.name} <span style={{ color: 'var(--dim)', fontSize: 10 }}>({p.category})</span></span>
-                        </div>
+                        </button>
                       ))}
                       {filteredTarget.length === 0 && <div style={{ padding: 12, textAlign: 'center', color: 'var(--dim)', fontSize: 12 }}>Tidak ditemukan</div>}
                     </div>

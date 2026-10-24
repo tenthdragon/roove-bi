@@ -206,7 +206,7 @@ export default function BrandAnalysisPage() {
       {/* Page Header */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 20, flexWrap: 'wrap', gap: 12 }}>
         <div>
-          <h2 style={{ margin: '0 0 4px', fontSize: 20, fontWeight: 700 }}>Brand Analysis</h2>
+          <h1 style={{ margin: '0 0 4px', fontSize: 20, fontWeight: 700 }}>Brand Analysis</h1>
           <p style={{ margin: 0, fontSize: 13, color: 'var(--dim)' }}>
             {activeView === 'brand-health'
               ? 'Owned channel brand health — trailing active buyer 90D dan new-to-brand customer'

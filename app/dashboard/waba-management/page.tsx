@@ -824,7 +824,7 @@ export default function WabaManagementPage() {
 
   return (
     <div className="fade-in">
-      <h2 style={{ margin: '0 0 20px', fontSize: 18, fontWeight: 700 }}>WABA Management</h2>
+      <h1 style={{ margin: '0 0 20px', fontSize: 18, fontWeight: 700 }}>WABA Management</h1>
 
       {/* ════════════════════════════════════════════════════════════════════ */}
       {/* Section A: Message Templates                                       */}

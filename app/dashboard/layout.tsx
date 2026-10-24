@@ -209,9 +209,13 @@ function RefreshViewsButton({
   return (
     <div style={{ position: 'relative' }} ref={detailRef}>
       <button
+        type="button"
         onClick={handleRefresh}
         disabled={status === 'loading'}
         title="Masukkan sync Google Sheets dan Meta ke antrean"
+        aria-label="Masukkan sync Google Sheets dan Meta ke antrean"
+        aria-busy={status === 'loading'}
+        aria-expanded={showDetail && status === 'loading'}
         style={{
           display: 'flex', alignItems: 'center', justifyContent: 'center',
           width: 34, height: 34, borderRadius: 8,
@@ -226,7 +230,7 @@ function RefreshViewsButton({
 
       {/* Detail popup showing sync progress */}
       {showDetail && status === 'loading' && (
-        <div style={{
+        <div role="status" aria-live="polite" style={{
           position: 'absolute', top: '100%', right: 0, marginTop: 8,
           background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 10,
           padding: '12px 14px', minWidth: 250, zIndex: 999,
@@ -347,6 +351,11 @@ export default function DashboardLayout({ children }) {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [expandedMenus, setExpandedMenus] = useState<Record<string, boolean>>({});
   const overlayRef = useRef(null);
+  const mobileMenuTriggerRef = useRef<HTMLButtonElement | null>(null);
+  const mobileMenuPanelRef = useRef<HTMLElement | null>(null);
+  const mobileMenuCloseRef = useRef<HTMLButtonElement | null>(null);
+  const mainContentRef = useRef<HTMLDivElement | null>(null);
+  const restoreMobileMenuFocusRef = useRef(false);
   const router = useRouter();
   const pathname = usePathname();
   const supabase = useSupabase();
@@ -541,17 +550,63 @@ export default function DashboardLayout({ children }) {
 
   // Close mobile menu on route change
   useEffect(() => {
+    restoreMobileMenuFocusRef.current = false;
     setMobileMenuOpen(false);
   }, [pathname]);
 
-  // Lock body scroll when mobile menu open
+  // Treat the mobile navigation as a modal surface: contain focus, support
+  // Escape, hide the background from assistive technology, and restore focus.
   useEffect(() => {
-    if (mobileMenuOpen) {
-      document.body.style.overflow = 'hidden';
-    } else {
+    if (!mobileMenuOpen) return;
+
+    const previouslyFocused = document.activeElement instanceof HTMLElement
+      ? document.activeElement
+      : mobileMenuTriggerRef.current;
+    const mainContent = mainContentRef.current;
+    restoreMobileMenuFocusRef.current = true;
+    document.body.style.overflow = 'hidden';
+    mobileMenuCloseRef.current?.focus();
+    mainContent?.setAttribute('inert', '');
+    mainContent?.setAttribute('aria-hidden', 'true');
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        setMobileMenuOpen(false);
+        return;
+      }
+
+      if (event.key !== 'Tab') return;
+      const panel = mobileMenuPanelRef.current;
+      if (!panel) return;
+
+      const focusable = Array.from(panel.querySelectorAll<HTMLElement>(
+        'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])',
+      )).filter((element) => !element.hasAttribute('hidden'));
+      if (focusable.length === 0) return;
+
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
+      }
+    };
+
+    document.addEventListener('keydown', handleKeyDown);
+    return () => {
+      document.removeEventListener('keydown', handleKeyDown);
       document.body.style.overflow = '';
-    }
-    return () => { document.body.style.overflow = ''; };
+      mainContent?.removeAttribute('inert');
+      mainContent?.removeAttribute('aria-hidden');
+      if (restoreMobileMenuFocusRef.current && previouslyFocused?.isConnected) {
+        previouslyFocused.focus();
+      }
+      restoreMobileMenuFocusRef.current = false;
+    };
   }, [mobileMenuOpen]);
 
   useEffect(() => {
@@ -569,6 +624,7 @@ export default function DashboardLayout({ children }) {
   };
 
   const navigateTo = (tabId) => {
+    restoreMobileMenuFocusRef.current = false;
     router.push(getTabPath(tabId));
     setMobileMenuOpen(false);
   };
@@ -612,7 +668,7 @@ export default function DashboardLayout({ children }) {
       <div style={{ minHeight:'100vh', background:'var(--bg)', display:'flex', alignItems:'center', justifyContent:'center', padding:20 }}>
         <div style={{ background:'var(--card)', border:'1px solid var(--border)', borderRadius:16, padding:40, textAlign:'center', maxWidth:460 }}>
           <div style={{ fontSize:48, marginBottom:16 }}>🔒</div>
-          <h2 style={{ margin:'0 0 8px', fontSize:20, fontWeight:700 }}>Akses Dashboard Tidak Tersedia</h2>
+          <h1 style={{ margin:'0 0 8px', fontSize:20, fontWeight:700 }}>Akses Dashboard Tidak Tersedia</h1>
           <p style={{ margin:'0 0 24px', color:'var(--dim)', fontSize:14, lineHeight:1.6 }}>
             {accessError || 'Akun ini belum memiliki permission tab dashboard. Silakan hubungi owner untuk mengaktifkan akses.'}
           </p>
@@ -629,7 +685,7 @@ export default function DashboardLayout({ children }) {
       <div style={{ minHeight:'100vh', background:'var(--bg)', display:'flex', alignItems:'center', justifyContent:'center', padding:20 }}>
         <div style={{ background:'var(--card)', border:'1px solid var(--border)', borderRadius:16, padding:40, textAlign:'center', maxWidth:420 }}>
           <div style={{ fontSize:48, marginBottom:16 }}>⏳</div>
-          <h2 style={{ margin:'0 0 8px', fontSize:20, fontWeight:700 }}>Menunggu Persetujuan</h2>
+          <h1 style={{ margin:'0 0 8px', fontSize:20, fontWeight:700 }}>Menunggu Persetujuan</h1>
           <p style={{ margin:'0 0 24px', color:'var(--dim)', fontSize:14, lineHeight:1.6 }}>
             Akun Anda telah terdaftar. Silakan hubungi Owner untuk mengaktifkan akses dashboard.
           </p>
@@ -708,6 +764,7 @@ export default function DashboardLayout({ children }) {
                 )}
                 {t.showSpacer && !collapsed && <div style={{ height:16 }} />}
                 <button
+                  type="button"
                   onClick={() => {
                     if (hasChildren) {
                       if (collapsed && !isMobile && !parentAccessible) {
@@ -737,6 +794,9 @@ export default function DashboardLayout({ children }) {
                     }
                   }}
                   title={collapsed ? t.label : undefined}
+                  aria-current={active ? 'page' : undefined}
+                  aria-expanded={hasChildren ? isExpanded : undefined}
+                  aria-controls={hasChildren ? `sidebar-children-${t.id}` : undefined}
                   style={{
                     display:'flex',
                     alignItems:'center',
@@ -768,10 +828,8 @@ export default function DashboardLayout({ children }) {
                             transform: isExpanded ? 'rotate(180deg)' : 'rotate(0deg)',
                             flexShrink:0,
                           }}
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            setExpandedMenus(prev => ({ ...prev, [t.id]: !isExpanded }));
-                          }}
+                          aria-hidden="true"
+                          focusable="false"
                         >
                           <polyline points="6 9 12 15 18 9"/>
                         </svg>
@@ -782,11 +840,12 @@ export default function DashboardLayout({ children }) {
 
                 {/* Submenu children */}
                 {hasChildren && isExpanded && !collapsed && (
-                  <div style={{ display:'flex', flexDirection:'column', gap:1, marginTop:2 }}>
+                  <div id={`sidebar-children-${t.id}`} style={{ display:'flex', flexDirection:'column', gap:1, marginTop:2 }}>
                     {t.children.map(child => {
                       const childIsActive = currentTab === child.id;
                       return (
                         <button
+                          type="button"
                           key={child.id}
                           onClick={() => navigateTo(child.id)}
                           style={{
@@ -821,6 +880,7 @@ export default function DashboardLayout({ children }) {
         {/* Logout at bottom */}
         <div style={{ padding:'12px 8px', flexShrink:0 }}>
           <button
+            type="button"
             onClick={handleLogout}
             style={{
               display:'flex', alignItems:'center', gap:12, width:'100%',
@@ -854,6 +914,9 @@ export default function DashboardLayout({ children }) {
     <DateRangeProvider>
       <ActiveBrandsProvider>
       <div style={{ minHeight:'100vh', background:'var(--bg)', display:'flex' }}>
+        <a className="skip-link" href="#dashboard-main-content" tabIndex={mobileMenuOpen ? -1 : undefined} aria-hidden={mobileMenuOpen || undefined}>
+          Langsung ke konten utama
+        </a>
 
         {/* ═══ DESKTOP SIDEBAR ═══ */}
         <aside className="desktop-sidebar" style={{
@@ -878,22 +941,21 @@ export default function DashboardLayout({ children }) {
             alignItems:'center',
             justifyContent: sidebarCollapsed ? 'center' : 'space-between',
             gap:10,
-            cursor:'pointer',
             minHeight:57,
           }}>
-            <div onClick={goHome} style={{ display:'flex', alignItems:'center', gap:10 }}>
-              <div style={{
+            <button type="button" onClick={goHome} aria-label={`Buka dashboard ${workspaceBrandName} BI`} style={{ display:'flex', alignItems:'center', gap:10, border:'none', background:'transparent', color:'inherit', padding:0, cursor:'pointer' }}>
+              <span aria-hidden="true" style={{
                 width:32, height:32, borderRadius:8, flexShrink:0,
                 background:'linear-gradient(135deg,#2563eb,#7c3aed)',
                 display:'flex', alignItems:'center', justifyContent:'center',
                 fontSize:15, fontWeight:800, color:'#fff',
-              }}>{workspaceBrandInitial}</div>
+              }}>{workspaceBrandInitial}</span>
               {!sidebarCollapsed && (
                 <span style={{ fontSize:16, fontWeight:700, color:'var(--text)', whiteSpace:'nowrap' }}>{workspaceBrandName} BI</span>
               )}
-            </div>
+            </button>
             {!sidebarCollapsed && (
-              <button onClick={() => setSidebarCollapsed(true)} style={{
+              <button type="button" aria-label="Ciutkan navigasi samping" onClick={() => setSidebarCollapsed(true)} style={{
                 background:'none', border:'none', cursor:'pointer', color:'var(--text-muted)', padding:4,
               }}>
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -902,7 +964,7 @@ export default function DashboardLayout({ children }) {
               </button>
             )}
             {sidebarCollapsed && (
-              <button onClick={() => setSidebarCollapsed(false)} style={{
+              <button type="button" aria-label="Luaskan navigasi samping" onClick={() => setSidebarCollapsed(false)} style={{
                 border:'1px solid var(--border)', cursor:'pointer', color:'var(--text-muted)',
                 padding:4, position:'absolute', right:-12, top:16,
                 background:'var(--card)', borderRadius:'50%',
@@ -924,6 +986,7 @@ export default function DashboardLayout({ children }) {
             ref={overlayRef}
             onClick={(e) => { if (e.target === overlayRef.current) setMobileMenuOpen(false); }}
             className="mobile-overlay"
+            role="presentation"
             style={{
               position:'fixed', top:0, left:0, right:0, bottom:0,
               background:'var(--overlay-bg)',
@@ -931,7 +994,7 @@ export default function DashboardLayout({ children }) {
               backdropFilter:'blur(2px)',
             }}
           >
-            <aside style={{
+            <aside id="mobile-navigation-dialog" ref={mobileMenuPanelRef} role="dialog" aria-modal="true" aria-label={`Navigasi utama ${workspaceBrandName} BI`} style={{
               width:260,
               height:'100dvh',
               maxHeight:'100dvh',
@@ -950,17 +1013,17 @@ export default function DashboardLayout({ children }) {
                 justifyContent:'space-between',
                 minHeight:57,
               }}>
-                <div onClick={goHome} style={{ display:'flex', alignItems:'center', gap:10, cursor:'pointer' }}>
-                  <div style={{
+                <button type="button" onClick={goHome} aria-label={`Buka dashboard ${workspaceBrandName} BI`} style={{ display:'flex', alignItems:'center', gap:10, cursor:'pointer', border:'none', background:'transparent', color:'inherit', padding:0 }}>
+                  <span aria-hidden="true" style={{
                     width:32, height:32, borderRadius:8,
                     background:'linear-gradient(135deg,#2563eb,#7c3aed)',
                     display:'flex', alignItems:'center', justifyContent:'center',
                     fontSize:15, fontWeight:800, color:'#fff',
-                  }}>{workspaceBrandInitial}</div>
+                  }}>{workspaceBrandInitial}</span>
                   <span style={{ fontSize:16, fontWeight:700, color:'var(--text)' }}>{workspaceBrandName} BI</span>
-                </div>
-                <button onClick={() => setMobileMenuOpen(false)} style={{
-                  background:'none', border:'none', cursor:'pointer', color:'var(--dim)', padding:4,
+                </button>
+                <button ref={mobileMenuCloseRef} type="button" aria-label="Tutup navigasi" onClick={() => setMobileMenuOpen(false)} style={{
+                  background:'none', border:'none', cursor:'pointer', color:'var(--dim)', padding:11, width:44, height:44, display:'flex', alignItems:'center', justifyContent:'center',
                 }}>
                   <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                     <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
@@ -974,7 +1037,7 @@ export default function DashboardLayout({ children }) {
         )}
 
         {/* ═══ MAIN CONTENT ═══ */}
-        <div className="main-content-area" style={{
+        <div ref={mainContentRef} className="main-content-area" style={{
           flex:1,
           minWidth:0,
           marginLeft: sidebarW,
@@ -1000,9 +1063,9 @@ export default function DashboardLayout({ children }) {
           }}>
             <div style={{ display:'flex', alignItems:'center', gap:12 }}>
               {/* Hamburger - mobile only */}
-              <button className="mobile-hamburger" onClick={() => setMobileMenuOpen(true)} style={{
+              <button ref={mobileMenuTriggerRef} type="button" className="mobile-hamburger" aria-label="Buka navigasi" aria-expanded={mobileMenuOpen} aria-controls="mobile-navigation-dialog" onClick={() => setMobileMenuOpen(true)} style={{
                 display:'none', /* shown via CSS on mobile */
-                background:'none', border:'none', cursor:'pointer', color:'var(--text-secondary)', padding:4,
+                background:'none', border:'none', cursor:'pointer', color:'var(--text-secondary)', padding:11, width:44, height:44, alignItems:'center', justifyContent:'center',
               }}>
                 <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                   <line x1="3" y1="6" x2="21" y2="6"/>
@@ -1029,7 +1092,7 @@ export default function DashboardLayout({ children }) {
           </header>
 
           {/* Content */}
-          <main className="dashboard-content" style={{ padding:'16px 20px', maxWidth:1400, width:'100%', overflowX:'hidden', margin:'0 auto' }}>
+          <main id="dashboard-main-content" tabIndex={-1} className="dashboard-content" style={{ padding:'16px 20px', maxWidth:1400, width:'100%', overflowX:'hidden', margin:'0 auto' }}>
             {accessRole === 'owner' || accessibleTabIds.includes(currentTab)
               ? children
               : <p role="status">{accessibleTabIds.length ? 'Mengalihkan ke halaman yang dapat diakses…' : 'Belum ada halaman yang dapat diakses. Silakan hubungi owner.'}</p>}
@@ -1044,7 +1107,7 @@ export default function DashboardLayout({ children }) {
 }
 
 function TabIcon({ id, size = 18 }) {
-  const s = { width: size, height: size, flexShrink: 0 };
+  const s = { width: size, height: size, style: { flexShrink: 0 } };
   switch(id) {
     case 'overview': return <svg {...s} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg>;
     case 'sales-channel-analysis': return <svg {...s} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="3 17 9 11 13 15 21 7"/><polyline points="15 7 21 7 21 13"/></svg>;
