@@ -115,6 +115,7 @@ export default function OverviewPage() {
   const [shipmentError, setShipmentError] = useState('');
   const { activeBrands, loading: activeBrandsLoading, error: activeBrandsError, isActiveBrand } = useActiveBrands();
   const [showTren, setShowTren] = useState(true);
+  const [showDetail, setShowDetail] = useState(false);
   const [showOlderTrendDays, setShowOlderTrendDays] = useState(false);
   const [isMobile, setIsMobile] = useState(false);
 
@@ -673,7 +674,7 @@ export default function OverviewPage() {
   if (filteredDailyData.length === 0 && !loading) {
     return (
       <div className="fade-in">
-        <h2 style={{ margin:'0 0 16px', fontSize:18, fontWeight:700 }}>Overview</h2>
+        <h1 style={{ margin:'0 0 16px', fontSize:18, fontWeight:700 }}>Overview</h1>
         <div style={{ textAlign:'center', padding:60, color:'var(--dim)', background:'var(--card)', border:'1px solid var(--border)', borderRadius:12 }}>
           <div style={{ fontSize:48, marginBottom:16 }}>📊</div>
           <div style={{ fontSize:18, fontWeight:600, marginBottom:8 }}>Belum Ada Data untuk Periode Ini</div>
@@ -685,7 +686,7 @@ export default function OverviewPage() {
 
   return (
     <div className="fade-in">
-      <h2 style={{ margin:'0 0 16px', fontSize:18, fontWeight:700 }}>Overview</h2>
+      <h1 style={{ margin:'0 0 16px', fontSize:18, fontWeight:700 }}>Overview</h1>
 
       {feeError && (
         <div style={{ background:'rgba(120,53,15,0.12)', border:'1px solid rgba(146,64,14,0.45)', borderRadius:8, padding:'10px 14px', marginBottom:12, fontSize:12, color:'var(--tone-amber)' }}>
@@ -777,11 +778,25 @@ export default function OverviewPage() {
 
       {kpi.chart.length > 0 && (
         <div style={{ background:'var(--card)', border:'1px solid var(--border)', borderRadius:12, padding:16, marginBottom:20 }}>
-          <div style={{ fontSize:15, fontWeight:700, marginBottom: showTren ? 12 : 0, display:'flex', alignItems:'center', gap:10, cursor:'pointer' }} onClick={() => setShowTren(v => !v)}>
-            <span style={{ transition:'transform 0.2s', display:'inline-block', transform: showTren ? 'rotate(90deg)' : 'rotate(0deg)', fontSize:10, color:'var(--dim)' }}>&#9654;</span>
-            Tren Harian
+          <div style={{ marginBottom: showTren ? 12 : 0, display:'flex', alignItems:'center', gap:10 }}>
+            <button
+              type="button"
+              onClick={() => setShowTren(v => !v)}
+              aria-expanded={showTren}
+              aria-controls="overview-daily-trend"
+              style={{ display:'flex', alignItems:'center', gap:10, border:'none', background:'transparent', color:'var(--text)', padding:0, cursor:'pointer', fontSize:15, fontWeight:700 }}
+            >
+              <span aria-hidden="true" style={{ transition:'transform 0.2s', display:'inline-block', transform: showTren ? 'rotate(90deg)' : 'rotate(0deg)', fontSize:10, color:'var(--dim)' }}>&#9654;</span>
+              Tren Harian
+            </button>
+            {showTren && (
+              <button type="button" onClick={() => setShowDetail(v => !v)} aria-expanded={showDetail} aria-controls="overview-daily-trend-table" style={{ background:'none', border:'1px solid var(--border)', borderRadius:6, padding:'5px 10px', cursor:'pointer', fontSize:10, color: showDetail ? 'var(--tone-violet)' : 'var(--dim)', display:'flex', alignItems:'center', gap:4 }}>
+                <span aria-hidden="true" style={{ transition:'transform 0.2s', display:'inline-block', transform: showDetail ? 'rotate(90deg)' : 'rotate(0deg)', fontSize:8 }}>&#9654;</span>
+                Detail
+              </button>
+            )}
           </div>
-          {showTren && <div style={{ overflowX:'auto' }}><table style={{ width:'100%', borderCollapse:'collapse', fontSize:12, minWidth:1160 }}>
+          {showTren && <div id="overview-daily-trend" style={{ overflowX:'auto' }}><table id="overview-daily-trend-table" style={{ width:'100%', borderCollapse:'collapse', fontSize:12, minWidth: showDetail ? 1160 : 560 }}>
             <thead>
               <tr style={{ borderBottom:'2px solid var(--border)' }}>
                 <th style={{ padding:'8px 10px', textAlign:'left', color:'var(--dim)', fontWeight:600, fontSize:10, textTransform:'uppercase', position:'sticky', left:0, background:'var(--card)', zIndex:1 }}>Tanggal</th>

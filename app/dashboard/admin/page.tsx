@@ -519,7 +519,7 @@ export default function AdminPage() {
   return (
     <div className="fade-in">
       {/* Header */}
-      <h2 style={{ margin: 0, fontSize: 18, fontWeight: 700, marginBottom: 16 }}>Admin</h2>
+      <h1 style={{ margin: 0, fontSize: 18, fontWeight: 700, marginBottom: 16 }}>Admin</h1>
 
       {/* Tab Navigation */}
       <div style={{

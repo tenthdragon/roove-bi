@@ -655,7 +655,7 @@ export default function RevenueRunRatePage() {
       <div style={{ display:'flex', justifyContent:'space-between', alignItems:'flex-start', gap:16, marginBottom:18, flexWrap:'wrap' }}>
         <div>
           <div style={{ fontSize:10, color:'var(--accent)', fontWeight:700, textTransform:'uppercase', letterSpacing:'.08em', marginBottom:5 }}>Sales Channel / Analysis</div>
-          <h2 style={{ margin:0, fontSize:20, fontWeight:750 }}>Sales Channel Analysis · {monthLabel}</h2>
+          <h1 style={{ margin:0, fontSize:20, fontWeight:750 }}>Sales Channel Analysis · {monthLabel}</h1>
           <div style={{ color:'var(--dim)', fontSize:11, marginTop:5 }}>Aktual s.d. hari ke-{analysis.actualDay} · dibandingkan dengan {prevLabel}</div>
         </div>
         <div style={{

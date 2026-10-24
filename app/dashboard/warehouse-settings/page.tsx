@@ -76,7 +76,7 @@ export default function WarehouseSettingsPage() {
   if (visibleTabs.length === 0) {
     return (
       <div className="fade-in">
-        <h2 style={{ margin: '0 0 16px', fontSize: 18, fontWeight: 700 }}>Catalog &amp; Master Data</h2>
+        <h1 style={{ margin: '0 0 16px', fontSize: 18, fontWeight: 700 }}>Catalog &amp; Master Data</h1>
         <div style={{ background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 12, padding: 20, color: 'var(--dim)', fontSize: 13 }}>
           Akun ini belum punya akses ke Catalog &amp; Master Data.
         </div>
@@ -87,7 +87,7 @@ export default function WarehouseSettingsPage() {
   return (
     <div className="fade-in">
       <div style={{ marginBottom: 16 }}>
-        <h2 style={{ margin: '0 0 4px', fontSize: 18, fontWeight: 700 }}>Catalog &amp; Master Data</h2>
+        <h1 style={{ margin: '0 0 4px', fontSize: 18, fontWeight: 700 }}>Catalog &amp; Master Data</h1>
         <div style={{ color: 'var(--dim)', fontSize: 12 }}>
           Satu sumber canonical untuk brand, product, SKU, vendor, external catalog, dan bundle.
         </div>
