@@ -356,22 +356,9 @@ export default function DashboardLayout({ children }) {
   const mobileMenuPanelRef = useRef<HTMLElement | null>(null);
   const mobileMenuCloseRef = useRef<HTMLButtonElement | null>(null);
   const mainContentRef = useRef<HTMLDivElement | null>(null);
-  const toolbarRef = useRef<HTMLDivElement | null>(null);
   const restoreMobileMenuFocusRef = useRef(false);
   const router = useRouter();
   const pathname = usePathname();
-
-  useEffect(() => {
-    const mobileQuery = window.matchMedia('(max-width: 639px)');
-    const resetToolbarPosition = () => {
-      window.requestAnimationFrame(() => {
-        if (toolbarRef.current) toolbarRef.current.scrollLeft = 0;
-      });
-    };
-    resetToolbarPosition();
-    mobileQuery.addEventListener('change', resetToolbarPosition);
-    return () => mobileQuery.removeEventListener('change', resetToolbarPosition);
-  }, []);
   const supabase = useSupabase();
   const { ready: authReady, hasSession } = useSupabaseSessionReady();
   const currentTab = getCurrentTab(pathname);
@@ -1088,7 +1075,7 @@ export default function DashboardLayout({ children }) {
                 </svg>
               </button>
             </div>
-            <div ref={toolbarRef} className="dashboard-toolbar" style={{ display:'flex', alignItems:'center', gap:8, flexShrink:0 }}>
+            <div className="dashboard-toolbar" style={{ display:'flex', alignItems:'center', gap:8, flexShrink:0 }}>
               <WorkspaceSwitcher />
               {canAccessTab(accessRole, 'meta-funnels', permissions) && isWorkspaceModuleEnabled(workspaceBootstrap.activeWorkspace, 'marketing') && isWorkspaceModuleEnabled(workspaceBootstrap.activeWorkspace, 'meta-funnels') && <div className="dashboard-notifications-control"><MetaFunnelNotifications /></div>}
               {showRefreshButton && (

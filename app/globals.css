@@ -276,10 +276,16 @@ body {
 
   .dashboard-topbar {
     padding-inline: max(6px, env(safe-area-inset-left)) max(6px, env(safe-area-inset-right)) !important;
+    align-items: flex-start !important;
   }
 
   .dashboard-topbar-menu { gap: 0 !important; }
-  .dashboard-toolbar { gap: 6px !important; }
+  .dashboard-toolbar {
+    gap: 6px !important;
+    flex-wrap: wrap;
+    overflow-x: visible;
+    scroll-snap-type: none;
+  }
   .dashboard-date-control { order: -2; }
   .dashboard-theme-control { order: -1; }
   .dashboard-workspace-control { max-width: 132px !important; }
@@ -293,7 +299,7 @@ body {
 
   .date-range-popover {
     position: fixed !important;
-    inset: 66px max(12px, env(safe-area-inset-right)) auto max(12px, env(safe-area-inset-left)) !important;
+    inset: 112px max(12px, env(safe-area-inset-right)) auto max(12px, env(safe-area-inset-left)) !important;
     width: auto !important;
     min-width: 0 !important;
     max-height: calc(100dvh - 82px);
@@ -306,7 +312,7 @@ body {
 
   .theme-toggle-menu {
     position: fixed !important;
-    inset: 66px max(12px, env(safe-area-inset-right)) auto max(12px, env(safe-area-inset-left)) !important;
+    inset: 112px max(12px, env(safe-area-inset-right)) auto max(12px, env(safe-area-inset-left)) !important;
     width: auto !important;
     max-height: calc(100dvh - 82px);
     overflow-y: auto;
@@ -381,6 +387,13 @@ body {
   .cash-flow-total { align-items: center !important; }
   .cash-flow-channels { padding: 10px 14px !important; }
   .cash-flow-channels button { min-height: 44px; }
+}
+
+/* Most phones can scan the six profitability KPIs as a compact 2 × 3 matrix.
+   The single-column fallback remains for genuinely narrow 320–359px screens. */
+@media (min-width: 360px) and (max-width: 639px) {
+  .overview-kpi-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .overview-kpi-card { padding: 12px !important; min-height: 132px; }
 }
 
 /* Slide-in animation for mobile sidebar */
