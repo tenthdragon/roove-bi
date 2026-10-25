@@ -685,8 +685,8 @@ export default function OverviewPage() {
   }
 
   return (
-    <div className="fade-in">
-      <h1 style={{ margin:'0 0 16px', fontSize:18, fontWeight:700 }}>Overview</h1>
+    <div className="fade-in overview-page">
+      <h1 className="overview-title" style={{ margin:'0 0 16px', fontSize:18, fontWeight:700 }}>Overview</h1>
 
       {feeError && (
         <div style={{ background:'rgba(120,53,15,0.12)', border:'1px solid rgba(146,64,14,0.45)', borderRadius:8, padding:'10px 14px', marginBottom:12, fontSize:12, color:'var(--tone-amber)' }}>
@@ -703,12 +703,11 @@ export default function OverviewPage() {
       {(() => {
         const cm2Color = kpi.tCm2 >= 0 ? '#0ea5e9' : 'var(--red)';
         const cm3Color = kpi.tCm3 >= 0 ? '#8b5cf6' : 'var(--red)';
-        const cols = isMobile ? 'repeat(2,1fr)' : 'repeat(3,1fr)';
         const Card = ({ label, value, sub, color, deltaVal, marginDelta, marginLabel, lowerBetter }: any) => {
           const hasD = deltaVal != null && !isNaN(deltaVal);
           const hasMarginDelta = marginDelta != null && !isNaN(marginDelta);
           return (
-            <div style={{ background:'var(--card)', border:'1px solid var(--border)', borderRadius:10, padding:'12px 14px', position:'relative', overflow:'hidden' }}>
+            <div className="overview-kpi-card" style={{ background:'var(--card)', border:'1px solid var(--border)', borderRadius:10, padding:'12px 14px', position:'relative', overflow:'hidden' }}>
               <div style={{ position:'absolute', top:0, left:0, right:0, height:2, background:color }} />
               <div style={{ fontSize:10, color:'var(--dim)', textTransform:'uppercase', letterSpacing:'0.05em', fontWeight:600, marginBottom:5, whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis' }}>{label}</div>
               <div style={{ fontSize:16, fontWeight:700, fontFamily:'monospace', lineHeight:1.2, color: toneText(color) }}>{value}</div>
@@ -748,7 +747,7 @@ export default function OverviewPage() {
         const mktUnavailable = Boolean(feeError);
         const afterOhUnavailable = cm3Unavailable || !kpi.hasOverhead;
         return (
-          <div style={{ display:'grid', gridTemplateColumns:cols, gap:10, marginBottom:16 }}>
+          <div className="overview-kpi-grid" style={{ display:'grid', gap:10, marginBottom:16 }}>
             <Card label="Net Sales" value={`Rp ${fmtCompact(kpi.ts)}`} sub={`Avg Rp ${fmtCompact(kpi.avg)}/hari · ${shipmentError ? 'Shipment tidak tersedia' : `${kpi.tShipment.toLocaleString('id-ID')} shipment`}`} color="var(--accent)" deltaVal={dNs} />
             <Card label={`CM1 · ${kpi.gpM.toFixed(1)}%`} value={`Rp ${fmtCompact(kpi.tg)}`} sub={`Gross profit · COGS ${cogsPct}%`} color="var(--green)" deltaVal={dCm1} marginDelta={dCm1Margin} marginLabel="CM1%" />
             <Card label={`CM2 · ${kpi.cm2M.toFixed(1)}%`} value={cm2Unavailable ? '—' : `Rp ${fmtCompact(kpi.tCm2)}`} sub={cm2Unavailable ? 'MP / shipping data belum lengkap' : `MP + shipping ${channelLogisticsPct}%`} color={cm2Color} deltaVal={cm2Unavailable ? null : dCm2} marginDelta={cm2Unavailable ? null : dCm2Margin} marginLabel="CM2%" />
@@ -777,8 +776,8 @@ export default function OverviewPage() {
       )}
 
       {kpi.chart.length > 0 && (
-        <div style={{ background:'var(--card)', border:'1px solid var(--border)', borderRadius:12, padding:16, marginBottom:20 }}>
-          <div style={{ marginBottom: showTren ? 12 : 0, display:'flex', alignItems:'center', gap:10 }}>
+        <div className="overview-trend-section" style={{ background:'var(--card)', border:'1px solid var(--border)', borderRadius:12, padding:16, marginBottom:20 }}>
+          <div className="overview-section-heading" style={{ marginBottom: showTren ? 12 : 0, display:'flex', alignItems:'center', gap:10 }}>
             <button
               type="button"
               onClick={() => setShowTren(v => !v)}
@@ -796,7 +795,7 @@ export default function OverviewPage() {
               </button>
             )}
           </div>
-          {showTren && <div id="overview-daily-trend" style={{ overflowX:'auto' }}><table id="overview-daily-trend-table" style={{ width:'100%', borderCollapse:'collapse', fontSize:12, minWidth: showDetail ? 1160 : 560 }}>
+          {showTren && <><div className="table-scroll-hint">Geser tabel untuk melihat metrik lainnya.</div><div id="overview-daily-trend" className="overview-table-scroll" tabIndex={0} aria-label="Tabel tren harian, dapat digeser secara horizontal" style={{ overflowX:'auto' }}><table id="overview-daily-trend-table" style={{ width:'100%', borderCollapse:'collapse', fontSize:12, minWidth: showDetail ? 1160 : 560 }}>
             <thead>
               <tr style={{ borderBottom:'2px solid var(--border)' }}>
                 <th style={{ padding:'8px 10px', textAlign:'left', color:'var(--dim)', fontWeight:600, fontSize:10, textTransform:'uppercase', position:'sticky', left:0, background:'var(--card)', zIndex:1 }}>Tanggal</th>
@@ -900,12 +899,12 @@ export default function OverviewPage() {
                 </td>
               </tr>
             </tbody>
-          </table></div>}
+          </table></div></>}
         </div>
       )}
 
       {cm3MonthlyTrend.length > 0 && (
-        <div style={{ background:'var(--card)', border:'1px solid var(--border)', borderRadius:12, padding:'16px 16px 10px', marginBottom:20 }}>
+        <div className="overview-history-section" style={{ background:'var(--card)', border:'1px solid var(--border)', borderRadius:12, padding:'16px 16px 10px', marginBottom:20 }}>
           <div style={{ display:'flex', justifyContent:'space-between', alignItems:'flex-start', gap:12, flexWrap:'wrap', marginBottom:12 }}>
             <div>
               <div style={{ fontSize:15, fontWeight:700 }}>Tren CM3 · 12 Bulan</div>
@@ -921,19 +920,19 @@ export default function OverviewPage() {
           {cm3HistoryData?.error && (
             <div style={{ fontSize:10, color:'var(--yellow)', marginBottom:8 }}>Sebagian data histori belum lengkap: {cm3HistoryData.error}</div>
           )}
-          <div style={{ width:'100%', height:isMobile ? 260 : 300 }}>
+          <div className="overview-history-chart" style={{ width:'100%', height:isMobile ? 260 : 300 }}>
             <ResponsiveContainer>
               <ComposedChart data={cm3MonthlyTrend} margin={{ top:10, right:10, left:4, bottom:2 }} barGap={-31}>
                 <CartesianGrid stroke="var(--border)" strokeDasharray="3 4" vertical={false} />
-                <XAxis dataKey="label" tick={{ fill:'var(--dim)', fontSize:9 }} axisLine={{ stroke:'var(--border)' }} tickLine={false} />
+                <XAxis dataKey="label" interval={isMobile ? 1 : 0} tick={{ fill:'var(--dim)', fontSize:9 }} axisLine={{ stroke:'var(--border)' }} tickLine={false} />
                 <YAxis yAxisId="amount" tickFormatter={(value) => fmtCompact(value)} tick={{ fill:'var(--dim)', fontSize:9 }} axisLine={false} tickLine={false} width={52} />
                 <YAxis yAxisId="margin" orientation="right" tickFormatter={(value) => `${value.toFixed(0)}%`} tick={{ fill:'var(--tone-cyan)', fontSize:9 }} axisLine={false} tickLine={false} width={38} />
                 <Tooltip content={<Cm3HistoryTooltip />} />
                 <ReferenceLine yAxisId="amount" y={0} stroke="var(--border)" />
-                <Bar yAxisId="amount" dataKey="cm3" name="CM3" radius={[4,4,0,0]} barSize={42}>
+                <Bar yAxisId="amount" dataKey="cm3" name="CM3" radius={[4,4,0,0]} barSize={isMobile ? 20 : 42}>
                   {cm3MonthlyTrend.map((row) => <Cell key={row.month} fill={row.cm3 >= 0 ? '#8b5cf6' : '#ef4444'} fillOpacity={row.isPartial ? 0.35 : 0.5} />)}
                 </Bar>
-                <Bar yAxisId="amount" dataKey="netProfit" name="Net Profit After OH" radius={[3,3,0,0]} barSize={20}>
+                <Bar yAxisId="amount" dataKey="netProfit" name="Net Profit After OH" radius={[3,3,0,0]} barSize={isMobile ? 10 : 20}>
                   {cm3MonthlyTrend.map((row) => <Cell key={row.month} fill={row.netProfit >= 0 ? '#6d28d9' : '#ef4444'} fillOpacity={row.isPartial ? 0.65 : 0.95} />)}
                 </Bar>
                 <Line yAxisId="margin" type="monotone" dataKey="margin" name="CM3 margin" stroke="#06b6d4" strokeWidth={2.2} dot={{ r:3, fill:'#06b6d4', stroke:'var(--card)', strokeWidth:1.5 }} activeDot={{ r:5 }} />
@@ -947,9 +946,26 @@ export default function OverviewPage() {
         </div>
       )}
 
-      <div style={{ background:'var(--card)', border:'1px solid var(--border)', borderRadius:12, padding:16, overflowX:'auto' }}>
+      <div className="overview-product-section" style={{ background:'var(--card)', border:'1px solid var(--border)', borderRadius:12, padding:16, overflowX:'auto' }}>
         <div style={{ fontSize:15, fontWeight:700, marginBottom:12 }}>Ringkasan Per Produk</div>
-        <div style={{ overflowX:'auto', WebkitOverflowScrolling:'touch' }}>
+        <div className="overview-product-cards" role="list">
+          {productTable.map(p => (
+            <article key={p.sku} role="listitem" className="overview-product-card">
+              <div className="overview-product-card-header">
+                <span className="overview-product-name"><span aria-hidden="true" style={{ background: getBrandColor(p.sku, activeBrands) || PRODUCT_COLORS[p.sku] || 'var(--dim)' }} />{p.sku}</span>
+                <span className="overview-product-share">{p.sp.toFixed(1)}% penjualan</span>
+              </div>
+              <div className="overview-product-primary"><span>Net Sales</span><strong>{fmtRupiah(p.sales)}</strong></div>
+              <dl className="overview-product-metrics">
+                <div><dt>Net Profit</dt><dd style={{ color:p.nam>=0?'var(--green)':'var(--red)' }}>{fmtRupiah(p.nam)}</dd></div>
+                <div><dt>Margin</dt><dd>{p.gmpR.toFixed(1)}%</dd></div>
+                <div><dt>Mkt Fee</dt><dd>{fmtRupiah(p.adsFee)}</dd></div>
+                <div><dt>Mkt Ratio</dt><dd>{p.mktR.toFixed(1)}%</dd></div>
+              </dl>
+            </article>
+          ))}
+        </div>
+        <div className="overview-product-table" style={{ overflowX:'auto', WebkitOverflowScrolling:'touch' }} tabIndex={0} aria-label="Tabel ringkasan produk, dapat digeser secara horizontal">
         <table style={{ width:'100%', borderCollapse:'collapse', fontSize:12, minWidth:900 }}>
           <thead><tr style={{ borderBottom:'2px solid var(--border)' }}>
             {['SKU','Net Sales','%','COGS','Mkt Fee','MP Fee','Net Profit','NP Margin','Mkt Ratio'].map(h => (

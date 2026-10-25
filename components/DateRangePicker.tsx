@@ -56,8 +56,8 @@ export default function DateRangePicker({ from, to, onChange, earliest, latest, 
   };
 
   return (
-    <div ref={ref} style={{ position: 'relative' }}>
-      <button ref={triggerRef} type="button" aria-haspopup="dialog" aria-expanded={open} aria-controls="date-range-popover" onClick={() => setOpen(!open)} style={{
+    <div ref={ref} className="date-range-picker" style={{ position: 'relative' }}>
+      <button className="date-range-trigger" ref={triggerRef} type="button" aria-haspopup="dialog" aria-expanded={open} aria-controls="date-range-popover" onClick={() => setOpen(!open)} style={{
         display: 'flex', alignItems: 'center', gap: 8,
         padding: '8px 14px', borderRadius: 8,
         border: '1px solid var(--border)', background: 'var(--card)',
@@ -77,7 +77,7 @@ export default function DateRangePicker({ from, to, onChange, earliest, latest, 
           position: 'absolute', top: '100%', right: 0, marginTop: 4, zIndex: 50,
           background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 12,
           padding: 16, minWidth: 280, boxShadow: 'var(--shadow)',
-        }} className="fade-in">
+        }} className="date-range-popover fade-in">
           {/* Presets */}
           <div style={{ marginBottom: 12 }}>
             <div style={{ fontSize: 11, color: 'var(--dim)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 8 }}>
@@ -102,7 +102,7 @@ export default function DateRangePicker({ from, to, onChange, earliest, latest, 
             <div style={{ fontSize: 11, color: 'var(--dim)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 8 }}>
               Custom Range
             </div>
-            <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+            <div className="date-range-inputs" style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
               <input type="date" aria-label="Tanggal mulai" value={from}
                 min={earliest} max={latest}
                 onChange={e => onChange(e.target.value, to)}
