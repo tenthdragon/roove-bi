@@ -33,6 +33,34 @@ import { toneText } from '@/lib/theme-tones';
 const marginColor = (v: number) => v >= 30 ? 'var(--green)' : v >= 0 ? 'var(--yellow)' : 'var(--red)';
 const marginBg = (v: number) => v >= 30 ? 'var(--badge-green-bg)' : v >= 0 ? 'var(--badge-yellow-bg)' : 'var(--badge-red-bg)';
 
+type MoneyValueProps = {
+  value: number;
+  variant?: 'exact' | 'compact' | 'responsive';
+  className?: string;
+};
+
+function MoneyValue({ value, variant = 'responsive', className = '' }: MoneyValueProps) {
+  const exact = fmtRupiah(value);
+  const compact = `Rp ${fmtCompact(value)}`;
+
+  return (
+    <span
+      className={`money-value money-value--${variant}${className ? ` ${className}` : ''}`}
+      title={exact}
+      aria-label={exact}
+    >
+      {variant === 'responsive' ? (
+        <>
+          <span className="money-value__compact" aria-hidden="true">{compact}</span>
+          <span className="money-value__exact" aria-hidden="true">{exact}</span>
+        </>
+      ) : (
+        <span aria-hidden="true">{variant === 'compact' ? compact : exact}</span>
+      )}
+    </span>
+  );
+}
+
 function formatIsoDate(year: number, month: number, day: number) {
   return `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
 }
@@ -588,7 +616,7 @@ export default function OverviewPage() {
   const pctOf = (value: number, base: number) => base > 0 ? `${(value / base * 100).toFixed(1)}%` : '—';
   const TrendValue = ({ value, base, color = 'var(--text)', muted = false, badge = false }: { value: number; base: number; color?: string; muted?: boolean; badge?: boolean }) => (
     <td style={{ padding:'8px 10px', textAlign:'right', fontFamily:'monospace', fontSize:11, color: toneText(color) }}>
-      <div title={fmtRupiah(value)}>Rp {fmtCompact(value)}</div>
+      <div><MoneyValue value={value} variant="compact" /></div>
       <div style={{ fontSize:9, color: muted ? 'var(--text-muted)' : 'var(--dim)', marginTop:2 }}>
         {badge ? (
           <span style={{ padding:'1px 5px', borderRadius:4, fontWeight:700, background: marginBg(base > 0 ? value / base * 100 : 0), color: toneText(marginColor(base > 0 ? value / base * 100 : 0)) }}>
@@ -838,68 +866,66 @@ export default function OverviewPage() {
                 </tr>
                 );
               })}
-              {kpi.chart.length > 2 && (
-                <tr>
-                  <td colSpan={12} style={{ padding:'8px 10px', textAlign:'center', borderBottom:'1px solid var(--bg-deep)' }}>
-                    <button
-                      type="button"
-                      onClick={() => setShowOlderTrendDays(value => !value)}
-                      style={{ background:'none', border:'1px solid var(--border)', borderRadius:6, padding:'5px 10px', cursor:'pointer', fontSize:10, color:'var(--dim)' }}
-                    >
-                      {showOlderTrendDays ? 'Sembunyikan tanggal sebelumnya' : `Tampilkan ${kpi.chart.length - 2} tanggal sebelumnya`}
-                    </button>
-                  </td>
-                </tr>
-              )}
               {/* TOTAL row with % of net sales */}
-              <tr style={{ borderTop:'2px solid var(--border)', fontWeight:700 }}>
+              <tr className="overview-trend-total-row" style={{ borderTop:'2px solid var(--border)', fontWeight:700 }}>
                 <td style={{ padding:'10px 10px', position:'sticky', left:0, background:'var(--card)', zIndex:1, textTransform:'uppercase', fontSize:11, letterSpacing:'0.05em' }}>Total</td>
                 <td style={{ padding:'10px 10px', textAlign:'right' }}>
                   <div style={{ fontFamily:'monospace', fontSize:11, color:'var(--text-secondary)' }}>{kpi.tShipment.toLocaleString('id-ID')}</div>
                 </td>
                 <td style={{ padding:'10px 10px', textAlign:'right' }}>
-                  <div style={{ fontFamily:'monospace', fontSize:11 }}>{fmtRupiah(kpi.ts)}</div>
+                  <div className="overview-trend-total-value"><MoneyValue value={kpi.ts} /></div>
                   <div style={{ fontSize:9, color:'var(--dim)', marginTop:2 }}>100%</div>
                 </td>
                 <td style={{ padding:'10px 10px', textAlign:'right' }}>
-                  <div style={{ fontFamily:'monospace', fontSize:11, color:'var(--dim)' }}>{fmtRupiah(kpi.tCogs)}</div>
+                  <div className="overview-trend-total-value" style={{ color:'var(--dim)' }}><MoneyValue value={kpi.tCogs} /></div>
                   <div style={{ fontSize:9, color:'var(--dim)', marginTop:2 }}>{kpi.ts > 0 ? (kpi.tCogs / kpi.ts * 100).toFixed(1) : 0}%</div>
                 </td>
                 <td style={{ padding:'10px 10px', textAlign:'right' }}>
-                  <div style={{ fontFamily:'monospace', fontSize:11, color:'var(--green)' }}>{fmtRupiah(kpi.tg)}</div>
+                  <div className="overview-trend-total-value" style={{ color:'var(--green)' }}><MoneyValue value={kpi.tg} /></div>
                   <div style={{ fontSize:9, color:'var(--dim)', marginTop:2 }}>{kpi.gpM.toFixed(1)}%</div>
                 </td>
                 <td style={{ padding:'10px 10px', textAlign:'right' }}>
-                  <div style={{ fontFamily:'monospace', fontSize:11, color:'var(--tone-violet)' }}>{fmtRupiah(kpi.tMp)}</div>
+                  <div className="overview-trend-total-value" style={{ color:'var(--tone-violet)' }}><MoneyValue value={kpi.tMp} /></div>
                   <div style={{ fontSize:9, color:'var(--dim)', marginTop:2 }}>{kpi.ts > 0 ? (kpi.tMp / kpi.ts * 100).toFixed(1) : 0}%</div>
                 </td>
                 <td style={{ padding:'10px 10px', textAlign:'right' }}>
-                  <div style={{ fontFamily:'monospace', fontSize:11, color:'var(--tone-sky)' }}>{fmtRupiah(kpi.tShipping)}</div>
+                  <div className="overview-trend-total-value" style={{ color:'var(--tone-sky)' }}><MoneyValue value={kpi.tShipping} /></div>
                   <div style={{ fontSize:9, color:'var(--dim)', marginTop:2 }}>{kpi.ts > 0 ? (kpi.tShipping / kpi.ts * 100).toFixed(1) : 0}%</div>
                 </td>
                 <td style={{ padding:'10px 10px', textAlign:'right' }}>
-                  <div style={{ fontFamily:'monospace', fontSize:11, color:'var(--tone-sky)' }}>{fmtRupiah(kpi.tCm2)}</div>
+                  <div className="overview-trend-total-value" style={{ color:'var(--tone-sky)' }}><MoneyValue value={kpi.tCm2} /></div>
                   <div style={{ fontSize:9, color:'var(--dim)', marginTop:2 }}>{kpi.cm2M.toFixed(1)}%</div>
                 </td>
                 <td style={{ padding:'10px 10px', textAlign:'right' }}>
-                  <div style={{ fontFamily:'monospace', fontSize:11, color:'var(--yellow)' }}>{fmtRupiah(kpi.tAds)}</div>
+                  <div className="overview-trend-total-value" style={{ color:'var(--yellow)' }}><MoneyValue value={kpi.tAds} /></div>
                   <div style={{ fontSize:9, color:'var(--dim)', marginTop:2 }}>{kpi.ts > 0 ? (kpi.tAds / kpi.ts * 100).toFixed(1) : 0}%</div>
                 </td>
                 <td style={{ padding:'10px 10px', textAlign:'right' }}>
-                  <div style={{ fontFamily:'monospace', fontSize:11, color:kpi.tCm3 >= 0 ? 'var(--tone-violet)' : 'var(--red)' }}>{fmtRupiah(kpi.tCm3)}</div>
+                  <div className="overview-trend-total-value" style={{ color:kpi.tCm3 >= 0 ? 'var(--tone-violet)' : 'var(--red)' }}><MoneyValue value={kpi.tCm3} /></div>
                   <div style={{ fontSize:9, marginTop:2 }}><span style={{ padding:'1px 5px', borderRadius:4, fontWeight:700, background: marginBg(kpi.cm3M), color: toneText(marginColor(kpi.cm3M)) }}>{kpi.cm3M.toFixed(1)}%</span></div>
                 </td>
                 <td style={{ padding:'10px 10px', textAlign:'right' }}>
-                  <div style={{ fontFamily:'monospace', fontSize:11, color:'var(--tone-violet)' }}>{fmtRupiah(kpi.tOverhead)}</div>
+                  <div className="overview-trend-total-value" style={{ color:'var(--tone-violet)' }}><MoneyValue value={kpi.tOverhead} /></div>
                   <div style={{ fontSize:9, color:'var(--dim)', marginTop:2 }}>{kpi.ts > 0 ? (kpi.tOverhead / kpi.ts * 100).toFixed(1) : 0}%</div>
                 </td>
                 <td style={{ padding:'10px 10px', textAlign:'right' }}>
-                  <div style={{ fontFamily:'monospace', fontSize:11, color: kpi.tNetProfit >= 0 ? 'var(--green)' : 'var(--red)' }}>{fmtRupiah(kpi.tNetProfit)}</div>
+                  <div className="overview-trend-total-value" style={{ color: kpi.tNetProfit >= 0 ? 'var(--green)' : 'var(--red)' }}><MoneyValue value={kpi.tNetProfit} /></div>
                   <div style={{ fontSize:9, marginTop:2 }}><span style={{ padding:'1px 5px', borderRadius:4, fontWeight:700, background: marginBg(kpi.npM), color: toneText(marginColor(kpi.npM)) }}>{kpi.npM.toFixed(1)}%</span></div>
                 </td>
               </tr>
             </tbody>
-          </table></div></>}
+          </table></div>
+          {kpi.chart.length > 2 && (
+            <div className="overview-trend-more">
+              <button
+                type="button"
+                onClick={() => setShowOlderTrendDays(value => !value)}
+              >
+                {showOlderTrendDays ? 'Sembunyikan tanggal sebelumnya' : `Tampilkan ${kpi.chart.length - 2} tanggal sebelumnya`}
+              </button>
+            </div>
+          )}
+          </>}
         </div>
       )}
 
@@ -948,22 +974,39 @@ export default function OverviewPage() {
 
       <div className="overview-product-section" style={{ background:'var(--card)', border:'1px solid var(--border)', borderRadius:12, padding:16, overflowX:'auto' }}>
         <div style={{ fontSize:15, fontWeight:700, marginBottom:12 }}>Ringkasan Per Produk</div>
-        <div className="overview-product-cards" role="list">
+        <div className="overview-product-cards">
+          <div className="overview-product-mobile-columns" aria-hidden="true">
+            <span>Produk</span>
+            <span>Sales</span>
+            <span>Net Profit</span>
+            <span>Margin</span>
+          </div>
+          <div className="overview-product-rows" role="list">
           {productTable.map(p => (
-            <article key={p.sku} role="listitem" className="overview-product-card">
-              <div className="overview-product-card-header">
-                <span className="overview-product-name"><span aria-hidden="true" style={{ background: getBrandColor(p.sku, activeBrands) || PRODUCT_COLORS[p.sku] || 'var(--dim)' }} />{p.sku}</span>
-                <span className="overview-product-share">{p.sp.toFixed(1)}% penjualan</span>
-              </div>
-              <div className="overview-product-primary"><span>Net Sales</span><strong>{fmtRupiah(p.sales)}</strong></div>
+            <details key={p.sku} role="listitem" className="overview-product-card">
+              <summary className="overview-product-summary">
+                <span className="overview-product-name">
+                  <span aria-hidden="true" style={{ background: getBrandColor(p.sku, activeBrands) || PRODUCT_COLORS[p.sku] || 'var(--dim)' }} />
+                  <span className="overview-product-name-copy">
+                    <strong>{p.sku}</strong>
+                    <small>{p.sp.toFixed(1)}%</small>
+                  </span>
+                </span>
+                <span className="overview-product-mobile-value"><MoneyValue value={p.sales} variant="compact" /></span>
+                <span className="overview-product-mobile-value" style={{ color:p.nam>=0?'var(--green)':'var(--red)' }}><MoneyValue value={p.nam} variant="compact" /></span>
+                <span className={`overview-product-mobile-margin ${p.gmpR < 0 ? 'is-negative' : ''}`}>{p.gmpR.toFixed(1)}%</span>
+              </summary>
               <dl className="overview-product-metrics">
-                <div><dt>Net Profit</dt><dd style={{ color:p.nam>=0?'var(--green)':'var(--red)' }}>{fmtRupiah(p.nam)}</dd></div>
-                <div><dt>Margin</dt><dd>{p.gmpR.toFixed(1)}%</dd></div>
-                <div><dt>Mkt Fee</dt><dd>{fmtRupiah(p.adsFee)}</dd></div>
+                <div><dt>Net Sales lengkap</dt><dd><MoneyValue value={p.sales} variant="exact" /></dd></div>
+                <div><dt>Net Profit lengkap</dt><dd style={{ color:p.nam>=0?'var(--green)':'var(--red)' }}><MoneyValue value={p.nam} variant="exact" /></dd></div>
+                <div><dt>COGS</dt><dd><MoneyValue value={p.cogs} variant="exact" /></dd></div>
+                <div><dt>Mkt Fee</dt><dd><MoneyValue value={p.adsFee} variant="exact" /></dd></div>
+                <div><dt>MP Fee</dt><dd><MoneyValue value={p.mpFee} variant="exact" /></dd></div>
                 <div><dt>Mkt Ratio</dt><dd>{p.mktR.toFixed(1)}%</dd></div>
               </dl>
-            </article>
+            </details>
           ))}
+          </div>
         </div>
         <div className="overview-product-table" style={{ overflowX:'auto', WebkitOverflowScrolling:'touch' }} tabIndex={0} aria-label="Tabel ringkasan produk, dapat digeser secara horizontal">
         <table style={{ width:'100%', borderCollapse:'collapse', fontSize:12, minWidth:900 }}>
