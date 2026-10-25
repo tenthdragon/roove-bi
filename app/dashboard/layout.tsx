@@ -207,7 +207,7 @@ function RefreshViewsButton({
   };
 
   return (
-    <div style={{ position: 'relative' }} ref={detailRef}>
+    <div className="dashboard-refresh-control" style={{ position: 'relative' }} ref={detailRef}>
       <button
         type="button"
         onClick={handleRefresh}
@@ -293,7 +293,7 @@ function WorkspaceSwitcher() {
   if (workspaces.length <= 1) {
     return (
       <div
-        className="desktop-sidebar"
+        className="desktop-sidebar dashboard-workspace-control"
         style={{
           fontSize: 11,
           color: 'var(--text-secondary)',
@@ -311,6 +311,7 @@ function WorkspaceSwitcher() {
 
   return (
     <select
+      className="dashboard-workspace-control"
       aria-label="Pilih workspace"
       value={activeWorkspace.id}
       disabled={switching}
@@ -355,9 +356,22 @@ export default function DashboardLayout({ children }) {
   const mobileMenuPanelRef = useRef<HTMLElement | null>(null);
   const mobileMenuCloseRef = useRef<HTMLButtonElement | null>(null);
   const mainContentRef = useRef<HTMLDivElement | null>(null);
+  const toolbarRef = useRef<HTMLDivElement | null>(null);
   const restoreMobileMenuFocusRef = useRef(false);
   const router = useRouter();
   const pathname = usePathname();
+
+  useEffect(() => {
+    const mobileQuery = window.matchMedia('(max-width: 639px)');
+    const resetToolbarPosition = () => {
+      window.requestAnimationFrame(() => {
+        if (toolbarRef.current) toolbarRef.current.scrollLeft = 0;
+      });
+    };
+    resetToolbarPosition();
+    mobileQuery.addEventListener('change', resetToolbarPosition);
+    return () => mobileQuery.removeEventListener('change', resetToolbarPosition);
+  }, []);
   const supabase = useSupabase();
   const { ready: authReady, hasSession } = useSupabaseSessionReady();
   const currentTab = getCurrentTab(pathname);
@@ -1047,7 +1061,7 @@ export default function DashboardLayout({ children }) {
           minHeight:'100vh',
         }}>
           {/* Top Bar */}
-          <header style={{
+          <header className="dashboard-topbar" style={{
             padding:'10px 16px',
             borderBottom:'1px solid var(--border)',
             display:'flex',
@@ -1061,7 +1075,7 @@ export default function DashboardLayout({ children }) {
             minHeight:49,
             gap:8,
           }}>
-            <div style={{ display:'flex', alignItems:'center', gap:12 }}>
+            <div className="dashboard-topbar-menu" style={{ display:'flex', alignItems:'center', gap:12 }}>
               {/* Hamburger - mobile only */}
               <button ref={mobileMenuTriggerRef} type="button" className="mobile-hamburger" aria-label="Buka navigasi" aria-expanded={mobileMenuOpen} aria-controls="mobile-navigation-dialog" onClick={() => setMobileMenuOpen(true)} style={{
                 display:'none', /* shown via CSS on mobile */
@@ -1074,17 +1088,19 @@ export default function DashboardLayout({ children }) {
                 </svg>
               </button>
             </div>
-            <div style={{ display:'flex', alignItems:'center', gap:8, flexShrink:0 }}>
+            <div ref={toolbarRef} className="dashboard-toolbar" style={{ display:'flex', alignItems:'center', gap:8, flexShrink:0 }}>
               <WorkspaceSwitcher />
-              {canAccessTab(accessRole, 'meta-funnels', permissions) && isWorkspaceModuleEnabled(workspaceBootstrap.activeWorkspace, 'marketing') && isWorkspaceModuleEnabled(workspaceBootstrap.activeWorkspace, 'meta-funnels') && <MetaFunnelNotifications />}
+              {canAccessTab(accessRole, 'meta-funnels', permissions) && isWorkspaceModuleEnabled(workspaceBootstrap.activeWorkspace, 'marketing') && isWorkspaceModuleEnabled(workspaceBootstrap.activeWorkspace, 'meta-funnels') && <div className="dashboard-notifications-control"><MetaFunnelNotifications /></div>}
               {showRefreshButton && (
                 <RefreshViewsButton canSyncSheets={canSyncSheets} canSyncMeta={canSyncMeta} />
               )}
-              {showDatePicker && <HeaderDatePicker />}
-              <ThemeToggle
-                preference={profileThemePreference(profile)}
-                onPreferenceSaved={(themePreference) => setProfile((current: any) => (current ? { ...current, theme_preference: themePreference } : current))}
-              />
+              {showDatePicker && <div className="dashboard-date-control"><HeaderDatePicker /></div>}
+              <div className="dashboard-theme-control">
+                <ThemeToggle
+                  preference={profileThemePreference(profile)}
+                  onPreferenceSaved={(themePreference) => setProfile((current: any) => (current ? { ...current, theme_preference: themePreference } : current))}
+                />
+              </div>
               <div className="desktop-sidebar" style={{ fontSize:11, color:'var(--text-muted)', fontWeight:500 }}>
                 {profile?.full_name || profile?.email}
               </div>

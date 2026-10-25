@@ -124,7 +124,7 @@ export default function ThemeToggle({
   const visibleOptions = accountBacked ? OPTIONS : OPTIONS.filter((option) => option.value !== null);
 
   return (
-    <div ref={rootRef} style={{ position: 'relative' }}>
+    <div ref={rootRef} className="theme-toggle" style={{ position: 'relative' }}>
       <button
         onClick={() => setOpen((value) => !value)}
         title="Pengaturan tema"
@@ -167,6 +167,7 @@ export default function ThemeToggle({
 
       {open && (
         <div
+          className="theme-toggle-menu"
           role="menu"
           aria-label="Tema tampilan"
           style={{

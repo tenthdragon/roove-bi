@@ -52,8 +52,8 @@ export default function CashFlowSection({ netSales, periodStart }: Props) {
   const periodLabel = `${monthNames[m]} ${y}`;
 
   const shell = (children: React.ReactNode) => (
-    <div style={{ background:'var(--card)', border:'1px solid var(--border)', borderRadius:12, overflow:'hidden', marginBottom:16 }}>
-      <div style={{ padding:'14px 20px', borderBottom:'1px solid var(--border)' }}>
+    <div className="cash-flow-section" style={{ background:'var(--card)', border:'1px solid var(--border)', borderRadius:12, overflow:'hidden', marginBottom:16 }}>
+      <div className="cash-flow-heading" style={{ padding:'14px 20px', borderBottom:'1px solid var(--border)' }}>
         <div style={{ fontSize:13, fontWeight:700 }}>Cash Flow Status</div>
         <div style={{ fontSize:11, color:'var(--dim)', marginTop:2 }}>{periodLabel} · Sumber data: Scalev Orders</div>
       </div>
@@ -82,7 +82,7 @@ export default function CashFlowSection({ netSales, periodStart }: Props) {
   );
 
   const Row = ({ label, pctVal, amount, orders, color = 'var(--text-secondary)', indent = false, warn = false }: any) => (
-    <div style={{ padding:`10px 20px 10px ${indent ? 32 : 20}px`, borderBottom:'1px solid var(--bg-deep)', display:'flex', justifyContent:'space-between', alignItems:'center', gap:8 }}>
+    <div className="cash-flow-row" style={{ padding:`10px 20px 10px ${indent ? 32 : 20}px`, borderBottom:'1px solid var(--bg-deep)', display:'flex', justifyContent:'space-between', alignItems:'center', gap:8 }}>
       <span style={{ fontSize:12, color: indent ? 'var(--dim)' : 'var(--text)' }}>
         {label}
         {warn && <span style={{ color:'var(--red)', marginLeft:6 }}>!</span>}
@@ -96,7 +96,7 @@ export default function CashFlowSection({ netSales, periodStart }: Props) {
   );
 
   const SeparatorRow = ({ label, pctVal, amount, orders, color }: any) => (
-    <div style={{ padding:'11px 16px', background:`color-mix(in srgb, ${color} 8%, transparent)`, borderBottom:'1px solid var(--border)', display:'flex', justifyContent:'space-between', alignItems:'center', gap:8 }}>
+    <div className="cash-flow-row cash-flow-total" style={{ padding:'11px 16px', background:`color-mix(in srgb, ${color} 8%, transparent)`, borderBottom:'1px solid var(--border)', display:'flex', justifyContent:'space-between', alignItems:'center', gap:8 }}>
       <span style={{ fontSize:12, fontWeight:700, color: toneText(color) }}>
         {label}
         <span style={{ fontSize:10, fontFamily:'monospace', fontWeight:400, opacity:0.75, marginLeft:6 }}>{pctVal.toFixed(1)}%</span>
@@ -117,10 +117,10 @@ export default function CashFlowSection({ netSales, periodStart }: Props) {
 
   return shell(
     <>
-      <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fit, minmax(min(100%, 360px), 1fr))', borderBottom:'1px solid var(--border)' }}>
+      <div className="cash-flow-grid" style={{ display:'grid', gridTemplateColumns:'repeat(auto-fit, minmax(min(100%, 360px), 1fr))', borderBottom:'1px solid var(--border)' }}>
         {/* Visual summary */}
-        <div style={{ padding:'18px 20px', borderRight:'1px solid var(--border)', display:'flex', alignItems:'center', justifyContent:'center', gap:24, flexWrap:'wrap' }}>
-          <div style={{ position:'relative', width:138, height:138, flex:'0 0 138px' }}>
+        <div className="cash-flow-visual" style={{ padding:'18px 20px', borderRight:'1px solid var(--border)', display:'flex', alignItems:'center', justifyContent:'center', gap:24, flexWrap:'wrap' }}>
+          <div className="cash-flow-donut" style={{ position:'relative', width:138, height:138, flex:'0 0 138px' }}>
             <svg width="138" height="138" viewBox="0 0 120 120" role="img" aria-label={`Total cash masuk ${totalCashInPct.toFixed(1)} persen dari net sales`}>
               <circle cx="60" cy="60" r="46" fill="none" stroke="var(--bg-deep)" strokeWidth="11" />
               <circle cx="60" cy="60" r="46" fill="none" stroke="#10b981" strokeWidth="11" strokeLinecap="butt"
@@ -133,7 +133,7 @@ export default function CashFlowSection({ netSales, periodStart }: Props) {
               <div style={{ fontSize:9, color:'var(--dim)', marginTop:2 }}>cash masuk</div>
             </div>
           </div>
-          <div style={{ minWidth:190, flex:'1 1 190px', maxWidth:300 }}>
+          <div className="cash-flow-bars" style={{ minWidth:190, flex:'1 1 190px', maxWidth:300 }}>
             <div style={{ fontSize:10, color:'var(--dim)', textTransform:'uppercase', letterSpacing:'.06em', marginBottom:7 }}>Terhadap net sales</div>
             {[
               { label:'Received', value:receivedPct, color:'#10b981' },
@@ -156,7 +156,7 @@ export default function CashFlowSection({ netSales, periodStart }: Props) {
         </div>
 
         {/* Current status summary */}
-        <div style={{ minWidth:0, alignSelf:'stretch' }}>
+        <div className="cash-flow-summary" style={{ minWidth:0, alignSelf:'stretch' }}>
           <Row label="Received (bulan ini)" pctVal={receivedPct} amount={data.cashReceived} orders={data.cashReceivedOrders} indent />
           <Row label="Spill Over (bulan lalu)" pctVal={spillOverPct} amount={data.spillOver} orders={data.spillOverOrders} indent />
           <SeparatorRow label="Total Cash Masuk" pctVal={totalCashInPct} amount={totalCashIn} orders={data.cashReceivedOrders + data.spillOverOrders} color="#10b981" />
@@ -167,7 +167,7 @@ export default function CashFlowSection({ netSales, periodStart }: Props) {
 
       {/* Channel breakdown collapsible */}
       {activeChannels.length > 0 && (
-        <div style={{ padding:'10px 20px' }}>
+        <div className="cash-flow-channels" style={{ padding:'10px 20px' }}>
           <button
             type="button"
             onClick={() => setChannelOpen(!channelOpen)}
