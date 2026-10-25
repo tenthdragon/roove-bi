@@ -261,6 +261,16 @@ body {
 }
 
 .dashboard-content { box-sizing: border-box; min-width: 0; }
+.date-range-label--compact,
+.date-range-label--micro,
+.dashboard-mobile-actions-trigger,
+.dashboard-mobile-action-copy { display: none; }
+.dashboard-mobile-actions,
+.dashboard-mobile-actions-menu,
+.dashboard-mobile-action-row { display: contents; }
+.dashboard-refresh-control { order: 3; }
+.dashboard-date-control { order: 4; }
+.dashboard-theme-control { order: 5; }
 .overview-kpi-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 .overview-product-cards { display: none; }
 .table-scroll-hint { display: none; }
@@ -308,30 +318,141 @@ body {
 
   .dashboard-topbar {
     padding-inline: max(6px, env(safe-area-inset-left)) max(6px, env(safe-area-inset-right)) !important;
-    align-items: flex-start !important;
+    align-items: center !important;
+    min-height: 60px;
   }
 
   .dashboard-topbar-menu { gap: 0 !important; }
+  .mobile-hamburger {
+    flex: 0 0 44px;
+    padding: 0 !important;
+    border: 1px solid var(--border) !important;
+    border-radius: 8px;
+    background: var(--card) !important;
+  }
+  .mobile-hamburger:hover { background: var(--bg-deep) !important; color: var(--text) !important; }
+  .mobile-hamburger:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
   .dashboard-toolbar {
-    gap: 6px !important;
-    flex-wrap: wrap;
+    gap: 4px !important;
+    width: 100%;
+    flex-wrap: nowrap;
     overflow-x: visible;
     scroll-snap-type: none;
   }
-  .dashboard-date-control { order: -2; }
-  .dashboard-theme-control { order: -1; }
-  .dashboard-workspace-control { max-width: 132px !important; }
-
-  .date-range-trigger {
-    max-width: 184px;
-    padding-inline: 10px !important;
+  .dashboard-date-control {
+    order: 1;
+    flex: 1.2 1 0;
+    min-width: 0;
+  }
+  .dashboard-date-control .date-range-picker,
+  .dashboard-date-control .date-range-trigger { width: 100%; }
+  .dashboard-workspace-control {
+    order: 2;
+    flex: 1 1 0;
+    width: auto;
+    min-width: 0;
+    max-width: none !important;
+    padding-inline: 8px 20px !important;
     overflow: hidden;
     text-overflow: ellipsis;
   }
+  .dashboard-notifications-control {
+    order: 3;
+    flex: 0 0 44px;
+  }
+  .dashboard-mobile-actions {
+    position: relative;
+    display: block;
+    order: 4;
+    flex: 0 0 44px;
+  }
+  .dashboard-mobile-actions-trigger {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 44px;
+    height: 44px;
+    padding: 0;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: var(--card);
+    color: var(--text-secondary);
+    cursor: pointer;
+  }
+  .dashboard-mobile-actions-trigger:hover,
+  .dashboard-mobile-actions.is-open .dashboard-mobile-actions-trigger { background: var(--bg-deep); color: var(--text); }
+  .dashboard-mobile-actions-trigger:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .dashboard-mobile-actions-menu {
+    display: none;
+    position: fixed;
+    top: calc(60px + env(safe-area-inset-top));
+    right: max(8px, env(safe-area-inset-right));
+    width: min(264px, calc(100vw - 16px));
+    padding: 6px;
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    background: var(--card);
+    box-shadow: var(--shadow);
+    z-index: 70;
+  }
+  .dashboard-mobile-actions.is-open .dashboard-mobile-actions-menu { display: grid; }
+  .dashboard-mobile-action-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    min-height: 56px;
+    padding: 6px 8px;
+    border-radius: 8px;
+  }
+  .dashboard-mobile-action-row + .dashboard-mobile-action-row { border-top: 1px solid var(--border); border-radius: 0 0 8px 8px; }
+  .dashboard-mobile-action-copy { display: grid; min-width: 0; gap: 2px; }
+  .dashboard-mobile-action-copy strong { color: var(--text); font-size: 12px; font-weight: 650; }
+  .dashboard-mobile-action-copy small { color: var(--text-muted); font-size: 10px; line-height: 1.35; }
+  .dashboard-mobile-actions-menu .dashboard-refresh-control,
+  .dashboard-mobile-actions-menu .dashboard-theme-control { order: initial; flex: 0 0 auto; }
+  .dashboard-mobile-actions-menu .dashboard-refresh-control > button,
+  .dashboard-mobile-actions-menu .dashboard-theme-control .theme-toggle > button { width: 44px !important; height: 44px !important; }
+
+  .meta-funnel-notifications {
+    position: relative;
+    width: 44px;
+    height: 44px;
+    padding: 0 !important;
+  }
+  .meta-funnel-notifications-count {
+    position: absolute;
+    top: 2px;
+    right: 2px;
+    display: grid;
+    place-items: center;
+    min-width: 16px;
+    height: 16px;
+    padding-inline: 2px;
+    border: 2px solid var(--header-bg);
+    border-radius: 999px;
+    background: var(--red);
+    color: #fff;
+    font-size: 8px;
+    font-weight: 800;
+    line-height: 1;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .date-range-trigger {
+    max-width: none;
+    min-width: 0;
+    padding-inline: 8px !important;
+    gap: 6px !important;
+    overflow: hidden;
+  }
+  .date-range-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+  .date-range-label--full { display: none; }
+  .date-range-label--compact { display: inline; }
 
   .date-range-popover {
     position: fixed !important;
-    inset: 112px max(12px, env(safe-area-inset-right)) auto max(12px, env(safe-area-inset-left)) !important;
+    inset: calc(60px + env(safe-area-inset-top)) max(12px, env(safe-area-inset-right)) auto max(12px, env(safe-area-inset-left)) !important;
     width: auto !important;
     min-width: 0 !important;
     max-height: calc(100dvh - 128px);
@@ -344,7 +465,7 @@ body {
 
   .theme-toggle-menu {
     position: fixed !important;
-    inset: 112px max(12px, env(safe-area-inset-right)) auto max(12px, env(safe-area-inset-left)) !important;
+    inset: calc(60px + env(safe-area-inset-top)) max(12px, env(safe-area-inset-right)) auto max(12px, env(safe-area-inset-left)) !important;
     width: auto !important;
     max-height: calc(100dvh - 128px);
     overflow-y: auto;
@@ -505,6 +626,16 @@ body {
   .cash-flow-total { align-items: center !important; }
   .cash-flow-channels { padding: 10px 14px !important; }
   .cash-flow-channels button { min-height: 44px; }
+}
+
+@media (max-width: 359px) {
+  .dashboard-workspace-control {
+    padding-inline: 7px 18px !important;
+  }
+  .date-range-trigger { gap: 0 !important; }
+  .date-range-icon,
+  .date-range-label--compact { display: none; }
+  .date-range-label--micro { display: inline; }
 }
 
 /* Most phones can scan the six profitability KPIs as a compact 2 × 3 matrix.

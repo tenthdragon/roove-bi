@@ -22,6 +22,6 @@ export default function MetaFunnelNotifications() {
   }, [activeWorkspace.id]);
   return <Link className="meta-funnel-notifications" href="/dashboard/meta-funnels/notifications" title={`${count} notifikasi funnel belum dibaca`} aria-label={`${count} notifikasi funnel belum dibaca`}
     style={{ display: 'inline-flex', alignItems: 'center', gap: 5, border: '1px solid var(--border)', borderRadius: 8, padding: '8px 10px', color: count ? 'var(--red)' : 'var(--dim)', fontSize: 11 }}>
-    <Bell size={14} />{count > 0 && <span>{count > 99 ? '99+' : count}</span>}
+    <Bell size={14} aria-hidden="true" />{count > 0 && <span className="meta-funnel-notifications-count" aria-hidden="true">{count > 99 ? '99+' : count}</span>}
   </Link>;
 }
