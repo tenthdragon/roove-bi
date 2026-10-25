@@ -264,6 +264,38 @@ body {
 .overview-kpi-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 .overview-product-cards { display: none; }
 .table-scroll-hint { display: none; }
+.money-value {
+  display: inline-flex;
+  align-items: baseline;
+  max-width: 100%;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+.money-value__compact { display: none; }
+.overview-trend-total-value {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.overview-trend-more {
+  display: flex;
+  justify-content: center;
+  margin-top: 10px;
+}
+.overview-trend-more button {
+  min-height: 34px;
+  padding: 7px 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: transparent;
+  color: var(--dim);
+  cursor: pointer;
+  font: inherit;
+  font-size: 10px;
+}
+.overview-trend-more button:hover { background: var(--bg-deep); color: var(--text); }
+.overview-trend-more button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 
 @media (min-width: 640px) and (max-width: 1099px) {
   .overview-kpi-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
@@ -344,30 +376,116 @@ body {
     -webkit-overflow-scrolling: touch;
   }
 
+  .money-value--responsive .money-value__compact { display: inline; }
+  .money-value--responsive .money-value__exact { display: none; }
+  .overview-trend-total-value { font-size: 11px; }
+  .overview-trend-more button { min-height: 44px; }
+
   .overview-history-chart { height: 280px !important; }
 
   .overview-product-section { overflow: visible !important; }
   .overview-product-table { display: none; }
-  .overview-product-cards { display: grid; gap: 9px; }
-  .overview-product-card {
-    padding: 13px;
+  .overview-product-cards {
+    display: grid;
+    gap: 0;
+    overflow: hidden;
     border: 1px solid var(--border);
     border-radius: 12px;
     background: var(--bg-deep);
   }
-  .overview-product-card-header,
-  .overview-product-primary { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
-  .overview-product-card-header { margin-bottom: 11px; }
-  .overview-product-name { display: inline-flex; align-items: center; min-width: 0; font-size: 13px; font-weight: 700; }
-  .overview-product-name > span { width: 8px; height: 8px; border-radius: 2px; margin-right: 8px; flex: 0 0 auto; }
-  .overview-product-share { color: var(--text-muted); font-size: 10px; white-space: nowrap; }
-  .overview-product-primary { padding-bottom: 11px; border-bottom: 1px solid var(--border); }
-  .overview-product-primary span { color: var(--text-secondary); font-size: 11px; }
-  .overview-product-primary strong { font-family: 'JetBrains Mono', monospace; font-size: 14px; }
-  .overview-product-metrics { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px 14px; margin: 11px 0 0; }
-  .overview-product-metrics div { min-width: 0; }
+  .overview-product-mobile-columns {
+    display: grid;
+    grid-template-columns: 1.1fr 0.9fr 0.95fr 0.68fr;
+    gap: 6px;
+    align-items: end;
+    padding: 9px 20px 8px 10px;
+    border-bottom: 1px solid var(--border);
+    color: var(--text-muted);
+    font-size: 9px;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+  }
+  .overview-product-mobile-columns span:not(:first-child) { text-align: right; }
+  .overview-product-card {
+    min-width: 0;
+    border: 0;
+    border-radius: 0;
+    background: transparent;
+  }
+  .overview-product-card:not(:last-child) { border-bottom: 1px solid var(--border); }
+  .overview-product-summary {
+    position: relative;
+    display: grid;
+    grid-template-columns: 1.1fr 0.9fr 0.95fr 0.68fr;
+    gap: 6px;
+    align-items: center;
+    min-height: 58px;
+    padding: 9px 20px 9px 10px;
+    cursor: pointer;
+    list-style: none;
+  }
+  .overview-product-summary::-webkit-details-marker { display: none; }
+  .overview-product-summary::after {
+    content: '';
+    position: absolute;
+    right: 8px;
+    top: 50%;
+    width: 6px;
+    height: 6px;
+    border-right: 1.5px solid var(--text-muted);
+    border-bottom: 1.5px solid var(--text-muted);
+    transform: translateY(-65%) rotate(45deg);
+    transition: transform 160ms ease-out;
+  }
+  .overview-product-card[open] > .overview-product-summary::after { transform: translateY(-35%) rotate(225deg); }
+  .overview-product-summary:hover,
+  .overview-product-card[open] > .overview-product-summary { background: var(--card); }
+  .overview-product-summary:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+  .overview-product-name { display: inline-flex; align-items: center; min-width: 0; font-size: 12px; font-weight: 700; }
+  .overview-product-name > span[aria-hidden="true"] { width: 8px; height: 8px; border-radius: 2px; margin-right: 8px; flex: 0 0 auto; }
+  .overview-product-name-copy { display: grid; min-width: 0; gap: 2px; }
+  .overview-product-name-copy strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .overview-product-name-copy small { color: var(--text-muted); font-size: 9px; font-weight: 500; }
+  .overview-product-mobile-value,
+  .overview-product-mobile-margin {
+    min-width: 0;
+    text-align: right;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10px;
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+  }
+  .overview-product-mobile-margin { padding-right: 2px; color: var(--text); }
+  .overview-product-mobile-margin.is-negative { color: var(--red); }
+  .overview-product-metrics {
+    display: grid;
+    gap: 0;
+    margin: 0;
+    padding: 6px 10px 10px 26px;
+    border-top: 1px solid var(--border);
+    background: var(--card);
+  }
+  .overview-product-metrics div {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 12px;
+    min-width: 0;
+    padding: 6px 0;
+  }
+  .overview-product-metrics div:not(:last-child) { border-bottom: 1px solid var(--border); }
   .overview-product-metrics dt { color: var(--text-muted); font-size: 10px; }
-  .overview-product-metrics dd { margin: 3px 0 0; color: var(--text); font-family: 'JetBrains Mono', monospace; font-size: 11px; font-weight: 700; }
+  .overview-product-metrics dd {
+    margin: 0;
+    color: var(--text);
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10px;
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+  }
 
   .cash-flow-heading { padding: 13px 14px !important; }
   .cash-flow-grid { grid-template-columns: minmax(0, 1fr) !important; }
