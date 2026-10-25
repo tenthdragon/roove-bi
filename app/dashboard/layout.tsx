@@ -350,11 +350,15 @@ export default function DashboardLayout({ children }) {
   const [accessError, setAccessError] = useState('');
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const [mobileActionsOpen, setMobileActionsOpen] = useState(false);
   const [expandedMenus, setExpandedMenus] = useState<Record<string, boolean>>({});
   const overlayRef = useRef(null);
   const mobileMenuTriggerRef = useRef<HTMLButtonElement | null>(null);
   const mobileMenuPanelRef = useRef<HTMLElement | null>(null);
   const mobileMenuCloseRef = useRef<HTMLButtonElement | null>(null);
+  const mobileActionsRef = useRef<HTMLDivElement | null>(null);
+  const mobileActionsTriggerRef = useRef<HTMLButtonElement | null>(null);
+  const mobileActionsMenuRef = useRef<HTMLDivElement | null>(null);
   const mainContentRef = useRef<HTMLDivElement | null>(null);
   const restoreMobileMenuFocusRef = useRef(false);
   const router = useRouter();
@@ -553,7 +557,37 @@ export default function DashboardLayout({ children }) {
   useEffect(() => {
     restoreMobileMenuFocusRef.current = false;
     setMobileMenuOpen(false);
+    setMobileActionsOpen(false);
   }, [pathname]);
+
+  useEffect(() => {
+    if (!mobileActionsOpen) return;
+
+    const handlePointerDown = (event: MouseEvent) => {
+      if (!mobileActionsRef.current?.contains(event.target as Node)) {
+        setMobileActionsOpen(false);
+      }
+    };
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape') return;
+      event.preventDefault();
+      setMobileActionsOpen(false);
+      mobileActionsTriggerRef.current?.focus();
+    };
+
+    document.addEventListener('mousedown', handlePointerDown);
+    document.addEventListener('keydown', handleKeyDown);
+    window.requestAnimationFrame(() => {
+      mobileActionsMenuRef.current
+        ?.querySelector<HTMLButtonElement>('button:not([disabled])')
+        ?.focus();
+    });
+
+    return () => {
+      document.removeEventListener('mousedown', handlePointerDown);
+      document.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [mobileActionsOpen]);
 
   // Treat the mobile navigation as a modal surface: contain focus, support
   // Escape, hide the background from assistive technology, and restore focus.
@@ -1076,17 +1110,54 @@ export default function DashboardLayout({ children }) {
               </button>
             </div>
             <div className="dashboard-toolbar" style={{ display:'flex', alignItems:'center', gap:8, flexShrink:0 }}>
+              {showDatePicker && <div className="dashboard-date-control"><HeaderDatePicker /></div>}
               <WorkspaceSwitcher />
               {canAccessTab(accessRole, 'meta-funnels', permissions) && isWorkspaceModuleEnabled(workspaceBootstrap.activeWorkspace, 'marketing') && isWorkspaceModuleEnabled(workspaceBootstrap.activeWorkspace, 'meta-funnels') && <div className="dashboard-notifications-control"><MetaFunnelNotifications /></div>}
-              {showRefreshButton && (
-                <RefreshViewsButton canSyncSheets={canSyncSheets} canSyncMeta={canSyncMeta} />
-              )}
-              {showDatePicker && <div className="dashboard-date-control"><HeaderDatePicker /></div>}
-              <div className="dashboard-theme-control">
-                <ThemeToggle
-                  preference={profileThemePreference(profile)}
-                  onPreferenceSaved={(themePreference) => setProfile((current: any) => (current ? { ...current, theme_preference: themePreference } : current))}
-                />
+              <div ref={mobileActionsRef} className={`dashboard-mobile-actions${mobileActionsOpen ? ' is-open' : ''}`}>
+                <button
+                  ref={mobileActionsTriggerRef}
+                  type="button"
+                  className="dashboard-mobile-actions-trigger"
+                  aria-label="Aksi lainnya"
+                  aria-expanded={mobileActionsOpen}
+                  aria-controls="dashboard-mobile-actions-menu"
+                  onClick={() => setMobileActionsOpen((open) => !open)}
+                >
+                  <svg aria-hidden="true" width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
+                    <circle cx="5" cy="12" r="1.7" />
+                    <circle cx="12" cy="12" r="1.7" />
+                    <circle cx="19" cy="12" r="1.7" />
+                  </svg>
+                </button>
+                <div
+                  id="dashboard-mobile-actions-menu"
+                  ref={mobileActionsMenuRef}
+                  className="dashboard-mobile-actions-menu"
+                  role="group"
+                  aria-label="Aksi lainnya"
+                >
+                  {showRefreshButton && (
+                    <div className="dashboard-mobile-action-row">
+                      <span className="dashboard-mobile-action-copy">
+                        <strong>Sinkronkan data</strong>
+                        <small>Google Sheets dan Meta Ads</small>
+                      </span>
+                      <RefreshViewsButton canSyncSheets={canSyncSheets} canSyncMeta={canSyncMeta} />
+                    </div>
+                  )}
+                  <div className="dashboard-mobile-action-row">
+                    <span className="dashboard-mobile-action-copy">
+                      <strong>Tema tampilan</strong>
+                      <small>Light, dark, atau default aplikasi</small>
+                    </span>
+                    <div className="dashboard-theme-control">
+                      <ThemeToggle
+                        preference={profileThemePreference(profile)}
+                        onPreferenceSaved={(themePreference) => setProfile((current: any) => (current ? { ...current, theme_preference: themePreference } : current))}
+                      />
+                    </div>
+                  </div>
+                </div>
               </div>
               <div className="desktop-sidebar" style={{ fontSize:11, color:'var(--text-muted)', fontWeight:500 }}>
                 {profile?.full_name || profile?.email}
