@@ -957,7 +957,7 @@ export default function OverviewPage() {
               </div>
               <div className="overview-product-primary"><span>Net Sales</span><strong>{fmtRupiah(p.sales)}</strong></div>
               <dl className="overview-product-metrics">
-                <div><dt>After OH</dt><dd style={{ color:p.nam>=0?'var(--green)':'var(--red)' }}>{fmtRupiah(p.nam)}</dd></div>
+                <div><dt>Net Profit</dt><dd style={{ color:p.nam>=0?'var(--green)':'var(--red)' }}>{fmtRupiah(p.nam)}</dd></div>
                 <div><dt>Margin</dt><dd>{p.gmpR.toFixed(1)}%</dd></div>
                 <div><dt>Mkt Fee</dt><dd>{fmtRupiah(p.adsFee)}</dd></div>
                 <div><dt>Mkt Ratio</dt><dd>{p.mktR.toFixed(1)}%</dd></div>

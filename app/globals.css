@@ -302,7 +302,7 @@ body {
     inset: 112px max(12px, env(safe-area-inset-right)) auto max(12px, env(safe-area-inset-left)) !important;
     width: auto !important;
     min-width: 0 !important;
-    max-height: calc(100dvh - 82px);
+    max-height: calc(100dvh - 128px);
     overflow-y: auto;
   }
 
@@ -314,7 +314,7 @@ body {
     position: fixed !important;
     inset: 112px max(12px, env(safe-area-inset-right)) auto max(12px, env(safe-area-inset-left)) !important;
     width: auto !important;
-    max-height: calc(100dvh - 82px);
+    max-height: calc(100dvh - 128px);
     overflow-y: auto;
   }
 
