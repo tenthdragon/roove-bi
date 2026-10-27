@@ -11,12 +11,14 @@ import {
 } from '@/lib/manual-marketplace-ad-spend-actions';
 import {
   MANUAL_MARKETPLACE_LABELS,
+  selectActiveSheetFallbackRows,
   type ManualMarketplacePlatform,
 } from '@/lib/manual-marketplace-ad-spend';
 import styles from './page.module.css';
 
 type PageData = Awaited<ReturnType<typeof getManualMarketplaceSpendPage>>;
 type Entry = PageData['entries'][number];
+type SheetFallback = PageData['fallbackRows'][number];
 type Draft = {
   id: number | null;
   version: number | null;
@@ -117,6 +119,19 @@ export default function ManualAdSpendPage() {
     document.getElementById(`spend-form-${entry.platform}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' });
   }
 
+  function startReplace(platform: ManualMarketplacePlatform, fallback: SheetFallback) {
+    updateDraft(platform, {
+      id: null,
+      version: null,
+      date: fallback.date,
+      brandId: String(fallback.brand_id),
+      amount: '',
+      note: '',
+    });
+    setMessage('Isi biaya aktual untuk menggantikan angka spreadsheet pada tanggal dan brand ini.');
+    document.getElementById(`spend-form-${platform}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  }
+
   async function save(platform: ManualMarketplacePlatform) {
     if (!data || !data.canInput) return;
     const draft = draftFor(platform);
@@ -139,7 +154,7 @@ export default function ManualAdSpendPage() {
       });
       invalidateAll();
       setDrafts((current) => ({ ...current, [platform]: freshDraft(month, today) }));
-      setMessage(`Input ${MANUAL_MARKETPLACE_LABELS[platform]} tersimpan dan MKT Fee diperbarui.`);
+      setMessage(`Input ${MANUAL_MARKETPLACE_LABELS[platform]} tersimpan. Nilai ini sekarang dipakai untuk MKT Fee.`);
       await load();
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : 'Gagal menyimpan input.');
@@ -148,12 +163,12 @@ export default function ManualAdSpendPage() {
 
   async function remove(entry: Entry) {
     if (!data || !data.canInput || entry.created_by !== data.viewerId) return;
-    if (!window.confirm(`Hapus input ${MANUAL_MARKETPLACE_LABELS[entry.platform]} ${brands.get(entry.brand_id) || ''} pada ${formatDate(entry.spend_date)}? Riwayat penghapusan tetap tersimpan.`)) return;
+    if (!window.confirm(`Hapus input ${MANUAL_MARKETPLACE_LABELS[entry.platform]} ${brands.get(entry.brand_id) || ''} pada ${formatDate(entry.spend_date)}? Jika tersedia, angka spreadsheet akan kembali dipakai. Riwayat penghapusan tetap tersimpan.`)) return;
     setBusyPlatform(entry.platform); setError(''); setMessage('');
     try {
       await deleteManualMarketplaceSpend({ workspaceId: data.workspaceId, id: entry.id, version: entry.version });
       invalidateAll();
-      setMessage('Input dihapus. Perubahan tercatat di riwayat dan MKT Fee diperbarui.');
+      setMessage('Input dihapus. Jika ada, angka spreadsheet kembali dipakai untuk MKT Fee.');
       await load();
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : 'Gagal menghapus input.');
@@ -172,24 +187,35 @@ export default function ManualAdSpendPage() {
         </label>
       </header>
 
-      {data && <p className={styles.cutover}>Input manual berlaku sejak {formatDate(data.startsOn)}. Tanggal yang belum diisi tidak memiliki biaya Shopee/TikTok dari sumber lama.</p>}
+      {data && <p className={styles.cutover}>Sejak {formatDate(data.startsOn)}, input advertiser menjadi sumber utama. Jika belum ada input untuk tanggal, brand, dan platform tertentu, MKT Fee memakai angka Google Sheet yang tersedia.</p>}
       {error && <div role="alert" className={styles.error}>{error} <button type="button" onClick={() => void load()}>Muat ulang</button></div>}
       {message && <div role="status" className={styles.success}>{message}</div>}
       {loading && !data && <div className={styles.state}>Memuat catatan biaya iklan…</div>}
 
       {data?.platforms.map((platform) => {
         const entries = data.entries.filter((entry) => entry.platform === platform);
+        const fallbackRows = selectActiveSheetFallbackRows(entries,
+          data.fallbackRows.filter((row) => row.platform === platform));
+        const rows: Array<{ kind: 'manual'; entry: Entry } | { kind: 'sheet'; fallback: SheetFallback }> = [
+          ...entries.map((entry) => ({ kind: 'manual' as const, entry })),
+          ...fallbackRows.map((fallback) => ({ kind: 'sheet' as const, fallback })),
+        ].sort((left, right) => {
+          const leftDate = left.kind === 'manual' ? left.entry.spend_date : left.fallback.date;
+          const rightDate = right.kind === 'manual' ? right.entry.spend_date : right.fallback.date;
+          return rightDate.localeCompare(leftDate);
+        });
         const draft = draftFor(platform);
         const busy = busyPlatform === platform;
-        const total = entries.reduce((sum, entry) => sum + Number(entry.amount), 0);
+        const total = entries.reduce((sum, entry) => sum + Number(entry.amount), 0)
+          + fallbackRows.reduce((sum, row) => sum + Number(row.amount), 0);
         return (
           <section key={platform} className={styles.section} aria-labelledby={`section-${platform}`}>
             <div className={styles.sectionHeader}>
               <div>
                 <h2 id={`section-${platform}`}>{MANUAL_MARKETPLACE_LABELS[platform]}</h2>
-                <p>{entries.length} catatan pada bulan ini</p>
+                <p>{entries.length} input manual · {fallbackRows.length} dari spreadsheet</p>
               </div>
-              <div className={styles.total}><span>Total tercatat</span><strong>{fmtRupiah(total)}</strong></div>
+              <div className={styles.total}><span>Total dipakai di MKT Fee</span><strong>{fmtRupiah(total)}</strong></div>
             </div>
 
             {data.canInput && <form id={`spend-form-${platform}`} className={styles.form} onSubmit={(event) => { event.preventDefault(); void save(platform); }}>
@@ -221,15 +247,18 @@ export default function ManualAdSpendPage() {
               </div>
             </form>}
 
-            {entries.length === 0 ? <div className={styles.empty}>Belum ada input {MANUAL_MARKETPLACE_LABELS[platform]} untuk bulan ini.</div> : (
+            {rows.length === 0 ? <div className={styles.empty}>Belum ada input atau data spreadsheet {MANUAL_MARKETPLACE_LABELS[platform]} untuk bulan ini.</div> : (
               <div className={styles.tableWrap} tabIndex={0} aria-label={`Daftar input ${MANUAL_MARKETPLACE_LABELS[platform]}, dapat digeser secara horizontal`}>
                 <table>
-                  <thead><tr><th>Tanggal</th><th>Brand</th><th>Spend</th><th>Catatan</th><th>Pengisi</th><th>Diperbarui</th><th>Aksi</th></tr></thead>
-                  <tbody>{entries.map((entry) => (
-                    <tr key={entry.id}>
+                  <thead><tr><th>Tanggal</th><th>Brand</th><th>Spend</th><th>Sumber</th><th>Catatan</th><th>Pengisi</th><th>Diperbarui</th><th>Aksi</th></tr></thead>
+                  <tbody>{rows.map((row) => {
+                    if (row.kind === 'manual') {
+                      const entry = row.entry;
+                      return <tr key={`manual-${entry.id}`}>
                       <td>{formatDate(entry.spend_date)}</td>
                       <td>{brands.get(entry.brand_id) || `Brand #${entry.brand_id}`}</td>
                       <td className={styles.amount}>{fmtRupiah(Number(entry.amount))}</td>
+                      <td><span className={styles.manualSource}>Input manual</span></td>
                       <td>{entry.note || '—'}</td>
                       <td>{entry.created_by === data.viewerId ? 'Anda' : data.actorNames[entry.created_by] || 'Advertiser lain'}</td>
                       <td>{formatTimestamp(entry.updated_at)}</td>
@@ -237,8 +266,20 @@ export default function ManualAdSpendPage() {
                         <button type="button" disabled={busy} onClick={() => startEdit(entry)}>Edit</button>
                         <button type="button" disabled={busy} onClick={() => void remove(entry)}>Hapus</button>
                       </div> : '—'}</td>
-                    </tr>
-                  ))}</tbody>
+                    </tr>;
+                    }
+                    return <tr key={`sheet-${row.fallback.date}-${row.fallback.brand_id}`}>
+                      <td>{formatDate(row.fallback.date)}</td>
+                      <td>{brands.get(row.fallback.brand_id) || `Brand #${row.fallback.brand_id}`}</td>
+                      <td className={styles.amount}>{fmtRupiah(Number(row.fallback.amount))}</td>
+                      <td><span className={styles.sheetSource}>Spreadsheet</span></td>
+                      <td>Dipakai sampai ada input manual</td>
+                      <td>—</td><td>—</td>
+                      <td>{data.canInput ? <div className={styles.rowActions}>
+                        <button type="button" disabled={busy} onClick={() => startReplace(platform, row.fallback)}>Ganti dengan input</button>
+                      </div> : '—'}</td>
+                    </tr>;
+                  })}</tbody>
                 </table>
               </div>
             )}

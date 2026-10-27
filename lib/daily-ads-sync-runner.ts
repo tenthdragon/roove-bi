@@ -1,8 +1,6 @@
 import { parseGoogleSheet } from './google-sheets';
 import { createServiceSupabase } from './service-supabase';
 import { requireExplicitWorkspaceId } from './workspace-scope';
-import { getManualMarketplaceCutover } from './manual-marketplace-cutover';
-import { isLegacyMarketplaceSpendAfterCutover } from './manual-marketplace-ad-spend';
 
 type DailyAdsPeriod = {
   month: number;
@@ -148,6 +146,15 @@ async function deleteExistingGoogleSheetRows(
       if (error) {
         throw new Error(`Delete daily_ads_spend existing ad accounts: ${error.message}`);
       }
+      const fallback = await svc
+        .from('manual_marketplace_sheet_fallback')
+        .delete()
+        .eq('workspace_id', workspaceId)
+        .in('date', dateBatch)
+        .in('ad_account', accountBatch);
+      if (fallback.error) {
+        throw new Error(`Delete marketplace spreadsheet fallback accounts: ${fallback.error.message}`);
+      }
     }
   }
 
@@ -167,6 +174,17 @@ async function deleteExistingGoogleSheetRows(
       if (error) {
         throw new Error(`Delete daily_ads_spend blank-account scope: ${error.message}`);
       }
+      const fallback = await svc
+        .from('manual_marketplace_sheet_fallback')
+        .delete()
+        .eq('workspace_id', workspaceId)
+        .in('date', dateBatch)
+        .eq('ad_account', '')
+        .eq('source', scope.source)
+        .eq('store', scope.store);
+      if (fallback.error) {
+        throw new Error(`Delete marketplace spreadsheet fallback blank-account scope: ${fallback.error.message}`);
+      }
     }
   }
 }
@@ -176,7 +194,6 @@ export async function runDailyAdsSync(
 ): Promise<DailyAdsSyncResult> {
   const workspaceId = requireExplicitWorkspaceId(requestedWorkspaceId, 'Daily ads sync');
   const svc = createServiceSupabase();
-  const manualCutover = await getManualMarketplaceCutover(workspaceId);
 
   const { data: connections, error: connError } = await svc
     .from('sheet_connections')
@@ -257,8 +274,7 @@ export async function runDailyAdsSync(
 
       const filteredAds = parsed.ads
         .filter((row: { ad_account: string; date: string; source?: string | null }) =>
-          !metaManagedNames.has(row.ad_account)
-          && !isLegacyMarketplaceSpendAfterCutover({ ...row, data_source: 'google_sheets' }, manualCutover))
+          !metaManagedNames.has(row.ad_account))
         .map((row) => ({
           ...row,
           data_source: 'google_sheets',
@@ -300,9 +316,9 @@ export async function runDailyAdsSync(
           const batch = dedupedAds
             .slice(i, i + 500)
             .map((row) => ({ ...row, workspace_id: workspaceId }));
-          const { error } = await svc.from('daily_ads_spend').insert(batch);
+          const { data: inserted, error } = await svc.from('daily_ads_spend').insert(batch).select('id');
           if (error) throw error;
-          rowsInserted += batch.length;
+          rowsInserted += inserted?.length || 0;
         }
       }
 
