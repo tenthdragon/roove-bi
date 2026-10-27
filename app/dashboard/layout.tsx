@@ -346,6 +346,7 @@ export default function DashboardLayout({ children }) {
   const [profile, setProfile] = useState(null);
   const [workspaceBootstrap, setWorkspaceBootstrap] = useState(null);
   const [permissions, setPermissions] = useState<Set<string>>(new Set());
+  const [manualAdSpendEnabled, setManualAdSpendEnabled] = useState(false);
   const [loading, setLoading] = useState(true);
   const [accessError, setAccessError] = useState('');
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
@@ -470,6 +471,7 @@ export default function DashboardLayout({ children }) {
       }
 
       setProfile(data);
+      setManualAdSpendEnabled(serverResponse?.ok && serverPayload.manualAdSpendEnabled === true);
       let workspaceData = serverPayload.workspaceBootstrap || null;
       let bundledPermissions = Array.isArray(serverPayload.permissions)
         ? serverPayload.permissions
@@ -549,9 +551,11 @@ export default function DashboardLayout({ children }) {
     const ids = getOrderedAccessibleTabIds(accessRole, permissions);
     const workspace = workspaceBootstrap?.activeWorkspace;
     return workspace
-      ? ids.filter((tabId) => isWorkspaceModuleEnabled(workspace, tabId) && (tabId !== 'meta-funnels' || isWorkspaceModuleEnabled(workspace, 'marketing')))
+      ? ids.filter((tabId) => isWorkspaceModuleEnabled(workspace, tabId)
+          && (tabId !== 'manual-ad-spend' || manualAdSpendEnabled)
+          && (!['meta-funnels', 'manual-ad-spend'].includes(tabId) || isWorkspaceModuleEnabled(workspace, 'marketing')))
       : ids;
-  }, [profile, accessRole, permissions, workspaceBootstrap]);
+  }, [profile, accessRole, permissions, workspaceBootstrap, manualAdSpendEnabled]);
 
   // Close mobile menu on route change
   useEffect(() => {
@@ -680,11 +684,12 @@ export default function DashboardLayout({ children }) {
       .filter((tab) => isWorkspaceModuleEnabled(workspace, tab.id))
       .map((tab) => ({
         ...tab,
-        children: tab.children?.filter((child) => isWorkspaceModuleEnabled(workspace, child.id)),
+        children: tab.children?.filter((child) => isWorkspaceModuleEnabled(workspace, child.id)
+          && (child.id !== 'manual-ad-spend' || manualAdSpendEnabled)),
       }));
   }
 
-  const showDatePicker = !['admin', 'finance', 'customers', 'brand-analysis', 'warehouse', 'warehouse-settings', 'financial-report', 'cashflow', 'financial-settings', 'fixed-costs', 'marketplace-intake'].includes(currentTab)
+  const showDatePicker = !['admin', 'finance', 'customers', 'brand-analysis', 'warehouse', 'warehouse-settings', 'financial-report', 'cashflow', 'financial-settings', 'fixed-costs', 'marketplace-intake', 'manual-ad-spend'].includes(currentTab)
     && !(pathname.startsWith('/dashboard/meta-funnels') && !isMetaReportPath(pathname));
   const canSyncSheets = accessRole === 'owner' || permissions.has('admin:daily');
   const canSyncMeta = accessRole === 'owner' || permissions.has('admin:meta');
@@ -1188,6 +1193,7 @@ function TabIcon({ id, size = 18 }) {
     case 'products': return <svg {...s} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 16V8a2 2 0 00-1-1.73l-7-4a2 2 0 00-2 0l-7 4A2 2 0 003 8v8a2 2 0 001 1.73l7 4a2 2 0 002 0l7-4A2 2 0 0021 16z"/></svg>;
     case 'channels': return <svg {...s} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"/><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"/></svg>;
     case 'marketing': return <svg {...s} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z"/></svg>;
+    case 'manual-ad-spend': return <svg {...s} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L9 17l-4 1 1-4L16.5 3.5Z"/></svg>;
     case 'customers': return <svg {...s} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 00-3-3.87"/><path d="M16 3.13a4 4 0 010 7.75"/></svg>;
     case 'brand-analysis': return <svg {...s} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="2" y="2" width="20" height="20" rx="2"/><path d="M2 12h20"/><path d="M12 2v20"/><path d="M7 7h0"/><path d="M17 7h0"/><path d="M7 17h0"/><path d="M17 17h0"/></svg>;
     case 'finance': return <svg {...s} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 000 7h5a3.5 3.5 0 010 7H6"/></svg>;

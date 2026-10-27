@@ -5,6 +5,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { uploadExcelData, fetchAllUsers, rejectUserAccessRequest, updateUserRole } from '@/lib/actions';
 import AdvertiserBrandAssignments from '@/components/AdvertiserBrandAssignments';
+import AdvertiserSpendAccess from '@/components/AdvertiserSpendAccess';
 import {
   deleteMarketplaceFeeEstimateRate,
   deleteMonthlyOverhead,
@@ -1416,7 +1417,7 @@ export default function AdminPage() {
               { r: 'owner',             desc: 'akses penuh' },
               { r: 'admin',             desc: 'lihat semua, atur via matrix' },
               { r: 'marketing_api_reviewer', desc: 'khusus Admin > Marketing APIs' },
-              { r: 'advertiser',        desc: 'khusus Meta Ads Funnel' },
+              { r: 'advertiser',        desc: 'Meta Ads Funnel; input Shopee/TikTok Ads jika diberi hak per akun' },
               { r: 'direktur_ops',      desc: 'operasional + notif gudang' },
               { r: 'staf_ops',          desc: 'akses via matrix' },
               { r: 'direktur_finance',  desc: 'finance + laporan' },
@@ -1521,6 +1522,7 @@ export default function AdminPage() {
                     />
                   )}
                   {u.role === 'advertiser' && <AdvertiserBrandAssignments key={`${activeWorkspace.id}:${u.id}`} userId={u.id} workspaceId={activeWorkspace.id} />}
+                  {u.role === 'advertiser' && <AdvertiserSpendAccess key={`spend:${activeWorkspace.id}:${u.id}`} userId={u.id} workspaceId={activeWorkspace.id} />}
                 </div>
               );
             })}

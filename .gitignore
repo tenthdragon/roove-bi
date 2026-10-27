@@ -60,6 +60,7 @@ docs/runbooks/*
 !docs/runbooks/workspace-rollout.md
 !docs/runbooks/meta-ad-funnels.md
 !docs/runbooks/mcp-dimension-scopes.md
+!docs/runbooks/manual-marketplace-ad-spend.md
 
 # supabase temp
 supabase/.temp/

@@ -307,6 +307,7 @@ export const ALL_TABS: TabDef[] = [
   // { id: 'products',    label: 'Products',           icon: 'Package' },  // Hidden — merged into Overview
   { id: 'marketing',      label: 'Marketing Channel',  icon: 'Megaphone', group: 'Main Menu', children: [
     { id: 'meta-funnels', label: 'Meta Ads', icon: 'Megaphone' },
+    { id: 'manual-ad-spend', label: 'Input Biaya Iklan', icon: 'PencilLine' },
   ]},
   { id: 'channels',       label: 'Sales Channel',      icon: 'Share2', group: 'Main Menu', children: [
     { id: 'waba-management', label: 'WABA Management',   icon: 'MessageCircle' },

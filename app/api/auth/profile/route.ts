@@ -6,6 +6,7 @@ import {
 } from '@/lib/supabase-server';
 import { isThemePreference } from '@/lib/theme-preference';
 import { getWorkspaceBootstrapForVerifiedProfile } from '@/lib/workspace-access';
+import { isMissingManualMarketplaceSchema } from '@/lib/manual-marketplace-cutover';
 
 export const dynamic = 'force-dynamic';
 
@@ -50,6 +51,7 @@ export async function GET() {
   try {
     let workspaceBootstrap = null;
     let permissions: string[] = [];
+    let manualAdSpendEnabled = false;
 
     if (profile.role !== 'pending') {
       workspaceBootstrap = await getWorkspaceBootstrapForVerifiedProfile({
@@ -62,6 +64,15 @@ export async function GET() {
         profile.role === 'owner' || membershipRole === 'workspace_owner'
           ? 'owner'
           : membershipRole || profile.role;
+
+      const cutover = await service.from('manual_marketplace_ad_spend_cutovers')
+        .select('workspace_id')
+        .eq('workspace_id', workspaceBootstrap.activeWorkspace.id)
+        .maybeSingle();
+      if (cutover.error && !isMissingManualMarketplaceSchema(cutover.error)) {
+        return NextResponse.json({ error: 'Kebijakan input iklan gagal dimuat.' }, { status: 500 });
+      }
+      manualAdSpendEnabled = Boolean(cutover.data);
 
       if (effectiveRole !== 'owner') {
         const { data: permissionRows, error: permissionError } = await service
@@ -80,11 +91,25 @@ export async function GET() {
         permissions = (permissionRows || []).map(
           (row) => row.permission_key,
         );
+
+        if (effectiveRole === 'advertiser' && manualAdSpendEnabled) {
+          const spendAccess = await service.from('workspace_advertiser_spend_access')
+            .select('platform')
+            .eq('workspace_id', workspaceBootstrap.activeWorkspace.id)
+            .eq('user_id', user.id)
+            .limit(1);
+          if (spendAccess.error) {
+            return NextResponse.json({ error: 'Akses input iklan gagal dimuat.' }, { status: 500 });
+          }
+          if (manualAdSpendEnabled && (spendAccess.data?.length || 0) > 0) {
+            permissions.push('tab:manual-ad-spend');
+          }
+        }
       }
     }
 
     return NextResponse.json(
-      { profile, workspaceBootstrap, permissions },
+      { profile, workspaceBootstrap, permissions, manualAdSpendEnabled },
       { headers: { 'Cache-Control': 'no-store' } },
     );
   } catch (error: any) {
