@@ -1,7 +1,6 @@
 BEGIN;
 
--- The cutover is enabled for the Roove workspace only. Other workspaces keep
--- their existing import and Shopee API behavior until explicitly configured.
+-- Roove and Apurva both switch to advertiser-entered Shopee/TikTok spend.
 CREATE TABLE public.manual_marketplace_ad_spend_cutovers (
   workspace_id uuid PRIMARY KEY REFERENCES public.workspaces(id) ON DELETE CASCADE,
   starts_on date NOT NULL,
@@ -11,10 +10,10 @@ ALTER TABLE public.manual_marketplace_ad_spend_cutovers ENABLE ROW LEVEL SECURIT
 REVOKE ALL ON public.manual_marketplace_ad_spend_cutovers FROM PUBLIC, anon, authenticated;
 GRANT ALL ON public.manual_marketplace_ad_spend_cutovers TO service_role;
 INSERT INTO public.manual_marketplace_ad_spend_cutovers (workspace_id, starts_on)
-SELECT id, DATE '2026-10-01' FROM public.workspaces WHERE slug = 'roove';
+SELECT id, DATE '2026-10-01' FROM public.workspaces WHERE slug IN ('roove', 'apurva');
 DO $$ BEGIN
-  IF NOT EXISTS (SELECT 1 FROM public.manual_marketplace_ad_spend_cutovers) THEN
-    RAISE EXCEPTION 'Roove workspace not found; manual ad spend cutover was not configured.';
+  IF (SELECT count(*) FROM public.manual_marketplace_ad_spend_cutovers) <> 2 THEN
+    RAISE EXCEPTION 'Roove and Apurva workspaces must both exist for manual ad spend cutover.';
   END IF;
 END $$;
 
