@@ -39,6 +39,9 @@ jobs:
       - name: Check advertiser access boundaries
         run: npm run test:advertiser
 
+      - name: Check manual marketplace spend and spreadsheet fallback
+        run: node --import tsx --test tests/manual-marketplace-ad-spend.test.ts tests/daily-ads-sync-runner.test.ts
+
       - name: Check user access request boundaries
         run: npm run test:access-requests
 

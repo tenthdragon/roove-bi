@@ -36,6 +36,9 @@
 .tableWrap td { padding: 12px 15px; border-top: 1px solid var(--border); vertical-align: top; }
 .tableWrap td:first-child { white-space: nowrap; }
 .amount { text-align: right; white-space: nowrap; font-weight: 700; font-variant-numeric: tabular-nums; }
+.manualSource, .sheetSource { display: inline-block; padding: 4px 8px; border-radius: 6px; font-size: 11px; font-weight: 700; white-space: nowrap; }
+.manualSource { background: var(--badge-green-bg); color: var(--badge-green-text); }
+.sheetSource { background: var(--accent-subtle); color: var(--text); }
 .rowActions { display: flex; gap: 6px; }
 .rowActions button { min-height: 29px; padding: 4px 8px; }
 .history { border: 1px solid var(--border); border-radius: 10px; background: var(--card); }

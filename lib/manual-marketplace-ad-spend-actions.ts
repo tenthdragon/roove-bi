@@ -17,6 +17,34 @@ function monthRange(month: string) {
   return { start: `${month}-01`, end };
 }
 
+async function getSheetFallbackRows(
+  workspaceId: string,
+  platforms: ManualMarketplacePlatform[],
+  start: string,
+  end: string,
+) {
+  const svc = createServiceSupabase();
+  const rows: Array<{ date: string; platform: ManualMarketplacePlatform; brand_id: number; spent: number }> = [];
+  for (let offset = 0; ; offset += 1000) {
+    const page = await svc.from('manual_marketplace_sheet_fallback')
+      .select('date,platform,brand_id,spent')
+      .eq('workspace_id', workspaceId).in('platform', platforms)
+      .gte('date', start).lte('date', end)
+      .order('date').order('brand_id').range(offset, offset + 999);
+    if (page.error) throw new Error('Gagal memuat fallback spreadsheet.');
+    rows.push(...((page.data || []) as typeof rows));
+    if ((page.data || []).length < 1000) break;
+  }
+  const grouped = new Map<string, { date: string; platform: ManualMarketplacePlatform; brand_id: number; amount: number }>();
+  for (const row of rows) {
+    const key = `${row.date}|${row.platform}|${row.brand_id}`;
+    const current = grouped.get(key) || { date: row.date, platform: row.platform, brand_id: row.brand_id, amount: 0 };
+    current.amount += Math.abs(Number(row.spent || 0));
+    grouped.set(key, current);
+  }
+  return [...grouped.values()];
+}
+
 export async function getAdvertiserSpendAccess(userId: string) {
   const { workspaceId } = await requireDashboardRoles(['owner'], 'Hanya owner workspace yang dapat mengatur akses input iklan.');
   const svc = createServiceSupabase();
@@ -82,7 +110,7 @@ export async function getManualMarketplaceSpendPage(month: string) {
     .eq('workspace_id', ctx.workspaceId).in('platform', platforms);
   if (ctx.profile.role === 'advertiser') historyQuery = historyQuery.eq('changed_by', ctx.profile.id);
 
-  const [brands, entries, history] = await Promise.all([
+  const [brands, entries, history, fallbackRows] = await Promise.all([
     svc.from('brands').select('id,name,is_active').eq('workspace_id', ctx.workspaceId).order('name'),
     svc.from('manual_marketplace_ad_spend')
       .select('id,platform,brand_id,spend_date,amount,note,created_by,updated_by,created_at,updated_at,version')
@@ -90,6 +118,7 @@ export async function getManualMarketplaceSpendPage(month: string) {
       .gte('spend_date', start).lte('spend_date', end)
       .order('spend_date', { ascending: false }).order('brand_id'),
     historyQuery.order('changed_at', { ascending: false }).limit(50),
+    getSheetFallbackRows(ctx.workspaceId, platforms, start, end),
   ]);
   if (brands.error || entries.error || history.error) throw new Error('Gagal memuat catatan biaya iklan.');
   const actorNames: Record<string, string> = {};
@@ -118,6 +147,7 @@ export async function getManualMarketplaceSpendPage(month: string) {
       amount: number; note: string; created_by: string; updated_by: string;
       created_at: string; updated_at: string; version: number;
     }>,
+    fallbackRows,
     history: history.data || [],
   };
 }

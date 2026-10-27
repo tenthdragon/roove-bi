@@ -3,7 +3,19 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { ModuleKind, ScriptTarget, transpileModule } from 'typescript';
 import { buildVisibleTabs, getOrderedAccessibleTabIds } from '../lib/dashboard-navigation';
-import { isLegacyMarketplaceSpendAfterCutover } from '../lib/manual-marketplace-ad-spend';
+import { isLegacyMarketplaceSpendAfterCutover, selectActiveSheetFallbackRows } from '../lib/manual-marketplace-ad-spend';
+
+test('manual zero suppresses only the matching sheet platform, brand, and date', () => {
+  const sheet = [
+    { platform: 'shopee_ads' as const, brand_id: 1, date: '2026-10-27', amount: 100 },
+    { platform: 'tiktok_ads' as const, brand_id: 1, date: '2026-10-27', amount: 200 },
+    { platform: 'shopee_ads' as const, brand_id: 3, date: '2026-10-27', amount: 300 },
+    { platform: 'shopee_ads' as const, brand_id: 1, date: '2026-10-26', amount: 400 },
+  ];
+  const manual = [{ platform: 'shopee_ads' as const, brand_id: 1, spend_date: '2026-10-27', amount: 0 }];
+  assert.deepEqual(selectActiveSheetFallbackRows(manual, sheet), sheet.slice(1));
+  assert.deepEqual(selectActiveSheetFallbackRows([], sheet), sheet);
+});
 
 test('input menu appears only with the individual grant', () => {
   const base = new Set(['tab:meta-funnels']);
