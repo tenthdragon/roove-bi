@@ -4,6 +4,8 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 import { requireDashboardPermissionAccess } from '@/lib/dashboard-access';
 import { limitByIp, rejectMissingDashboardSession, rejectUntrustedOrigin } from '@/lib/request-hardening';
+import { getManualMarketplaceCutover } from '@/lib/manual-marketplace-cutover';
+import { isLegacyMarketplaceSpendAfterCutover } from '@/lib/manual-marketplace-ad-spend';
 
 function getServiceSupabase() {
   return createClient(
@@ -56,6 +58,7 @@ export async function POST(req: NextRequest) {
     }
 
     const svc = getServiceSupabase();
+    const manualCutover = await getManualMarketplaceCutover(workspaceId);
     const { data: workspaceBrands, error: brandsError } = await svc
       .from('brands')
       .select('name, sheet_name')
@@ -106,6 +109,11 @@ export async function POST(req: NextRequest) {
         continue;
       }
 
+      if (isLegacyMarketplaceSpendAfterCutover({ date, source: raw.source, data_source: 'xlsx_upload' }, manualCutover)) {
+        skipped++;
+        continue;
+      }
+
       rows.push({
         workspace_id: workspaceId,
         date,
@@ -121,7 +129,7 @@ export async function POST(req: NextRequest) {
 
     if (rows.length === 0) {
       return NextResponse.json({
-        error: 'No valid rows found after filtering',
+        error: 'Tidak ada baris yang dapat diimpor. Shopee/TikTok Ads sejak cutover diisi lewat Input Biaya Iklan.',
         skipped,
         skippedStores: Array.from(skippedStores),
       }, { status: 400 });

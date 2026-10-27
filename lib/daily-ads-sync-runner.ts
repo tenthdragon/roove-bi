@@ -1,6 +1,8 @@
 import { parseGoogleSheet } from './google-sheets';
 import { createServiceSupabase } from './service-supabase';
 import { requireExplicitWorkspaceId } from './workspace-scope';
+import { getManualMarketplaceCutover } from './manual-marketplace-cutover';
+import { isLegacyMarketplaceSpendAfterCutover } from './manual-marketplace-ad-spend';
 
 type DailyAdsPeriod = {
   month: number;
@@ -174,6 +176,7 @@ export async function runDailyAdsSync(
 ): Promise<DailyAdsSyncResult> {
   const workspaceId = requireExplicitWorkspaceId(requestedWorkspaceId, 'Daily ads sync');
   const svc = createServiceSupabase();
+  const manualCutover = await getManualMarketplaceCutover(workspaceId);
 
   const { data: connections, error: connError } = await svc
     .from('sheet_connections')
@@ -253,7 +256,9 @@ export async function runDailyAdsSync(
       await deleteExistingGoogleSheetRows(deleteScopeRows, workspaceId);
 
       const filteredAds = parsed.ads
-        .filter((row: { ad_account: string }) => !metaManagedNames.has(row.ad_account))
+        .filter((row: { ad_account: string; date: string; source?: string | null }) =>
+          !metaManagedNames.has(row.ad_account)
+          && !isLegacyMarketplaceSpendAfterCutover({ ...row, data_source: 'google_sheets' }, manualCutover))
         .map((row) => ({
           ...row,
           data_source: 'google_sheets',

@@ -23,6 +23,7 @@ function hasAdminAreaAccess(role: string, permissions: Set<string>) {
 export function canAccessLayoutTab(role: string, tab: TabDef, permissions: Set<string>) {
   // Sales Channel Analysis inherits its parent Sales Channel permission.
   if (tab.id === 'sales-channel-analysis') return canAccessTab(role, 'channels', permissions);
+  if (tab.id === 'manual-ad-spend' && role !== 'advertiser' && role !== 'owner') return false;
   if (tab.id === 'admin') return hasAdminAreaAccess(role, permissions);
   if (tab.ownerOnly && role !== 'owner') return false;
   return canAccessTab(role, tab.id, permissions);

@@ -5,6 +5,8 @@ import { requireDashboardPermissionAccess, requireDashboardRoles, requireDashboa
 import { parseRooveExcel } from './excel-parser';
 import { listWorkspaceUsers } from './workspace-user-access';
 import type { Profile, DailyProductSummary, MonthlyProductSummary } from './utils';
+import { getManualMarketplaceCutover } from './manual-marketplace-cutover';
+import { isLegacyMarketplaceSpendAfterCutover } from './manual-marketplace-ad-spend';
 
 // ── Auth & Profile ──
 
@@ -159,6 +161,7 @@ export async function uploadExcelData(formData: FormData) {
   if (brandsError) throw brandsError;
 
   const parsed = parseRooveExcel(buffer, brands || []);
+  const manualCutover = await getManualMarketplaceCutover(workspaceId);
 
   if (!parsed.period.month || !parsed.period.year) {
     throw new Error('Could not detect period from file. Make sure the file has date columns.');
@@ -200,6 +203,7 @@ export async function uploadExcelData(formData: FormData) {
 
     const del3 = await svc.from('daily_ads_spend').delete()
       .eq('workspace_id', workspaceId)
+      .eq('import_id', importId)
       .gte('date', periodStart).lte('date', periodEnd);
     if (del3.error) throw new Error(`Delete daily_ads_spend failed: ${del3.error.message}`);
 
@@ -235,11 +239,17 @@ export async function uploadExcelData(formData: FormData) {
     }
 
     // Insert ads data
-    if (parsed.ads.length > 0) {
-      const rows = parsed.ads.map(d => ({
+    const importedAds = parsed.ads.filter(d => !isLegacyMarketplaceSpendAfterCutover({
+      date: d.date,
+      source: d.source,
+      data_source: 'xlsx_upload',
+    }, manualCutover));
+    if (importedAds.length > 0) {
+      const rows = importedAds.map(d => ({
         ...d,
         workspace_id: workspaceId,
         import_id: importId,
+        data_source: 'xlsx_upload',
       }));
       for (let i = 0; i < rows.length; i += 500) {
         const batch = rows.slice(i, i + 500);
@@ -264,7 +274,7 @@ export async function uploadExcelData(formData: FormData) {
     // Mark import as completed
     await svc.from('data_imports').update({
       status: 'completed',
-      row_count: parsed.dailyProduct.length + parsed.dailyChannel.length + parsed.ads.length,
+      row_count: parsed.dailyProduct.length + parsed.dailyChannel.length + importedAds.length,
     }).eq('id', importId)
       .eq('workspace_id', workspaceId);
 
@@ -274,7 +284,7 @@ export async function uploadExcelData(formData: FormData) {
       counts: {
         dailyProduct: parsed.dailyProduct.length,
         dailyChannel: parsed.dailyChannel.length,
-        ads: parsed.ads.length,
+        ads: importedAds.length,
         monthlySummary: parsed.monthlySummary.length,
       },
     };

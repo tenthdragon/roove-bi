@@ -12,6 +12,8 @@ import {
   type ShopeeSpendSyncMode,
 } from './shopee-streams';
 import { requireExplicitWorkspaceId } from './workspace-scope';
+import { getManualMarketplaceCutover } from './manual-marketplace-cutover';
+import { isLegacyMarketplaceSpendAfterCutover } from './manual-marketplace-ad-spend';
 
 type ShopeeShopRow = {
   id: number;
@@ -229,6 +231,7 @@ export async function runShopeeSync(options: RunShopeeSyncOptions): Promise<Shop
   const startTime = Date.now();
   const svc = createServiceSupabase();
   const workspaceId = requireExplicitWorkspaceId(options.workspaceId, 'Shopee sync');
+  const manualCutover = await getManualMarketplaceCutover(workspaceId);
   const dateStart = options.dateStart || getYesterdayWib();
   const dateEnd = options.dateEnd || dateStart;
 
@@ -339,6 +342,7 @@ export async function runShopeeSync(options: RunShopeeSyncOptions): Promise<Shop
           const metricsRows = buildMetricsRows(shop, stream, points)
             .map((row) => ({ ...row, workspace_id: workspaceId }));
           const spendRows = buildSpendRows(shop, stream, points)
+            .filter((row) => !isLegacyMarketplaceSpendAfterCutover(row, manualCutover))
             .map((row) => ({ ...row, workspace_id: workspaceId }));
           const advertiser = normalizeAdvertiser(shop, stream);
           const source = getShopeeSpendStreamDefinition(stream.stream_key).defaultSource;
