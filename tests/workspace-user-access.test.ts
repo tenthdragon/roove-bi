@@ -18,6 +18,8 @@ function harness() {
       return { workspaceId: 'verified-workspace' };
     } },
     './excel-parser': {},
+    './manual-marketplace-cutover': {},
+    './manual-marketplace-ad-spend': {},
     './workspace-user-access': { listWorkspaceUsers: async (workspaceId: string) => [{ workspaceId }] },
   };
   const source = readFileSync(new URL('../lib/actions.ts', import.meta.url), 'utf8');
