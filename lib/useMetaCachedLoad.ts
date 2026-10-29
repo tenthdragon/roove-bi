@@ -54,9 +54,20 @@ export function useMetaCachedLoad<T>(key: string | null, cache: ReturnType<typeo
   const request = useRef(0);
   const scope = useRef(key);
   const pending = useRef<{ key: string; promise: Promise<T | null> } | null>(null);
+  const queuedRefresh = useRef<{ key: string; promise: Promise<T | null> } | null>(null);
   const load = useCallback(function load(force = false): Promise<T | null> {
     if (!key || scope.current !== key) return Promise.resolve(null);
-    if (pending.current?.key === key) return force ? pending.current.promise.then(() => load(true)) : pending.current.promise;
+    if (pending.current?.key === key) {
+      if (!force) return pending.current.promise;
+      // Several revision checks can discover the same stale parent at once.
+      // Queue one fresh read after the current request, not one per caller.
+      if (queuedRefresh.current?.key === key) return queuedRefresh.current.promise;
+      const promise = pending.current.promise.then(() => {
+        if (queuedRefresh.current?.promise === promise) queuedRefresh.current = null;
+        return load(true);
+      });
+      queuedRefresh.current = { key, promise }; return promise;
+    }
     if (force) cache.delete(key);
     const cached = force ? undefined : cache.get(key);
     if (cached) { setResult({ key, data: cached }); setLoading(false); setError(''); return Promise.resolve(cached); }
@@ -78,7 +89,7 @@ export function useMetaCachedLoad<T>(key: string | null, cache: ReturnType<typeo
   useEffect(() => {
     const guard = request; scope.current = key;
     void load();
-    return () => { guard.current++; pending.current = null; scope.current = null; };
+    return () => { guard.current++; pending.current = null; queuedRefresh.current = null; scope.current = null; };
   }, [key, load]);
   const data = result?.key === key ? result.data : key ? cache.get(key) || null : null;
   const setData = useCallback((update: SetStateAction<T | null>) => {

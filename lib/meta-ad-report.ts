@@ -10,7 +10,7 @@ import type { MetaAnalysisFilters, AnalysisFacet, AnalysisDimension } from './me
 export type MetaReportInput = { from: string; to: string; channel?: MetaAdChannel; funnelId?: string; brandId?: string; groupKey?: string; filters?: MetaAnalysisFilters; groupBy?: ReportGroupBy };
 export type ReportGroupBy = 'ad' | 'landing_page' | 'cep_intention';
 export type ReportQuery = {
-  from: string; to: string; config: Pick<FunnelConfig, 'account_ids' | 'name_filter' | 'match'> & { include_optimization?: boolean; include_matrix?: boolean; include_analysis?: boolean };
+  from: string; to: string; config: Pick<FunnelConfig, 'account_ids' | 'name_filter' | 'match'> & { include_optimization?: boolean; include_matrix?: boolean; include_analysis?: boolean; breakdown?: 'none' | 'format' | 'optimization' | 'partnership'; breakdown_only?: boolean };
   filters: MetaAnalysisFilters; channel: MetaAdChannel | null; brand: string | null; groupBy: ReportGroupBy;
   view: 'overview' | 'daily' | 'trends' | 'creatives'; period: 'week' | 'month'; groupKey: string | null;
 };

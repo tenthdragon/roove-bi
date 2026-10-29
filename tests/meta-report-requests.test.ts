@@ -44,7 +44,7 @@ test('a failed report releases its slot, rejects duplicate callers and can be re
 
 test('only expected report failures become safe retry data; auth and other errors still reject', async () => {
   const result = await metaReportResponse(async () => { throw new MetaReportUnavailableError(true); });
-  assert.deepEqual(result, { reportError: 'Laporan Meta sedang sibuk. Silakan klik Muat ulang beberapa saat lagi.' });
+  assert.deepEqual(result, { reportError: 'Perhitungan laporan melewati batas waktu. Silakan coba lagi.' });
   assert.deepEqual(await metaReportResponse(async () => ({ schemaReady: true })), { schemaReady: true });
   await assert.rejects(metaReportResponse(async () => { throw new Error('Forbidden'); }), /Forbidden/);
 });

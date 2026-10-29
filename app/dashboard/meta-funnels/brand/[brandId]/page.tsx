@@ -13,7 +13,8 @@ import { createMetaOverviewCache } from '@/lib/meta-overview-cache';
 import { defaultMetaRange, metaDailyTrendRange } from '@/lib/meta-report-status';
 import { getTodayWIB } from '@/lib/sync-schedule';
 import { getMetaFunnelHistory, getMetaReportRevision, queueMetaFunnelSync, verifyMetaAdDestination } from '@/lib/meta-funnel-actions';
-import { getMetaBrandDetail, getMetaFormatCepMatrix, saveMetaTemplateRule } from '@/lib/meta-brand-actions';
+import { getMetaBrandDetail, getMetaBrandBreakdown, getMetaFormatCepMatrix, saveMetaTemplateRule } from '@/lib/meta-brand-actions';
+import { mergeMetaBreakdown } from '@/lib/meta-report-breakdown';
 import { MEASURES, metricValue, type FunnelMetric, type Totals } from '@/lib/meta-funnel-domain';
 import { templateDestinationRule } from '@/lib/meta-ctwa-destinations';
 import { WORLD_CHANNEL, WORLD_LABELS, type MetaBrandWorld, type TemplateGroup, type TemplateSection } from '@/lib/meta-funnel-templates';
@@ -43,6 +44,8 @@ type HistoryPoint = { date: string; totals: Totals; complete: boolean; partial: 
 const detailCache = createMetaOverviewCache<Data>();
 type MatrixData = Extract<Awaited<ReturnType<typeof getMetaFormatCepMatrix>>, { schemaReady: true }>;
 const matrixCache = createMetaOverviewCache<MatrixData>();
+type BreakdownData = Extract<Awaited<ReturnType<typeof getMetaBrandBreakdown>>, { schemaReady: true }>;
+const breakdownCache = createMetaOverviewCache<BreakdownData>();
 const columnPreferencesCache = createMetaOverviewCache<MetaColumnPreferences>();
 const historyCache = createMetaOverviewCache<{ points: HistoryPoint[]; complete: boolean }>();
 const message = (e: unknown) => e instanceof Error ? e.message : 'Permintaan gagal.';
@@ -106,6 +109,25 @@ export default function MetaBrandDetailPage() {
     return result.schemaReady && result.workspaceId === session.workspaceId ? result : null;
   }, [input, world, session.workspaceId]);
   const { data, setData, loading, error, setError, load } = useMetaCachedLoad(cacheKey, detailCache, fetchDetail);
+  const breakdownKey = world === 'website' && view === 'destinations' && cacheKey && data && !data.reportingError && breakdown.ready && breakdown.value !== 'none'
+    ? JSON.stringify([cacheKey, data.reportVersion, breakdown.value]) : null;
+  const fetchBreakdown = useCallback(async () => {
+    if (breakdown.value === 'none') return null;
+    const result = await getMetaBrandBreakdown({ ...input, breakdown: breakdown.value, workspaceId: session.workspaceId });
+    if ('reportError' in result) throw new Error(result.reportError);
+    if (!result.schemaReady) throw new Error('Rincian belum tersedia. Silakan coba lagi.');
+    return result.workspaceId === session.workspaceId ? result : null;
+  }, [input, breakdown.value, session.workspaceId]);
+  const childReport = useMetaCachedLoad(breakdownKey, breakdownCache, fetchBreakdown);
+  useEffect(() => {
+    if (childReport.data && data && childReport.data.reportVersion !== data.reportVersion) void load(true);
+  }, [childReport.data, data, load]);
+  const sections = useMemo(() => {
+    if (!data) return [];
+    const children = breakdownKey && childReport.data?.reportVersion === data.reportVersion && childReport.data.breakdown === breakdown.value
+      ? childReport.data.groups : [];
+    return world === 'website' ? data.sections.map(section => ({ ...section, groups: mergeMetaBreakdown(section.groups, children) })) : data.sections;
+  }, [data, world, breakdownKey, breakdown.value, childReport.data]);
   const matrixKey = view === 'matrix' && cacheKey && data && !data.reportingError ? JSON.stringify([cacheKey, data.reportVersion, 'matrix']) : null;
   const fetchMatrix = useCallback(async () => {
     const result = await getMetaFormatCepMatrix({ ...input, world, workspaceId: session.workspaceId });
@@ -215,7 +237,9 @@ export default function MetaBrandDetailPage() {
         <MetaDataNotesTrigger notes={dataNotes} onOpen={() => setNotesOpen(true)} disabled={!data} />
       </div>
     </div>
-    {(session.error || error) && <div role="alert" className={styles.error}>{session.error || error}</div>}
+    {(session.error || error) && <div role="alert" className={styles.error}>{session.error || error}
+      {!session.error && <button type="button" className={styles.button} disabled={loading} onClick={() => void load(true)}>Coba lagi</button>}
+    </div>}
     {notice && <div role="status" className={styles.info}>{notice}</div>}
     {!schemaReady ? <div className={styles.card}>Pengelompokan iklan belum tersedia. Hubungi admin untuk mengaktifkannya.</div> : <>
       {loading && !session.error && !data && <p role="status" className={styles.muted}>Memuat detail brand…</p>}
@@ -257,13 +281,15 @@ export default function MetaBrandDetailPage() {
             {matrix.data && matrix.data.reportVersion === data.reportVersion && !matrix.data.reportingError && <MetaFormatCepMatrix key={JSON.stringify([session.key, brandId, world])} matrix={matrix.data.matrix} currency={matrix.data.currency} />}
           </>}
           {view === 'destinations' && world === 'website' && breakdown.error && <p role="status" className={styles.muted}>{breakdown.error}</p>}
+          {breakdownKey && childReport.loading && <p role="status" className={styles.muted}>Memuat rincian {breakdown.value === 'format' ? 'format' : breakdown.value === 'partnership' ? 'partnership' : 'optimasi'}…</p>}
+          {breakdownKey && childReport.error && <div role="alert" className={styles.error}>{childReport.error} <button type="button" className={styles.button} onClick={() => void childReport.load(true)}>Coba lagi</button></div>}
           {view === 'cep' && <MetaCepView view={data.cep} currency={currency} onOpenCep={setCepDrawer} highlights={data.highlights} period={highlightPeriod} />}
           {view === 'destinations' && world === 'website' && data.matchingAds > 0 && !data.sections.some(s => s.groups.length) && <div className={styles.card}>{data.sections.length ? 'Belum ada landing page yang terpetakan ke template pada periode ini.' : 'Belum ada template funnel.'} Tetapkan template di <Link href="/dashboard/meta-funnels/templates">Template funnel</Link>.</div>}
           {view === 'destinations' && world === 'website' && (columnError || columnPreferences?.ready === false) && <div className={styles.info} role="status">
             {columnError || 'Pengaturan tabel belum tersedia. Tampilan default digunakan.'} <button type="button" className={styles.button} onClick={() => void reloadColumns(true)}>Coba lagi</button>
           </div>}
           {view === 'destinations' && world === 'website' && !data.matchingAds && !data.reportingError && <p className={styles.card}>Tidak ada iklan yang cocok dengan periode dan filter ini.</p>}
-          {view === 'destinations' && data.sections.filter(s => s.groups.length || world === 'cpas').map(section => <MetaTemplateResults
+          {view === 'destinations' && sections.filter(s => s.groups.length || world === 'cpas').map(section => <MetaTemplateResults
             key={JSON.stringify([session.key, section.key])} breakdown={breakdown.value} breakdownReady={breakdown.ready} onBreakdownChange={breakdown.select} section={section} world={world} currency={currency} highlights={data.highlights} period={highlightPeriod}
             preferencesReady={!!columnPreferences?.ready && !columnError && !columnLoading} preference={section.funnelId ? columnPreferences?.preferences[section.funnelId] : null}
             savedSort={section.funnelId ? columnPreferences?.preferences[section.funnelId]?.sort ?? null : null}

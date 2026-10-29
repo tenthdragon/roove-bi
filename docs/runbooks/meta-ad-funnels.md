@@ -1256,3 +1256,79 @@ the previous report definition/grants for function rollback.
 Validation: Meta unit/UI and action-boundary tests; rollback database suite for
 report parity, metadata identity, filters, channels, account/workspace boundaries
 and grants; app typecheck, lint, build; browser preview and local performance check.
+
+### Native aggregation and deferred breakdowns (migration 241)
+
+The daily projection remains incremental: only invalidated account/dates rebuild.
+Migration `241_meta_report_native_aggregation.sql` changes the remaining read-time
+work. Detail/history/matrix and both brand overview scopes decode cached metrics
+once into numeric columns, then use PostgreSQL's native SUM/count aggregates.
+The existing finalizer preserves exact event sums and unavailable Instagram
+profile visits (NULL stays different from an observed zero). Authorization,
+current-ad comparison cohorts, historical destinations/objectives, overlapping
+CEP memberships, coverage and currency rules are unchanged. The unrestricted
+brand overview delegates to the same implementation with a NULL brand scope;
+an empty advertiser scope still returns no brands.
+
+The detail page uses `get_meta_brand_detail_report_light`, which returns the same
+parent results and highlights without destination child breakdowns. After the
+main result renders, a separate authorized read requests only the selected
+Format, Optimization or Partnership breakdown. No breakdown requests run for
+No breakdown, CPAS, CEP or Matrix. The compact response carries child rows only;
+merging it cannot overwrite parent totals, names, order or template assignments.
+Its cache includes viewer scope in the browser and workspace/revision/date/brand/
+filters/breakdown on the server. Responses with a different revision trigger a
+parent refresh before child rows display. Old full-report RPC consumers keep all
+breakdowns by default. Explicit `breakdown_only` requires a single supported
+breakdown and the landing-page overview view.
+
+The existing two-RPC process budget and pending-request deduplication also cover
+breakdown reads. Simultaneous forced refreshes queue one follow-up read. A child
+failure leaves the main report visible with its own retry; the main timeout now
+accurately names a report timeout and has a working retry control.
+
+After a successful ad snapshot commits, the existing sync worker warms only that
+account and the refreshed date batch through `ensure_meta_brand_report_days`.
+Cache warming is best effort: a failure becomes a warning and cannot roll back,
+retry or mark the saved source snapshot failed. No new timer, provider sync,
+background service or persistent summary table is introduced. Later metadata
+changes continue to invalidate the appropriate derived projections.
+
+Validation on 29 October 2026:
+
+- The rollback-only SQL suite passes 96 exact comparisons against migration 236,
+  288 legacy full-report comparisons, 48 filter intersections, deferred-child
+  reconciliation, empty scopes, NULL metrics, cache invalidation, and assigned-
+  brand/workspace boundaries. All fixtures and schema changes roll back.
+- The Meta UI/domain suite covers independent child loading/failure/retry,
+  switching breakdowns while responses are pending, keeping parent totals,
+  authorization before cache access and coalescing simultaneous refreshes.
+- On the dated local sample, the median of three Website month-to-date query
+  reads changed from 792.7 ms to 133.8 ms with every breakdown still requested.
+  The light three-part detail batch took 253.8 ms median; its selected Format
+  child read took 54.7 ms median. The all-brand overview measured 108.1 → 70.1 ms.
+- A separate synthetic fixture (200 ads × 56 dates = 11,200 source rows) measured
+  5,117.8 → 1,149.4 ms for the complete Website query, with identical JSON output.
+  These are database timings on local fixtures, not production page-load or
+  concurrent-user guarantees.
+
+Run `npm run test:meta-funnels`, `npm run test:meta-detail-mapping-db`, its
+`-- --benchmark` variant, `npm run typecheck:app`, `npm run lint`, and
+`npm run build`. CI runs the UI/domain suite; the database suite requires the
+verified local sample and must not target production.
+
+Release only after normal review/CI and explicit production authorization.
+Apply only 241, after verifying the existing 222–236 report prerequisites and
+224 scoped overview in the actual target migration history. Do not replay old
+migrations. This migration replaces report functions and adds one service-only
+light-detail RPC; it does not clear existing projections or change source facts.
+Before applying it, save the definitions and grants of
+`get_meta_ad_report_incremental`, `get_meta_brand_overview_report_scoped`, and
+`get_meta_brand_overview_report` for recovery. Deploy the matching app and worker
+from the exact reviewed commit after the migration. The old application remains
+compatible with the new database functions.
+
+Verify authenticated Roove Website/CPAS with uncached month-to-date and seven-day
+ranges, every breakdown and analysis filter, empty/multiple advertiser brand
+scopes, and rapid date/brand changes. Check actual database timings and source
+revision stability; no production speed claim is implied by the local benchmark.
