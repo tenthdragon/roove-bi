@@ -65,3 +65,21 @@ test('failed requests remain retryable and cannot populate the navigation cache'
   assert.equal(state.error, ''); assert.equal(state.data?.label, 'Retry');
   await act(async () => root.unmount());
 });
+
+test('simultaneous revision checks queue one refresh and share its result', async () => {
+  const cache = createMetaOverviewCache<Data>(), old = deferred(), fresh = deferred();
+  let reads = 0, state!: ReturnType<typeof useMetaCachedLoad<Data>>;
+  const fetch = () => (++reads === 1 ? old.promise : fresh.promise);
+  function Probe() { state = useMetaCachedLoad('scope', cache, fetch); return null; }
+  let root: any, first!: Promise<Data | null>, second!: Promise<Data | null>;
+  await act(async () => { root = create(<Probe />); await tick(); });
+  await act(async () => {
+    first = state.load(true); second = state.load(true);
+    assert.equal(first, second);
+    old.resolve({ label: 'Old', reportVersion: '1' }); await tick();
+  });
+  assert.equal(reads, 2);
+  await act(async () => { fresh.resolve({ label: 'Current', reportVersion: '2' }); await Promise.all([first, second]); });
+  assert.equal(reads, 2); assert.equal(state.data?.reportVersion, '2');
+  await act(async () => root.unmount());
+});

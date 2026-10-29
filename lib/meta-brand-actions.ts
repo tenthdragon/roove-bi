@@ -11,7 +11,7 @@ import { metaReportResponse } from './meta-report-requests';
 import { daysBetween, emptyTotals, metricValue, relativeChange, shiftDay, sumMetricTotals, type FunnelMetric, type Totals } from './meta-funnel-domain';
 import { loadTemplateRules } from './meta-funnel-store';
 import { metaReportQuery, metaReportOptions, type MetaReportInput, type RawMetaReport, type ReportGroupBy } from './meta-ad-report';
-import { getCachedMetaAdReport, getCachedMetaBrandOverviewReport, getCachedMetaBrandDetailReport, getCachedMetaFormatCepMatrix } from './meta-ad-report-data';
+import { getCachedMetaAdReport, getCachedMetaBrandOverviewReport, getCachedMetaBrandDetailReport, getCachedMetaFormatCepMatrix, getCachedMetaBreakdownReport } from './meta-ad-report-data';
 import { emptyMetaBrandReport } from './meta-brand-report';
 import { dimensionLabel } from './meta-ad-dimensions';
 import { metaBrandAccountIds, metaBrandOptions, validateMetaBrandFilter } from './meta-ad-brands';
@@ -180,6 +180,24 @@ async function loadMetaBrandDetail(input: BrandInput & { brandId: string; world:
   // or separately-windowed meta_funnel_alerts. No extra reads or writes.
   return { ...detail, leakSnapshots: createMetaLeakSnapshots({ report: detail, workspaceName: ctx.workspaceName,
     filters: ctx.filters, currencies: activeRaw.currencies, generatedAt: new Date().toISOString() }) };
+}
+
+/** Child rows load independently so a slow breakdown cannot hide the main report. */
+export async function getMetaBrandBreakdown(input: BrandInput & { brandId: string; breakdown: 'format' | 'optimization' | 'partnership'; workspaceId?: string }) {
+  return metaReportResponse(async () => {
+    if (!['format', 'optimization', 'partnership'].includes(input.breakdown)) throw new Error('Rincian iklan tidak valid.');
+    const brandId = validateMetaBrandFilter(input.brandId);
+    if (!brandId) throw new Error('Pilih brand terlebih dahulu.');
+    const ctx = await reportContext({ from: input.from, to: input.to, filters: input.filters, brandId });
+    if (!ctx.schemaReady) return ctx;
+    if (input.workspaceId && input.workspaceId !== ctx.workspaceId) throw new Error('Workspace berubah. Muat ulang halaman.');
+    const query = metaReportQuery({ ...ctx.input, brandId, channel: 'non_cpas', groupBy: 'landing_page' },
+      { ...ctx.config, account_ids: ctx.scopedAccountIds.length ? ctx.scopedAccountIds : ['__no_authorized_meta_account__'] });
+    query.config.breakdown = input.breakdown; query.config.breakdown_only = true;
+    const raw = await getCachedMetaBreakdownReport(ctx.workspaceId, ctx.reportVersion, query);
+    return { schemaReady: true as const, workspaceId: ctx.workspaceId, reportVersion: ctx.reportVersion, breakdown: input.breakdown,
+      groups: raw.currencies.length > 1 ? [] : raw.groups };
+  });
 }
 
 /** Loaded only when the Matrix tab opens; reuse the report's scoped per-ad totals. */

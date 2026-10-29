@@ -26,7 +26,7 @@ export function createMetaReportRequests(concurrency = 2) {
 export class MetaReportUnavailableError extends Error {
   constructor(timeout: boolean) {
     super(timeout
-      ? 'Laporan Meta sedang sibuk. Silakan klik Muat ulang beberapa saat lagi.'
+      ? 'Perhitungan laporan melewati batas waktu. Silakan coba lagi.'
       : 'Laporan Meta belum berhasil dimuat. Silakan coba muat ulang.');
   }
 }

@@ -5,6 +5,7 @@ import type { RawMetaReport, ReportQuery } from './meta-ad-report';
 import { buildFormatCepMatrix } from './meta-format-cep-matrix';
 import type { MetaBrandReport } from './meta-brand-report';
 import type { MetaAnalysisFilters } from './meta-analysis-filters';
+import type { MetaBreakdownGroup } from './meta-report-breakdown';
 
 async function intentionLabels(workspaceId: string, brand?: string | null) {
   let query = createServiceSupabase().from('meta_ad_intention_catalog').select('key,label').eq('workspace_id', workspaceId);
@@ -20,7 +21,7 @@ async function intentionLabels(workspaceId: string, brand?: string | null) {
 const processState = globalThis as typeof globalThis & { metaReportRequests?: ReturnType<typeof createMetaReportRequests> };
 const requests = processState.metaReportRequests ??= createMetaReportRequests(2);
 
-async function readMetaAdReport(workspaceId: string, query: ReportQuery): Promise<RawMetaReport> {
+async function readMetaAdReport<T = RawMetaReport>(workspaceId: string, query: ReportQuery): Promise<T> {
   const result = await createServiceSupabase().rpc('get_meta_ad_report_incremental', {
     p_workspace_id: workspaceId, p_from: query.from, p_to: query.to, p_config: query.config,
     p_filters: { ...query.filters, ...(query.channel ? { channel: query.channel } : {}) }, p_brand: query.brand, p_group_by: query.groupBy,
@@ -30,7 +31,7 @@ async function readMetaAdReport(workspaceId: string, query: ReportQuery): Promis
     console.error('[meta-ad-report] RPC failed', { code: result.error.code, message: result.error.message });
     throw new MetaReportUnavailableError(result.error.code === '57014');
   }
-  return result.data as RawMetaReport;
+  return result.data as T;
 }
 
 // Auth is checked by the Server Action before every call, including cache hits.
@@ -62,7 +63,7 @@ export const getCachedMetaFormatCepMatrix = unstable_cache(
 export const getCachedMetaBrandDetailReport = unstable_cache(
   (workspaceId: string, revision: string, from: string, to: string, brand: string, channel: string, filters: MetaAnalysisFilters): Promise<{ website: RawMetaReport; cpas: RawMetaReport; cep: RawMetaReport }> => requests.run(
     JSON.stringify(['brand-detail', workspaceId, revision, from, to, brand, channel, filters]), async () => {
-      const result = await createServiceSupabase().rpc('get_meta_brand_detail_report', {
+      const result = await createServiceSupabase().rpc('get_meta_brand_detail_report_light', {
         p_workspace_id: workspaceId, p_from: from, p_to: to, p_brand: brand, p_channel: channel, p_filters: filters,
       });
       if (result.error) {
@@ -72,7 +73,17 @@ export const getCachedMetaBrandDetailReport = unstable_cache(
       const labels = await intentionLabels(workspaceId, brand);
       return Object.fromEntries(Object.entries(result.data).map(([key,value]) => [key,{ ...(value as object), intentionLabels: labels }])) as { website: RawMetaReport; cpas: RawMetaReport; cep: RawMetaReport };
     }),
-  ['meta-brand-detail-v6-analysis-filters'], { revalidate: 300 },
+  ['meta-brand-detail-v7-deferred-breakdown'], { revalidate: 300 },
+);
+
+export const getCachedMetaBreakdownReport = unstable_cache(
+  (workspaceId: string, revision: string, query: ReportQuery) => requests.run(
+    JSON.stringify(['breakdown', workspaceId, revision, query]), async () => {
+      const raw = await readMetaAdReport<{ currencies: string[]; groups: MetaBreakdownGroup[] }>(workspaceId, query);
+      // Cache only the requested child rows; they never replace parent totals.
+      return { currencies: raw.currencies, groups: raw.groups };
+    }),
+  ['meta-breakdown-v1'], { revalidate: 300 },
 );
 
 // One batched report shares the same database budget as detail/history reads.

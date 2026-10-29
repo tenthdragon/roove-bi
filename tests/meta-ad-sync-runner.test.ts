@@ -28,7 +28,7 @@ test('ad sync never replaces stored facts when the API report fails', async () =
 });
 test('new ads preserve successful performance snapshots while metadata is populated separately', async () => {
   const h = harness(false, true); const result = await runMetaAdSync(options, h.deps);
-  assert.equal(result.status, 'success'); assert.equal(h.snapshots.length, 1); assert.equal(h.creatives.length, 0);
+  assert.equal(result.status, 'success'); assert.equal(h.snapshots.length, 2); assert.equal(h.creatives.length, 0);
   assert.equal(h.snapshots[0].args.p_workspace_id, options.workspaceId);
   assert.equal(h.snapshots[0].args.p_account_id, 'act_1'); assert.equal(result.warnings?.length, 0);
   assert.ok(h.filters.some(f => f.table === 'meta_ad_accounts' && f.key === 'workspace_id' && f.value === options.workspaceId));
@@ -66,4 +66,20 @@ test('uncertified and mismatched adset caches are not frozen into metric snapsho
   const result = await runMetaAdSync(options, h.deps);assert.equal(result.status, 'success');
   assert.equal(h.snapshots[0].args.p_rows[0].creative_id, null);assert.deepEqual(h.snapshots[0].args.p_rows[0].landing_page_urls, []);
   assert.equal(h.snapshots[0].args.p_rows[0].metrics.spend, 100);assert.equal(h.creatives.length, 0);
+});
+
+
+test('successful snapshots warm only their account and dates, after the facts commit', async () => {
+  const h = harness();
+  await runMetaAdSync(options, h.deps);
+  assert.deepEqual(h.snapshots.map(r => r.name), ['replace_meta_ad_snapshot', 'ensure_meta_brand_report_days']);
+  assert.deepEqual(h.snapshots[1].args, { p_workspace_id: options.workspaceId, p_from: options.dateStart, p_to: options.dateEnd, p_accounts: ['act_1'] });
+});
+test('projection warm-up failure never retries or marks a committed snapshot failed', async () => {
+  const h = harness(); const svc = h.deps.createServiceSupabase(); const rpc = svc.rpc;
+  svc.rpc = async (name: string, args: unknown) => name === 'ensure_meta_brand_report_days' ? { error: { message: 'timeout' } } : rpc(name, args);
+  const result = await runMetaAdSync(options, h.deps);
+  assert.equal(result.status, 'success'); assert.equal(result.accounts_synced, 1);
+  assert.equal(h.snapshots.length, 1); assert.equal(result.errors.length, 0);
+  assert.match(result.warnings.join(' '), /metrik tersimpan/);
 });

@@ -16,10 +16,12 @@ migration += read('../supabase/migrations/232_meta_optimization_breakdown.sql').
 const matrixMigration = read('../supabase/migrations/234_meta_format_cep_matrix.sql').replace(/^\s*(BEGIN|COMMIT);\s*$/gm, '');
 const partnershipMigration = read('../supabase/migrations/235_meta_partnership_breakdown.sql').replace(/^\s*(BEGIN|COMMIT);\s*$/gm, '');
 const analysisMigration = read('../supabase/migrations/236_meta_analysis_filters.sql').replace(/^\s*(BEGIN|COMMIT);\s*$/gm, '');
+const nativeMigration = read('../supabase/migrations/241_meta_report_native_aggregation.sql').replace(/^\s*(BEGIN|COMMIT);\s*$/gm, '');
+const preserveReference = `DO $$ BEGIN EXECUTE replace(pg_get_functiondef('public.get_meta_ad_report_incremental(uuid,date,date,jsonb,jsonb,text,text,text,text,text)'::regprocedure), 'public.get_meta_ad_report_incremental(', 'pg_temp.meta_report_before_241('); EXECUTE replace(pg_get_functiondef('public.get_meta_brand_overview_report(uuid,date,date,jsonb)'::regprocedure), 'public.get_meta_brand_overview_report(', 'pg_temp.meta_overview_before_241('); END $$;`;
 const fastAdMigration = read('../supabase/migrations/233_meta_optimization_ad_totals.sql').replace(/^\s*(BEGIN|COMMIT);\s*$/gm, '');
 if (process.argv.includes('--benchmark')) {
   migration += fastAdMigration + matrixMigration + partnershipMigration + analysisMigration;
-  console.log(query('BEGIN;\n' + migration + '\n' + read('meta-detail-mapping-benchmark.sql') + '\nROLLBACK;').trim());
+  console.log(query('BEGIN;\n' + migration + '\n' + read('meta-detail-mapping-benchmark.sql') + '\n' + preserveReference + '\n' + nativeMigration + '\n' + read('meta-native-benchmark.sql') + '\nROLLBACK;').trim());
   assert.equal(snapshot(), before); process.exit(0);
 }
 let fixtures = read('meta-ctwa-destinations-db.sql').split('DO $$ DECLARE w uuid; config')[0].replace(/^\s*BEGIN;\s*$/gm, '');
@@ -31,6 +33,6 @@ UPDATE meta_ad_daily_metrics SET currency='USD' WHERE ad_id='99999997309';
 INSERT INTO meta_ad_daily_metrics(workspace_id,account_id,account_name,ad_id,ad_name,metric_date,currency,metrics,raw_insights,landing_page_urls)
 SELECT workspace_id,account_id,'Paused','999999973999','Paused','1996-01-01','IDR','{"spend":9000,"impressions":10000}','{}','[]' FROM ctwa_scope WHERE n=1;
 `;
-console.log(query('BEGIN;\n' + migration + '\n' + fixtures + '\n' + read('meta-optimization-ad-parity-before.sql') + '\n' + 'RESET ROLE;\n' + fastAdMigration + matrixMigration + '\nSET LOCAL ROLE service_role;\n' + read('meta-optimization-ad-parity-after.sql') + '\nRESET ROLE;\n' + partnershipMigration + analysisMigration + '\nSET LOCAL ROLE service_role;\nSAVEPOINT analysis_filter_tests;\n' + read('meta-analysis-filters-db.sql') + '\nROLLBACK TO SAVEPOINT analysis_filter_tests;\n' + read('meta-partnership-db.sql') + '\n' + read('meta-creative-format-db.sql') + '\n' + read('meta-optimization-db.sql') + '\n' + read('meta-format-cep-matrix-db.sql') + '\n' + read('meta-detail-mapping-db.sql') + '\n' + read('meta-brand-overview-db.sql') + '\nROLLBACK;').trim());
+console.log(query('BEGIN;\n' + migration + '\n' + fixtures + '\n' + read('meta-optimization-ad-parity-before.sql') + '\n' + 'RESET ROLE;\n' + fastAdMigration + matrixMigration + '\nSET LOCAL ROLE service_role;\n' + read('meta-optimization-ad-parity-after.sql') + '\nRESET ROLE;\n' + partnershipMigration + analysisMigration + '\n' + preserveReference + '\n' + nativeMigration + '\nSET LOCAL ROLE service_role;\nSAVEPOINT analysis_filter_tests;\n' + read('meta-analysis-filters-db.sql') + '\n' + read('meta-native-report-db.sql') + '\nROLLBACK TO SAVEPOINT analysis_filter_tests;\n' + read('meta-partnership-db.sql') + '\n' + read('meta-creative-format-db.sql') + '\n' + read('meta-optimization-db.sql') + '\n' + read('meta-format-cep-matrix-db.sql') + '\n' + read('meta-detail-mapping-db.sql') + '\nSAVEPOINT overview_suite;\n' + read('meta-brand-overview-db.sql') + '\nROLLBACK TO SAVEPOINT overview_suite;\n' + read('advertiser-brand-report-db.sql').split('RESET ROLE;')[0] + '\nROLLBACK;').trim());
 assert.equal(snapshot(), before, 'Fixtures or schema escaped rollback');
 console.log('PASS: all report/cache/schema changes rolled back');

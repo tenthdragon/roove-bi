@@ -67,6 +67,16 @@ export async function runMetaAdSync(options: { workspaceId: string; dateStart?: 
       });
       if (replaceError) throw new Error(replaceError.message);
       rowsInserted += rows.length; synced++;
+      // Source facts are committed first. Prepare only this account's changed
+      // dates for the next reader; derived-cache failure must never retry a sync.
+      try {
+        const { error: warmError } = await svc.rpc('ensure_meta_brand_report_days', {
+          p_workspace_id: workspaceId, p_from: start, p_to: end, p_accounts: [account.account_id],
+        });
+        if (warmError) throw new Error(warmError.message);
+      } catch {
+        warnings.push(`${account.account_name}: metrik tersimpan; cache laporan akan disiapkan saat dibuka.`);
+      }
     } catch (e) { errors.push(`${account.account_name}: ${e instanceof Error ? e.message : 'Ad sync gagal'}`); }
   }
   let alerts = 0;
