@@ -20,10 +20,11 @@ approval; creation, correction, deletion and grant changes retain audit rows.
 Corrections require access to both the original and destination brand. Revoked
 brands cannot be edited or deleted, even from a stale page. Advertiser history
 includes only their own changes whose before and after brands are still assigned.
-Owners and active workspace admins can enter both platforms without advertiser
-grants, and inspect entries and their audit log. Like advertisers, they can
+Owners, active workspace admins, and Brand Managers can enter both platforms
+for all brands in their active workspace without advertiser grants, and inspect
+entries and their audit log. Like advertisers, they can
 correct or remove only their own entries. Access follows the active workspace;
-an admin role in another workspace does not grant access here.
+an admin or Brand Manager role in another workspace does not grant access here.
 
 Migration `239_manual_marketplace_ad_spend.sql` enabled the initial cutover for both
 workspaces (`roove` and `apurva`). It requires both to exist, then copies legacy rows to
@@ -51,6 +52,12 @@ spend and grants. On a database already at 242, apply only 243 before the app;
 capture the current two function definitions/grants for rollback. It does not
 automatically assign brands or enable platform access for any user.
 
+Migration `244_manual_marketplace_spend_brand_manager.sql` adds active Brand
+Managers to both write functions. It preserves advertiser brand/platform scope,
+creator ownership, and version checks. On a database already at 243, apply only
+244 before the app and capture the two function definitions/grants for rollback.
+No spend rows or user assignments are changed.
+
 The deployment order is migration first, then the application. Review the
 production migration history and archived-row count before activation. The
 sheet fallback is only available for dates and brands actually present in
@@ -59,15 +66,16 @@ rows into `daily_ads_spend`; migration 240 seeds and projects them with source
 priority and audit behavior.
 
 After release, verify one granted advertiser with each platform combination
-(Shopee only, TikTok only, both), one ungranted advertiser, owner/admin input on
-both platforms without grants,
+(Shopee only, TikTok only, both), one ungranted advertiser, and owner/admin/Brand
+Manager input on both platforms without grants,
 and direct URL/write denial for other roles. Check workspace isolation, inactive
-admin denial, stale-version rejection, and denial of edits/deletions to another
-user’s entries. For an advertiser assigned to brand A, check that both platforms
+admin/Brand Manager denial, stale-version rejection, and denial of edits/deletions
+to another user’s entries. For an advertiser assigned to brand A, check that both platforms
 show only assigned brands and their costs, including spreadsheet fallback and
 history. Deny a direct save for brand B, changes from a revoked brand B to A,
 and deletion of revoked-brand entries. Removing all brand assignments must deny
-the page and writes. Owner/admin access remains available without assignments.
+the page and writes. Owner/admin/Brand Manager access remains available without
+assignments.
 Confirm that creating, editing and
 deleting an entry switches exactly one date/brand/platform between
 `manual_marketplace` and `google_sheets` effective rows, without summing both,
@@ -83,7 +91,7 @@ node tests/manual-marketplace-spend-access-database.mjs
 ```
 
 Run `npm run db:local:verify` from the primary checkout before the database test.
-The test applies only migration 243 to a disposable database with minimal schema
+The test applies only migration 244 to a disposable database with minimal schema
 dependencies in the local Supabase container, then removes that database. It
 does not apply migrations to the shared local sample. CI runs the same role and
 brand-boundary checks with `--ci` in its disposable PostgreSQL container.
