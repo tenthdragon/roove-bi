@@ -92,7 +92,7 @@ export async function GET() {
           (row) => row.permission_key,
         );
 
-        if (effectiveRole === 'admin' && manualAdSpendEnabled) {
+        if (['admin', 'brand_manager'].includes(effectiveRole) && manualAdSpendEnabled) {
           permissions.push('tab:manual-ad-spend');
         }
 

@@ -17,7 +17,7 @@ test('manual zero suppresses only the matching sheet platform, brand, and date',
   assert.deepEqual(selectActiveSheetFallbackRows([], sheet), sheet);
 });
 
-test('advertiser input menu requires its individual grant; owner/admin can access it', () => {
+test('advertiser input menu requires its individual grant; owner/admin/Brand Manager can access it', () => {
   const base = new Set(['tab:meta-funnels']);
   assert.deepEqual(buildVisibleTabs('advertiser', base)[0]?.children?.map((tab) => tab.id), ['meta-funnels']);
   const granted = new Set([...base, 'tab:manual-ad-spend']);
@@ -26,7 +26,8 @@ test('advertiser input menu requires its individual grant; owner/admin can acces
   assert.deepEqual(buildVisibleTabs('advertiser', new Set(['tab:manual-ad-spend']))[0]?.children?.map((tab) => tab.id), ['manual-ad-spend']);
   assert.deepEqual(buildVisibleTabs('admin', new Set(['tab:manual-ad-spend']))[0]?.children?.map((tab) => tab.id), ['manual-ad-spend']);
   assert.ok(getOrderedAccessibleTabIds('owner', new Set()).includes('manual-ad-spend'));
-  for (const role of ['staf_ops', 'brand_manager', 'pending', 'marketing_api_reviewer']) {
+  assert.deepEqual(buildVisibleTabs('brand_manager', new Set(['tab:manual-ad-spend']))[0]?.children?.map((tab) => tab.id), ['manual-ad-spend']);
+  for (const role of ['staf_ops', 'pending', 'marketing_api_reviewer']) {
     assert.equal(getOrderedAccessibleTabIds(role, granted).includes('manual-ad-spend'), false);
   }
 });
@@ -59,7 +60,7 @@ function loadActions(stubs: Record<string, unknown>, file = '../lib/manual-marke
   return exports as Record<string, (...args: any[]) => Promise<any>>;
 }
 
-test('owner/admin/advertiser can write and delete, with active-workspace and input checks', async () => {
+test('owner/admin/Brand Manager/advertiser can write and delete, with active-workspace and input checks', async () => {
   const calls: Array<[string, Record<string, unknown>]> = [];
   let role = 'advertiser';
   const actions = loadActions({
@@ -89,7 +90,7 @@ test('owner/admin/advertiser can write and delete, with active-workspace and inp
   await assert.rejects(actions.saveManualMarketplaceSpend({ ...entry, workspaceId: 'workspace-b' }), /Workspace berubah/);
   await assert.rejects(actions.saveManualMarketplaceSpend({ ...entry, platform: 'meta_ads' }), /tidak valid/);
   await assert.rejects(actions.saveManualMarketplaceSpend({ ...entry, amount: -1 }), /tidak valid/);
-  for (const allowedRole of ['owner', 'admin', 'advertiser']) {
+  for (const allowedRole of ['owner', 'admin', 'brand_manager', 'advertiser']) {
     role = allowedRole;
     await actions.saveManualMarketplaceSpend(entry);
     await actions.saveManualMarketplaceSpend({ ...entry, id: 12, version: 1, amount: 0 });
@@ -99,12 +100,12 @@ test('owner/admin/advertiser can write and delete, with active-workspace and inp
     }]);
     await assert.rejects(actions.deleteManualMarketplaceSpend({ workspaceId: 'workspace-b', id: 12, version: 2 }), /Workspace berubah/);
   }
-  for (const deniedRole of ['brand_manager', 'staf_ops', 'pending', 'marketing_api_reviewer']) {
+  for (const deniedRole of ['staf_ops', 'pending', 'marketing_api_reviewer']) {
     role = deniedRole;
-    await assert.rejects(actions.saveManualMarketplaceSpend(entry), /Hanya owner, admin, dan advertiser/);
-    await assert.rejects(actions.deleteManualMarketplaceSpend({ workspaceId: 'workspace-a', id: 12, version: 2 }), /Hanya owner, admin, dan advertiser/);
+    await assert.rejects(actions.saveManualMarketplaceSpend(entry), /Hanya owner, admin, Brand Manager, dan advertiser/);
+    await assert.rejects(actions.deleteManualMarketplaceSpend({ workspaceId: 'workspace-a', id: 12, version: 2 }), /Hanya owner, admin, Brand Manager, dan advertiser/);
   }
-  assert.equal(calls.length, 10);
+  assert.equal(calls.length, 13);
 });
 
 function serviceStub(data: Record<string, unknown>, queries: Array<{ table: string; filters: unknown[][] }>, filterRows = false, errorTables: string[] = []) {
@@ -144,7 +145,7 @@ function serviceStub(data: Record<string, unknown>, queries: Array<{ table: stri
   } };
 }
 
-test('page enables both platforms for owner/admin, while advertiser grants and history stay scoped', async () => {
+test('page enables both platforms for owner/admin/Brand Manager, while advertiser grants and history stay scoped', async () => {
   let role = 'owner';
   let enabled = true;
   const queries: Array<{ table: string; filters: unknown[][] }> = [];
@@ -171,7 +172,7 @@ test('page enables both platforms for owner/admin, while advertiser grants and h
       MANUAL_MARKETPLACE_PLATFORMS: ['shopee_ads', 'tiktok_ads'],
     },
   });
-  for (const privilegedRole of ['owner', 'admin']) {
+  for (const privilegedRole of ['owner', 'admin', 'brand_manager']) {
     role = privilegedRole; queries.length = 0;
     const page = await actions.getManualMarketplaceSpendPage('2026-10');
     assert.equal(page.canInput, true);
@@ -279,7 +280,7 @@ test('assigned brands scope both platforms, sheet totals and both audit snapshot
   await assert.rejects(actions.getManualMarketplaceSpendPage('2026-10'), /Belum ada brand/);
   assert.equal(queries.some(q => q.table === 'manual_marketplace_ad_spend'), false);
 
-  for (role of ['owner', 'admin']) {
+  for (role of ['owner', 'admin', 'brand_manager']) {
     const privileged = await actions.getManualMarketplaceSpendPage('2026-10');
     assert.deepEqual(privileged.brands.map((b: any) => b.id), [1, 2, 3]);
     assert.equal(privileged.entries.length, 5);
@@ -288,9 +289,14 @@ test('assigned brands scope both platforms, sheet totals and both audit snapshot
   }
 });
 
-test('profile grants admin navigation only in enabled workspaces and uses the active membership role', async () => {
+test('profile grants admin/Brand Manager navigation only in enabled workspaces and uses the active membership role', async () => {
   for (const [profileRole, membershipRole, enabled, granted, expected] of [
     ['admin', 'admin', true, false, true],
+    ['brand_manager', 'brand_manager', true, false, true],
+    ['brand_manager', 'brand_manager', false, false, false],
+    ['advertiser', 'brand_manager', true, false, true],
+    ['brand_manager', 'advertiser', true, false, false],
+    ['brand_manager', 'staf_ops', true, true, false],
     ['admin', 'admin', false, false, false],
     ['advertiser', 'admin', true, false, true],
     ['admin', 'advertiser', true, false, false],
@@ -319,7 +325,7 @@ test('profile grants admin navigation only in enabled workspaces and uses the ac
     }, '../app/api/auth/profile/route.ts');
     const result = await route.GET();
     assert.equal(result.permissions.includes('tab:manual-ad-spend'), expected, `${profileRole}/${membershipRole}/${enabled}/${granted}`);
-    if (membershipRole === 'admin') assert.equal(queries.some(q => q.table === 'workspace_advertiser_spend_access'), false);
+    if (['admin', 'brand_manager'].includes(membershipRole)) assert.equal(queries.some(q => q.table === 'workspace_advertiser_spend_access'), false);
   }
 });
 
