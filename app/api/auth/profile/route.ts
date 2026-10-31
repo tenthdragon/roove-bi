@@ -92,6 +92,10 @@ export async function GET() {
           (row) => row.permission_key,
         );
 
+        if (effectiveRole === 'admin' && manualAdSpendEnabled) {
+          permissions.push('tab:manual-ad-spend');
+        }
+
         if (effectiveRole === 'advertiser' && manualAdSpendEnabled) {
           const spendAccess = await service.from('workspace_advertiser_spend_access')
             .select('platform')

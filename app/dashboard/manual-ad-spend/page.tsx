@@ -187,7 +187,7 @@ export default function ManualAdSpendPage() {
         </label>
       </header>
 
-      {data && <p className={styles.cutover}>Sejak {formatDate(data.startsOn)}, input advertiser menjadi sumber utama. Jika belum ada input untuk tanggal, brand, dan platform tertentu, MKT Fee memakai angka Google Sheet yang tersedia.</p>}
+      {data && <p className={styles.cutover}>Sejak {formatDate(data.startsOn)}, input manual menjadi sumber utama. Jika belum ada input untuk tanggal, brand, dan platform tertentu, MKT Fee memakai angka Google Sheet yang tersedia.</p>}
       {error && <div role="alert" className={styles.error}>{error} <button type="button" onClick={() => void load()}>Muat ulang</button></div>}
       {message && <div role="status" className={styles.success}>{message}</div>}
       {loading && !data && <div className={styles.state}>Memuat catatan biaya iklan…</div>}
@@ -260,7 +260,7 @@ export default function ManualAdSpendPage() {
                       <td className={styles.amount}>{fmtRupiah(Number(entry.amount))}</td>
                       <td><span className={styles.manualSource}>Input manual</span></td>
                       <td>{entry.note || '—'}</td>
-                      <td>{entry.created_by === data.viewerId ? 'Anda' : data.actorNames[entry.created_by] || 'Advertiser lain'}</td>
+                      <td>{entry.created_by === data.viewerId ? 'Anda' : data.actorNames[entry.created_by] || 'Pengguna lain'}</td>
                       <td>{formatTimestamp(entry.updated_at)}</td>
                       <td>{data.canInput && entry.created_by === data.viewerId ? <div className={styles.rowActions}>
                         <button type="button" disabled={busy} onClick={() => startEdit(entry)}>Edit</button>
@@ -292,7 +292,7 @@ export default function ManualAdSpendPage() {
         {data.history.length === 0 ? <p>Belum ada perubahan yang tercatat.</p> : <ul>
           {data.history.map((row) => <li key={row.id}>
             <span>{formatTimestamp(row.changed_at)}</span>
-            <strong>{row.action === 'created' ? 'Input' : row.action === 'updated' ? 'Koreksi' : 'Hapus'} · {MANUAL_MARKETPLACE_LABELS[row.platform as ManualMarketplacePlatform]} · {row.changed_by === data.viewerId ? 'Anda' : data.actorNames[row.changed_by] || 'Advertiser'}</strong>
+            <strong>{row.action === 'created' ? 'Input' : row.action === 'updated' ? 'Koreksi' : 'Hapus'} · {MANUAL_MARKETPLACE_LABELS[row.platform as ManualMarketplacePlatform]} · {row.changed_by === data.viewerId ? 'Anda' : data.actorNames[row.changed_by] || 'Pengguna lain'}</strong>
             <span>{auditDescription(row, brands)}</span>
           </li>)}
         </ul>}
