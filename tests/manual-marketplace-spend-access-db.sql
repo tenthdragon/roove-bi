@@ -35,6 +35,9 @@ INSERT INTO public.workspace_memberships VALUES
   ('00000000-0000-4000-8000-000000000002', '10000000-0000-4000-8000-000000000002', 'staf_ops', 'active');
 INSERT INTO public.workspace_advertiser_spend_access (workspace_id, user_id, platform)
 VALUES ('00000000-0000-4000-8000-000000000001', '10000000-0000-4000-8000-000000000003', 'shopee_ads');
+INSERT INTO public.workspace_advertiser_brands (workspace_id, user_id, brand_id) VALUES
+  ('00000000-0000-4000-8000-000000000001', '10000000-0000-4000-8000-000000000003', 1),
+  ('00000000-0000-4000-8000-000000000001', '10000000-0000-4000-8000-000000000003', 4);
 
 DO $$
 DECLARE

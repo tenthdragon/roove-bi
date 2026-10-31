@@ -22,15 +22,18 @@ async function getSheetFallbackRows(
   platforms: ManualMarketplacePlatform[],
   start: string,
   end: string,
+  brandIds: number[] | null,
 ) {
   const svc = createServiceSupabase();
   const rows: Array<{ date: string; platform: ManualMarketplacePlatform; brand_id: number; spent: number }> = [];
   for (let offset = 0; ; offset += 1000) {
-    const page = await svc.from('manual_marketplace_sheet_fallback')
+    let query = svc.from('manual_marketplace_sheet_fallback')
       .select('date,platform,brand_id,spent')
       .eq('workspace_id', workspaceId).in('platform', platforms)
       .gte('date', start).lte('date', end)
       .order('date').order('brand_id').range(offset, offset + 999);
+    if (brandIds !== null) query = query.in('brand_id', brandIds);
+    const page = await query;
     if (page.error) throw new Error('Gagal memuat fallback spreadsheet.');
     rows.push(...((page.data || []) as typeof rows));
     if ((page.data || []).length < 1000) break;
@@ -97,28 +100,45 @@ export async function getManualMarketplaceSpendPage(month: string) {
   if (!policy.data) throw new Error('Input iklan belum aktif untuk workspace ini.');
 
   let platforms = MANUAL_MARKETPLACE_PLATFORMS;
+  let brandIds: number[] | null = null;
   if (ctx.profile.role === 'advertiser') {
-    const grants = await svc.from('workspace_advertiser_spend_access')
-      .select('platform').eq('workspace_id', ctx.workspaceId).eq('user_id', ctx.profile.id);
-    if (grants.error) throw new Error('Gagal memverifikasi akses input iklan.');
+    const [grants, brands] = await Promise.all([
+      svc.from('workspace_advertiser_spend_access')
+        .select('platform').eq('workspace_id', ctx.workspaceId).eq('user_id', ctx.profile.id),
+      svc.from('workspace_advertiser_brands')
+        .select('brand_id').eq('workspace_id', ctx.workspaceId).eq('user_id', ctx.profile.id),
+    ]);
+    if (grants.error || brands.error) throw new Error('Gagal memverifikasi akses input iklan.');
     platforms = (grants.data || []).map((row) => row.platform).filter(isManualMarketplacePlatform);
     if (platforms.length === 0) throw new Error('Akun ini belum diberi akses input Shopee Ads atau TikTok Ads.');
+    brandIds = (brands.data || []).map((row) => Number(row.brand_id));
+    if (brandIds.length === 0) throw new Error('Belum ada brand yang ditugaskan. Hubungi owner workspace untuk mendapatkan akses brand.');
   }
 
+  let brandsQuery = svc.from('brands').select('id,name,is_active').eq('workspace_id', ctx.workspaceId).order('name');
+  let entriesQuery = svc.from('manual_marketplace_ad_spend')
+    .select('id,platform,brand_id,spend_date,amount,note,created_by,updated_by,created_at,updated_at,version')
+    .eq('workspace_id', ctx.workspaceId).in('platform', platforms)
+    .gte('spend_date', start).lte('spend_date', end)
+    .order('spend_date', { ascending: false }).order('brand_id');
   let historyQuery = svc.from('manual_marketplace_ad_spend_audit')
     .select('id,entry_id,platform,action,before_value,after_value,changed_by,changed_at')
     .eq('workspace_id', ctx.workspaceId).in('platform', platforms);
-  if (ctx.profile.role === 'advertiser') historyQuery = historyQuery.eq('changed_by', ctx.profile.id);
+  if (brandIds !== null) {
+    brandsQuery = brandsQuery.in('id', brandIds);
+    entriesQuery = entriesQuery.in('brand_id', brandIds);
+    // Both snapshots must be in scope: a past brand correction must not expose
+    // a brand whose assignment has since been revoked.
+    historyQuery = historyQuery.eq('changed_by', ctx.profile.id)
+      .or(`before_value.is.null,before_value->>brand_id.in.(${brandIds.join(',')})`)
+      .or(`after_value.is.null,after_value->>brand_id.in.(${brandIds.join(',')})`);
+  }
 
   const [brands, entries, history, fallbackRows] = await Promise.all([
-    svc.from('brands').select('id,name,is_active').eq('workspace_id', ctx.workspaceId).order('name'),
-    svc.from('manual_marketplace_ad_spend')
-      .select('id,platform,brand_id,spend_date,amount,note,created_by,updated_by,created_at,updated_at,version')
-      .eq('workspace_id', ctx.workspaceId).in('platform', platforms)
-      .gte('spend_date', start).lte('spend_date', end)
-      .order('spend_date', { ascending: false }).order('brand_id'),
+    brandsQuery,
+    entriesQuery,
     historyQuery.order('changed_at', { ascending: false }).limit(50),
-    getSheetFallbackRows(ctx.workspaceId, platforms, start, end),
+    getSheetFallbackRows(ctx.workspaceId, platforms, start, end, brandIds),
   ]);
   if (brands.error || entries.error || history.error) throw new Error('Gagal memuat catatan biaya iklan.');
   const actorNames: Record<string, string> = {};

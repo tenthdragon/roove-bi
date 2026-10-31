@@ -8,11 +8,18 @@ and suppresses the sheet value. The platform dashboard remains the place to
 inspect actual platform metrics. Meta Ads keeps its automatic sync.
 
 The owner grants Shopee Ads and/or TikTok Ads separately for each active
-advertiser in **Admin → Users → Hak input biaya iklan**. A grant covers every
-active brand in the workspace. An advertiser with neither grant does not see
+advertiser in **Admin → Users → Hak input biaya iklan**. Each platform grant is
+limited to the brands assigned in **Brand yang dapat diakses**, using the same
+assignments as Meta Ads. New entries require an active, assigned brand. The brand
+picker, manual entries, spreadsheet fallback, and their totals use this scope.
+An advertiser with neither platform grant does not see
 **Marketing Channel → Input Biaya Iklan**. The page has one section for each
-granted platform. Advertisers can correct or remove their own entries without
+granted platform; without any brand assignment it shows an access explanation
+and returns no spend data. Advertisers can correct or remove their own entries without
 approval; creation, correction, deletion and grant changes retain audit rows.
+Corrections require access to both the original and destination brand. Revoked
+brands cannot be edited or deleted, even from a stale page. Advertiser history
+includes only their own changes whose before and after brands are still assigned.
 Owners and active workspace admins can enter both platforms without advertiser
 grants, and inspect entries and their audit log. Like advertisers, they can
 correct or remove only their own entries. Access follows the active workspace;
@@ -37,6 +44,13 @@ access by replacing only the save/delete functions. It does not change existing
 spend rows, advertiser grants, source priority, or audit triggers. Capture the
 current definitions/grants of those two functions before release for rollback.
 
+Migration `243_manual_marketplace_spend_brand_scope.sql` replaces those two
+functions to require the existing brand assignments for advertiser writes. It
+preserves owner/admin access, creator ownership, version checks, and all stored
+spend and grants. On a database already at 242, apply only 243 before the app;
+capture the current two function definitions/grants for rollback. It does not
+automatically assign brands or enable platform access for any user.
+
 The deployment order is migration first, then the application. Review the
 production migration history and archived-row count before activation. The
 sheet fallback is only available for dates and brands actually present in
@@ -49,7 +63,12 @@ After release, verify one granted advertiser with each platform combination
 both platforms without grants,
 and direct URL/write denial for other roles. Check workspace isolation, inactive
 admin denial, stale-version rejection, and denial of edits/deletions to another
-user’s entries. Confirm that creating, editing and
+user’s entries. For an advertiser assigned to brand A, check that both platforms
+show only assigned brands and their costs, including spreadsheet fallback and
+history. Deny a direct save for brand B, changes from a revoked brand B to A,
+and deletion of revoked-brand entries. Removing all brand assignments must deny
+the page and writes. Owner/admin access remains available without assignments.
+Confirm that creating, editing and
 deleting an entry switches exactly one date/brand/platform between
 `manual_marketplace` and `google_sheets` effective rows, without summing both,
 and creates an audit row each time. Verify a zero manual input suppresses a
@@ -64,6 +83,7 @@ node tests/manual-marketplace-spend-access-database.mjs
 ```
 
 Run `npm run db:local:verify` from the primary checkout before the database test.
-The test applies only migration 242 to a disposable database with minimal schema
+The test applies only migration 243 to a disposable database with minimal schema
 dependencies in the local Supabase container, then removes that database. It
-does not apply migrations to the shared local sample.
+does not apply migrations to the shared local sample. CI runs the same role and
+brand-boundary checks with `--ci` in its disposable PostgreSQL container.

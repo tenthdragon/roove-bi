@@ -47,7 +47,7 @@ export default function AdvertiserSpendAccess({ userId, workspaceId }: { userId:
     <fieldset disabled={busy || loading || !enabled} style={{ width: '100%', border: '1px solid var(--border)', borderRadius: 8, padding: 12 }}>
       <legend style={{ fontWeight: 600 }}>Hak input biaya iklan</legend>
       <p style={{ fontSize: 12, color: 'var(--text-secondary)', margin: '0 0 10px' }}>
-        Pilih platform yang boleh diisi advertiser ini. Berlaku untuk semua brand aktif di workspace.
+        Pilih platform yang boleh diisi advertiser ini. Input hanya tersedia untuk brand aktif yang dipilih pada “Brand yang dapat diakses”.
       </p>
       {loading ? <span>Memuat akses…</span> : !enabled ? <span>Input biaya iklan belum aktif untuk workspace ini.</span> : (
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 16 }}>
