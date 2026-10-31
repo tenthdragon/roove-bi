@@ -76,6 +76,8 @@ jobs:
         run: node tests/sync-queue-database.mjs --ci
       - name: Check MCP marketing dimensions and tenant isolation
         run: node tests/mcp-marketing-reader-database.mjs --ci
+      - name: Check marketplace spend brand and role boundaries
+        run: node tests/manual-marketplace-spend-access-database.mjs --ci
       - name: Remove disposable database container
         if: always()
         run: docker rm -f roove-access-requests-test

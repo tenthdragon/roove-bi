@@ -22,7 +22,7 @@ export default function AdvertiserBrandAssignments({ userId, workspaceId }: { us
   }
   return <fieldset disabled={busy} style={{ width: '100%', border: '1px solid var(--border)', borderRadius: 8, padding: 12 }}>
     <legend style={{ fontWeight: 600 }}>Brand yang dapat diakses</legend>
-    <p style={{ fontSize: 12, color: 'var(--text-secondary)', margin: '0 0 10px' }}>Pilih satu atau lebih brand. Tanpa pilihan, advertiser tidak dapat melihat data Meta Ads.</p>
+    <p style={{ fontSize: 12, color: 'var(--text-secondary)', margin: '0 0 10px' }}>Pilih satu atau lebih brand untuk akses Meta Ads dan input biaya Shopee Ads/TikTok Ads. Izin input platform tetap diatur pada “Hak input biaya iklan”. Tanpa pilihan brand, advertiser tidak dapat mengakses data atau menginput biaya iklan.</p>
     {!data && !message && <span>Memuat brand…</span>}
     <div style={{ display: 'flex', flexWrap: 'wrap', gap: 16 }}>{data?.brands.map(brand => <label key={brand.id} style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
       <input type="checkbox" checked={selected.includes(brand.id)} onChange={e => setSelected(ids => e.target.checked ? [...ids, brand.id] : ids.filter(id => id !== brand.id))} />{brand.name}

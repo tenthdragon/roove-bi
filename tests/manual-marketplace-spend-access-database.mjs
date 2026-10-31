@@ -2,12 +2,13 @@ import { execFileSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { randomBytes } from 'node:crypto';
 
-// Only migration 242 runs, in a disposable database with minimal dependencies.
+// Only migration 243 runs, in a disposable database with minimal dependencies.
 // The shared local sample, its schema, and existing spend are never changed.
 const database = `manual_spend_access_test_${randomBytes(6).toString('hex')}`;
+const container = process.argv.includes('--ci') ? 'roove-access-requests-test' : 'supabase_db_roove-bi-local';
 const read = path => readFileSync(new URL(path, import.meta.url), 'utf8');
 const docker = (command, args, input) => execFileSync('docker', [
-  'exec', '-i', 'supabase_db_roove-bi-local', 'sh', '-c',
+  'exec', '-i', container, 'sh', '-c',
   'export PGPASSWORD="$POSTGRES_PASSWORD"; exec "$@"', 'manual-spend-access-test',
   command, '-U', 'supabase_admin', ...args,
 ], { input, encoding: 'utf8' });
@@ -22,11 +23,17 @@ const roleHelpers = ['is_platform_owner', 'workspace_has_role'].map(name =>
   definition(foundation, new RegExp(`CREATE OR REPLACE FUNCTION public\\.${name}\\([\\s\\S]*?\\$\\$;`))).join('\n');
 const tables = ['manual_marketplace_ad_spend_cutovers', 'workspace_advertiser_spend_access', 'manual_marketplace_ad_spend'].map(name =>
   definition(initial, new RegExp(`CREATE TABLE public\\.${name} \\([\\s\\S]*?\\n\\);`))).join('\n');
-const migration = read('../supabase/migrations/242_manual_marketplace_spend_owner_admin.sql');
+const brandAssignments = definition(read('../supabase/migrations/224_advertiser_brand_access.sql'), /CREATE TABLE public\.workspace_advertiser_brands \([\s\S]*?\n\);/);
+const migration = read('../supabase/migrations/243_manual_marketplace_spend_brand_scope.sql');
 
 docker('createdb', [database]);
 try {
   process.stdout.write(docker('psql', ['-d', database, '-X', '-Atq', '-v', 'ON_ERROR_STOP=1'], `
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname='anon') THEN CREATE ROLE anon; END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname='authenticated') THEN CREATE ROLE authenticated; END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname='service_role') THEN CREATE ROLE service_role; END IF;
+END $$;
 CREATE SCHEMA auth;
 CREATE FUNCTION auth.uid() RETURNS uuid LANGUAGE sql STABLE AS $$
   SELECT nullif(current_setting('request.jwt.claim.sub', true), '')::uuid;
@@ -42,10 +49,12 @@ CREATE TABLE public.brands (
   id integer, workspace_id uuid, is_active boolean, PRIMARY KEY(workspace_id, id)
 );
 ${tables}
+${brandAssignments}
 ${roleHelpers}
 ${migration}
 ${migration}
 ${read('./manual-marketplace-spend-access-db.sql')}
+${read('./manual-marketplace-spend-brand-scope-db.sql')}
 `));
 } finally {
   docker('dropdb', ['--if-exists', database]);
