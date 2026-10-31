@@ -85,7 +85,7 @@ export async function saveAdvertiserSpendAccess(
 }
 
 export async function getManualMarketplaceSpendPage(month: string) {
-  const ctx = await requireDashboardRoles(['owner', 'advertiser'], 'Halaman input iklan hanya tersedia untuk advertiser.');
+  const ctx = await requireDashboardRoles(['owner', 'admin', 'advertiser'], 'Halaman input iklan hanya tersedia untuk owner, admin, dan advertiser.');
   if (!isWorkspaceModuleEnabled(ctx.workspace, 'marketing') || !isWorkspaceModuleEnabled(ctx.workspace, 'manual-ad-spend')) {
     throw new Error('Input iklan tidak diaktifkan untuk workspace ini.');
   }
@@ -122,7 +122,7 @@ export async function getManualMarketplaceSpendPage(month: string) {
   ]);
   if (brands.error || entries.error || history.error) throw new Error('Gagal memuat catatan biaya iklan.');
   const actorNames: Record<string, string> = {};
-  if (ctx.profile.role === 'owner') {
+  if (ctx.profile.role === 'owner' || ctx.profile.role === 'admin') {
     const actorIds = [...new Set([
       ...(entries.data || []).map((row) => row.created_by),
       ...(history.data || []).map((row) => row.changed_by),
@@ -138,7 +138,7 @@ export async function getManualMarketplaceSpendPage(month: string) {
     workspaceId: ctx.workspaceId,
     viewerId: ctx.profile.id,
     actorNames,
-    canInput: ctx.profile.role === 'advertiser',
+    canInput: true,
     startsOn: policy.data.starts_on as string,
     platforms,
     brands: (brands.data || []) as { id: number; name: string; is_active: boolean }[],
@@ -162,7 +162,7 @@ export async function saveManualMarketplaceSpend(input: {
   note: string;
   version: number | null;
 }) {
-  const ctx = await requireDashboardRoles(['advertiser'], 'Hanya advertiser yang dapat mengisi biaya iklan.');
+  const ctx = await requireDashboardRoles(['owner', 'admin', 'advertiser'], 'Hanya owner, admin, dan advertiser yang dapat mengisi biaya iklan.');
   if (ctx.workspaceId !== input.workspaceId) throw new Error('Workspace berubah. Muat ulang sebelum menyimpan.');
   if (!isManualMarketplacePlatform(input.platform) || !Number.isSafeInteger(input.brandId) || input.brandId <= 0
     || !/^\d{4}-\d{2}-\d{2}$/.test(input.date) || !Number.isFinite(input.amount)
@@ -188,7 +188,7 @@ export async function saveManualMarketplaceSpend(input: {
 export async function deleteManualMarketplaceSpend(input: {
   workspaceId: string; id: number; version: number;
 }) {
-  const ctx = await requireDashboardRoles(['advertiser'], 'Hanya advertiser yang dapat mengoreksi biaya iklan.');
+  const ctx = await requireDashboardRoles(['owner', 'admin', 'advertiser'], 'Hanya owner, admin, dan advertiser yang dapat mengoreksi biaya iklan.');
   if (ctx.workspaceId !== input.workspaceId) throw new Error('Workspace berubah. Muat ulang sebelum menghapus.');
   if (!Number.isSafeInteger(input.id) || input.id <= 0 || !Number.isSafeInteger(input.version) || input.version <= 0) {
     throw new Error('Input biaya iklan tidak valid.');
