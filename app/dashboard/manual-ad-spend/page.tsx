@@ -380,8 +380,13 @@ function SpendWorkspace({ workspaceId }: { workspaceId: string }) {
             entry.brand_id === Number(draft.brandId) && entry.spend_date === draft.date && entry.id !== draft.id,
         );
         const replacing = fallbackRows.find((row) => row.brand_id === Number(draft.brandId) && row.date === draft.date);
-        const manualTotal = entries.reduce((sum, entry) => sum + Number(entry.amount), 0);
-        const sheetTotal = fallbackRows.reduce((sum, row) => sum + Number(row.amount), 0);
+        const visibleManual = visibleRows.filter((row) => row.kind === 'manual');
+        const visibleSheet = visibleRows.filter((row) => row.kind === 'sheet');
+        const manualTotal = visibleManual.reduce((sum, row) => sum + Number(row.entry.amount), 0);
+        const sheetTotal = visibleSheet.reduce((sum, row) => sum + Number(row.fallback.amount), 0);
+        const total = manualTotal + sheetTotal;
+        const brandLabel = filter.brand ? brands.get(Number(filter.brand)) || `Brand #${filter.brand}` : 'semua brand';
+        const sourceLabel = filter.source === 'manual' ? 'Input manual' : filter.source === 'sheet' ? 'Spreadsheet' : '';
         const notice = feedback[platform];
         const formId = `spend-form-${platform}`;
         const editableBrand =
@@ -398,12 +403,12 @@ function SpendWorkspace({ workspaceId }: { workspaceId: string }) {
               <div>
                 <h2 id={`section-${platform}`}>{MANUAL_MARKETPLACE_LABELS[platform]}</h2>
                 <p>
-                  {monthLabel} · {entries.length} input manual · {fallbackRows.length} spreadsheet
+                  {monthLabel} · {visibleManual.length} input manual · {visibleSheet.length} spreadsheet
                 </p>
               </div>
-              <div className={styles.total}>
-                <span>Total MKT Fee · semua brand</span>
-                <strong>{money(manualTotal + sheetTotal)}</strong>
+              <div className={styles.total} aria-live="polite" aria-atomic="true">
+                <span>Total MKT Fee · {brandLabel}{sourceLabel && ` · ${sourceLabel}`}</span>
+                <strong>{money(total)}</strong>
                 <small>
                   Manual {money(manualTotal)} · Spreadsheet {money(sheetTotal)}
                 </small>
@@ -756,8 +761,7 @@ function SpendWorkspace({ workspaceId }: { workspaceId: string }) {
             )}
             {filtered && (
               <div className={styles.tableFoot}>
-                Filter hanya mengubah rincian. Total MKT Fee tetap mencakup semua brand yang dapat Anda akses pada
-                periode ini.
+                Total sesuai filter: <strong>{money(total)}</strong> dari {visibleRows.length} catatan.
               </div>
             )}
           </section>
