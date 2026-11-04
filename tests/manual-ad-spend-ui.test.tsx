@@ -145,7 +145,7 @@ test('failed save preserves the draft and retry accepts explicit zero with works
   await view.unmount();
 });
 
-test('duplicate date and brand cannot save; source filters do not alter the platform total', async () => {
+test('duplicate date and brand cannot save; source filters update the displayed total', async () => {
   const view = await mount();
   await view.change('brand-shopee_ads', '1');
   await view.change('date-shopee_ads', '2026-11-02');
@@ -158,9 +158,76 @@ test('duplicate date and brand cannot save; source filters do not alter the plat
       .findByProps({ 'aria-label': 'Filter sumber Shopee Ads' })
       .props.onChange({ target: { value: 'sheet' } }),
   );
-  assert.match(view.text(), /Rp 450.000/);
+  const summary = view.root.root.findByProps({ 'aria-labelledby': 'section-shopee_ads' }).findByProps({ className: 'total' });
+  assert.equal(summary.findByType('strong').children.join(''), 'Rp 300.000');
   assert.match(view.text(), /1 dari 2 catatan/);
   assert.equal(view.root.root.findAllByProps({ 'aria-label': 'Edit Roove, 2 Nov 2026' }).length, 0);
+  await view.unmount();
+});
+
+test('brand and source filters aggregate the visible costs, preserve overrides, and reset per platform', async () => {
+  const data = base();
+  data.brands.push({ id: 3, name: 'Empty brand', is_active: true });
+  data.entries.push(
+    { ...data.entries[0], id: 2, brand_id: 2, amount: 0 },
+    { ...data.entries[0], id: 3, platform: 'tiktok_ads', amount: 60000 },
+  );
+  data.fallbackRows.push(
+    { platform: 'shopee_ads', brand_id: 1, date: '2026-11-02', amount: 999000 },
+    { platform: 'shopee_ads', brand_id: 2, date: '2026-11-02', amount: 900000 },
+    { platform: 'shopee_ads', brand_id: 2, date: '2026-11-01', amount: 800000 },
+    { platform: 'tiktok_ads', brand_id: 1, date: '2026-11-02', amount: 70000 },
+    { platform: 'tiktok_ads', brand_id: 2, date: '2026-11-01', amount: 90000 },
+  );
+  const view = await mount({ getManualMarketplaceSpendPage: async () => data });
+  const section = (platform = 'shopee_ads') => view.root.root.findByProps({ 'aria-labelledby': `section-${platform}` });
+  const text = (node: any): string => node.children.map((child: any) => typeof child === 'object' ? text(child) : String(child)).join('');
+  const summary = () => section().findByProps({ className: 'total' });
+  const amount = (platform = 'shopee_ads') => text(section(platform).findByProps({ className: 'total' }).findByType('strong'));
+  const filter = async (label: string, value: string) => act(async () =>
+    view.root.root.findByProps({ 'aria-label': label }).props.onChange({ target: { value } }));
+  assert.equal(amount(), 'Rp 1.250.000');
+  assert.equal(amount('tiktok_ads'), 'Rp 150.000');
+
+  await filter('Filter brand Shopee Ads', '1');
+  assert.equal(amount(), 'Rp 450.000');
+  assert.equal(text(summary().findByType('span')), 'Total MKT Fee · Roove');
+  assert.equal(text(summary().findByType('small')), 'Manual Rp 150.000 · Spreadsheet Rp 300.000');
+  assert.equal(text(section().findByProps({ className: 'sectionHeader' }).findByType('p')), 'November 2026 · 1 input manual · 1 spreadsheet');
+  assert.equal(text(section().findByProps({ className: 'tableFoot' })), 'Total sesuai filter: Rp 450.000 dari 2 catatan.');
+  assert.equal(amount('tiktok_ads'), 'Rp 150.000');
+
+  await filter('Filter sumber Shopee Ads', 'sheet');
+  assert.equal(amount(), 'Rp 300.000');
+  assert.equal(text(summary().findByType('span')), 'Total MKT Fee · Roove · Spreadsheet');
+  assert.equal(text(summary().findByType('small')), 'Manual Rp 0 · Spreadsheet Rp 300.000');
+  await filter('Filter sumber Shopee Ads', 'manual');
+  assert.equal(amount(), 'Rp 150.000');
+  await filter('Filter brand Shopee Ads', '2');
+  assert.equal(amount(), 'Rp 0');
+  assert.equal(section().findAllByType('tbody')[0].findAllByType('tr').length, 1);
+  await filter('Filter brand Shopee Ads', '3');
+  assert.equal(amount(), 'Rp 0');
+  assert.equal(text(section().findByProps({ className: 'empty' }).findByType('strong')), 'Tidak ada catatan yang cocok');
+  await act(async () => section().findAllByType('button').find((button: any) => text(button) === 'Reset filter').props.onClick());
+  assert.equal(amount(), 'Rp 1.250.000');
+  assert.equal(text(summary().findByType('span')), 'Total MKT Fee · semua brand');
+  assert.equal(section().findAllByProps({ className: 'tableFoot' }).length, 0);
+  await filter('Filter brand TikTok Ads', '1');
+  assert.equal(amount('tiktok_ads'), 'Rp 60.000');
+  assert.equal(amount(), 'Rp 1.250.000');
+  await view.unmount();
+});
+
+test('filtered totals refresh after deleting a manual override and use its restored spreadsheet fallback', async () => {
+  const view = await mount();
+  view.data.fallbackRows.push({ platform: 'shopee_ads', brand_id: 1, date: '2026-11-02', amount: 800000 });
+  await act(async () => view.root.root.findByProps({ 'aria-label': 'Filter brand Shopee Ads' }).props.onChange({ target: { value: '1' } }));
+  const amount = () => view.root.root.findByProps({ 'aria-labelledby': 'section-shopee_ads' }).findByProps({ className: 'total' }).findByType('strong').children.join('');
+  assert.equal(amount(), 'Rp 450.000');
+  await act(async () => view.root.root.findByProps({ 'aria-label': 'Hapus Roove, 2 Nov 2026' }).props.onClick());
+  assert.equal(amount(), 'Rp 1.100.000');
+  assert.equal(view.root.root.findByProps({ 'aria-label': 'Filter brand Shopee Ads' }).props.value, '1');
   await view.unmount();
 });
 
