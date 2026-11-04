@@ -61,7 +61,8 @@
 .tableToolbar p { margin-top: 4px; font-size: 11px; color: var(--dim); }
 .filters { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
 .filters select { min-height: 36px; width: auto; max-width: 220px; font-size: 12px; }
-.tableWrap { min-width: 0; overflow-x: auto; border-radius: 0 0 12px 12px; }
+.tableWrap { min-width: 0; overflow-x: auto; overscroll-behavior-inline: contain; border-radius: 0 0 12px 12px; }
+.scrollHint { display: none; }
 .tableWrap table { width: 100%; border-collapse: collapse; font-size: 12px; line-height: 1.5; }
 .tableWrap th { text-align: left; padding: 10px 16px; border-block: 1px solid var(--border); color: var(--dim); background: var(--bg-deep); font-size: 11px; font-weight: 600; white-space: nowrap; }
 .tableWrap td { padding: 14px 16px; border-bottom: 1px solid var(--border); vertical-align: top; }
@@ -113,7 +114,20 @@
   .form .amountHint { grid-column: 1 / -1; margin-top: -6px; }
   .noteField, .formActions { grid-column: 1 / -1; }
   .history li { grid-template-columns: 1fr; gap: 4px; }
-  .tableWrap th, .tableWrap td { padding-inline: 12px; }
+  .scrollHint { display: block; padding: 0 16px 10px; color: var(--dim); font-size: 11px; line-height: 1.5; }
+  .tableWrap table { min-width: 800px; }
+  .tableWrap th, .tableWrap td { padding: 10px; }
+  .tableWrap th:first-child { width: 90px; }
+  .tableWrap th:nth-child(2) { width: 112px; }
+  .tableWrap th:nth-child(3) { width: 128px; }
+  .tableWrap th:nth-child(4) { width: 130px; }
+  .tableWrap th:nth-child(5) { width: 170px; }
+  .tableWrap th:nth-child(6) { width: 170px; }
+  .tableWrap td:nth-child(2) { min-width: 112px; max-width: 160px; }
+  .tableWrap th:first-child, .tableWrap td:first-child { position: sticky; left: 0; z-index: 1; border-right: 1px solid var(--border); }
+  .tableWrap td:first-child { background: var(--card); }
+  .tableWrap tr:hover td:first-child, .tableWrap .editingRow td:first-child { background: var(--card-hover); }
+  .tableWrap .rowActions button { min-height: 44px; }
 }
 @media (max-width: 600px) {
   .page { gap: 14px; }
@@ -130,18 +144,6 @@
   .filters { width: 100%; }
   .filters select { flex: 1 1 120px; width: 0; max-width: none; }
   .tableToolbar p { font-size: 12px; }
-  .tableWrap { overflow: visible; }
-  .tableWrap table, .tableWrap tbody { display: block; }
-  .tableWrap thead { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
-  .tableWrap tr { display: block; padding: 12px 16px; border-top: 1px solid var(--border); }
-  .tableWrap td, .tableWrap tbody tr:last-child td { display: grid; grid-template-columns: 100px minmax(0, 1fr); gap: 4px 12px; padding: 6px 0; border: 0; min-width: 0; max-width: none; text-align: left; white-space: normal; }
-  .tableWrap td::before { content: attr(data-label); grid-column: 1; grid-row: 1 / span 3; color: var(--dim); font-size: 11px; font-weight: 400; }
-  .tableWrap td > * { grid-column: 2; justify-self: start; }
-  .tableWrap td small { margin-top: 0; }
-  .tableWrap .amount { text-align: left; }
-  .tableWrap td:nth-child(2), .tableWrap td:nth-child(5) { min-width: 0; max-width: none; }
-  .rowActions { justify-content: flex-start; flex-wrap: wrap; white-space: normal; }
-  .tableWrap td .rowActions { margin-left: -7px; }
   .guide summary { align-items: flex-start; padding: 12px; }
   .guide summary svg { margin-top: 2px; }
   .guide p { padding: 0 12px 14px; }

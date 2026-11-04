@@ -611,6 +611,11 @@ function SpendWorkspace({ workspaceId }: { workspaceId: string }) {
                 )}
               </div>
             </div>
+            {visibleRows.length > 0 && (
+              <p id={`scroll-hint-${platform}`} className={styles.scrollHint}>
+                Geser tabel ke samping untuk melihat semua kolom.
+              </p>
+            )}
             {visibleRows.length === 0 ? (
               <div className={styles.empty}>
                 <strong>
@@ -628,6 +633,7 @@ function SpendWorkspace({ workspaceId }: { workspaceId: string }) {
                 tabIndex={0}
                 role="region"
                 aria-label={`Rincian biaya ${MANUAL_MARKETPLACE_LABELS[platform]}`}
+                aria-describedby={`scroll-hint-${platform}`}
               >
                 <table>
                   <caption className={styles.srOnly}>
@@ -658,18 +664,18 @@ function SpendWorkspace({ workspaceId }: { workspaceId: string }) {
                           key={entry ? `manual-${entry.id}` : `sheet-${rowDate(row)}-${rowBrand(row)}`}
                           className={editing ? styles.editingRow : undefined}
                         >
-                          <td data-label="Tanggal">
+                          <td>
                             <time dateTime={rowDate(row)}>{formatDate(rowDate(row))}</time>
                             {editing && <small className={styles.editingLabel}>Sedang diedit</small>}
                           </td>
-                          <td data-label="Brand / catatan">
+                          <td>
                             <div className={styles.brandName}>{brand}</div>
                             {entry?.note && <small className={styles.note}>{entry.note}</small>}
                           </td>
-                          <td data-label="Biaya iklan" className={styles.amount}>
+                          <td className={styles.amount}>
                             {money(Number(amount))}
                           </td>
-                          <td data-label="Sumber">
+                          <td>
                             <span className={entry ? styles.manualSource : styles.sheetSource}>
                               {entry ? (
                                 <Pencil size={12} aria-hidden="true" />
@@ -679,7 +685,7 @@ function SpendWorkspace({ workspaceId }: { workspaceId: string }) {
                               {entry ? 'Input manual' : 'Spreadsheet'}
                             </span>
                           </td>
-                          <td data-label="Pengisi / diperbarui">
+                          <td>
                             {entry ? (
                               <>
                                 {entry.created_by === data.viewerId
@@ -693,7 +699,7 @@ function SpendWorkspace({ workspaceId }: { workspaceId: string }) {
                               <span className={styles.muted}>Dipakai sampai ada input manual</span>
                             )}
                           </td>
-                          <td data-label="Aksi">
+                          <td>
                             <div className={styles.rowActions}>
                               {data.canInput && entry?.created_by === data.viewerId ? (
                                 <>
