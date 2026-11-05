@@ -6,7 +6,7 @@ import { useState, useEffect, useMemo, useRef } from 'react';
 import { useRouter, usePathname } from 'next/navigation';
 import { useSupabase } from '@/lib/supabase-browser';
 import { canAccessTab } from '@/lib/utils';
-import { buildVisibleTabs, canAccessLayoutTab, getCurrentTab, getOrderedAccessibleTabIds, getTabPath } from '@/lib/dashboard-navigation';
+import { buildVisibleTabs, canAccessLayoutTab, getActiveParentId, getCurrentTab, getMobileTabs, getOrderedAccessibleTabIds, getTabPath } from '@/lib/dashboard-navigation';
 import { PermissionsProvider, usePermissions } from '@/lib/PermissionsContext';
 import { DateRangeProvider, useDateRange } from '@/lib/DateRangeContext';
 import DateRangePicker from '@/components/DateRangePicker';
@@ -353,6 +353,7 @@ export default function DashboardLayout({ children }) {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [mobileActionsOpen, setMobileActionsOpen] = useState(false);
   const [expandedMenus, setExpandedMenus] = useState<Record<string, boolean>>({});
+  const [navigationParent, setNavigationParent] = useState<string | null>(null);
   const overlayRef = useRef(null);
   const mobileMenuTriggerRef = useRef<HTMLButtonElement | null>(null);
   const mobileMenuPanelRef = useRef<HTMLElement | null>(null);
@@ -662,8 +663,9 @@ export default function DashboardLayout({ children }) {
     router.push('/');
   };
 
-  const navigateTo = (tabId) => {
+  const navigateTo = (tabId, parentId = null) => {
     restoreMobileMenuFocusRef.current = false;
+    setNavigationParent(parentId);
     router.push(getTabPath(tabId));
     setMobileMenuOpen(false);
   };
@@ -685,7 +687,7 @@ export default function DashboardLayout({ children }) {
       .map((tab) => ({
         ...tab,
         children: tab.children?.filter((child) => isWorkspaceModuleEnabled(workspace, child.id)
-          && (child.id !== 'manual-ad-spend' || manualAdSpendEnabled)),
+          && (child.id !== 'manual-ad-spend' || (manualAdSpendEnabled && isWorkspaceModuleEnabled(workspace, 'marketing')))),
       }));
   }
 
@@ -746,17 +748,11 @@ export default function DashboardLayout({ children }) {
 
   // ── Shared sidebar content (used by both desktop and mobile) ──
   function SidebarNav({ isMobile = false }) {
-    // On mobile, flatten children into top-level items (no submenus)
+    // Shared destinations appear once in the flat mobile menu.
     const flatTabs = isMobile
-      ? visibleTabs.flatMap(t => {
-          const parentAccessible = canAccessLayoutTab(accessRole, t, permissions);
-          const parent = { ...t, children: undefined };
-          const children = t.children?.map(c => ({ ...c, group: t.group })) ?? [];
-          return t.children?.length
-            ? (parentAccessible ? [parent, ...children] : children)
-            : [parent];
-        })
+      ? getMobileTabs(visibleTabs, accessRole, permissions)
       : visibleTabs;
+    const activeParent = getActiveParentId(visibleTabs, currentTab, navigationParent, accessRole);
 
     // Pre-compute group boundaries
     const tabsWithGroupInfo = flatTabs.map((t, idx) => {
@@ -784,7 +780,7 @@ export default function DashboardLayout({ children }) {
             const hasChildren = t.children && t.children.length > 0;
             const parentAccessible = canAccessLayoutTab(accessRole, t, permissions);
             const active = currentTab === t.id;
-            const childActive = hasChildren && t.children.some(c => currentTab === c.id);
+            const childActive = hasChildren && activeParent === t.id;
             const isExpanded = expandedMenus[t.id] || childActive;
             const collapsed = !isMobile && sidebarCollapsed;
 
@@ -882,12 +878,13 @@ export default function DashboardLayout({ children }) {
                 {hasChildren && isExpanded && !collapsed && (
                   <div id={`sidebar-children-${t.id}`} style={{ display:'flex', flexDirection:'column', gap:1, marginTop:2 }}>
                     {t.children.map(child => {
-                      const childIsActive = currentTab === child.id;
+                      const childIsActive = currentTab === child.id && activeParent === t.id;
                       return (
                         <button
                           type="button"
                           key={child.id}
-                          onClick={() => navigateTo(child.id)}
+                          onClick={() => navigateTo(child.id, t.id)}
+                          aria-current={childIsActive ? 'page' : undefined}
                           style={{
                             display:'flex',
                             alignItems:'center',

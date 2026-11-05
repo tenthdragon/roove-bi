@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { ModuleKind, ScriptTarget, transpileModule } from 'typescript';
-import { buildVisibleTabs, getOrderedAccessibleTabIds } from '../lib/dashboard-navigation';
+import { buildVisibleTabs, getActiveParentId, getMobileTabs, getOrderedAccessibleTabIds, getTabPath } from '../lib/dashboard-navigation';
 import { isLegacyMarketplaceSpendAfterCutover, selectActiveSheetFallbackRows } from '../lib/manual-marketplace-ad-spend';
 
 test('manual zero suppresses only the matching sheet platform, brand, and date', () => {
@@ -17,7 +17,7 @@ test('manual zero suppresses only the matching sheet platform, brand, and date',
   assert.deepEqual(selectActiveSheetFallbackRows([], sheet), sheet);
 });
 
-test('advertiser input menu requires its individual grant; owner/admin/Brand Manager can access it', () => {
+test('advertiser input menu requires its individual grant; owner/admin/Brand Manager/Sales Manager can access it', () => {
   const base = new Set(['tab:meta-funnels']);
   assert.deepEqual(buildVisibleTabs('advertiser', base)[0]?.children?.map((tab) => tab.id), ['meta-funnels']);
   const granted = new Set([...base, 'tab:manual-ad-spend']);
@@ -49,6 +49,35 @@ test('cutover excludes only the intended legacy Shopee and TikTok spend', () => 
   assert.equal(isLegacyMarketplaceSpendAfterCutover(row('TikTok Ads'), null), false);
 });
 
+test('shared input keeps one destination, contextual desktop links and one mobile item', () => {
+  const permissions = new Set(['tab:marketing', 'tab:channels', 'tab:manual-ad-spend']);
+  const tabs = buildVisibleTabs('sales_manager', permissions);
+  for (const parent of ['marketing', 'channels']) {
+    const link = tabs.find(tab => tab.id === parent)?.children?.find(tab => tab.id === 'manual-ad-spend');
+    assert.ok(link, `Missing input under ${parent}`);
+    assert.equal(getTabPath(link.id), '/dashboard/manual-ad-spend');
+  }
+  assert.equal(getOrderedAccessibleTabIds('sales_manager', permissions).filter(id => id === 'manual-ad-spend').length, 1);
+  const mobileTabs = getMobileTabs(tabs, 'sales_manager', permissions);
+  assert.equal(mobileTabs.filter(tab => tab.id === 'manual-ad-spend').length, 1);
+  assert.equal(new Set(mobileTabs.map(tab => tab.id)).size, mobileTabs.length);
+  assert.equal(getActiveParentId(tabs, 'manual-ad-spend', null, 'sales_manager'), 'channels');
+  assert.equal(getActiveParentId(tabs, 'manual-ad-spend', 'marketing', 'sales_manager'), 'marketing');
+  assert.equal(getActiveParentId(tabs, 'manual-ad-spend', 'channels', 'brand_manager'), 'channels');
+  assert.equal(getActiveParentId(tabs, 'manual-ad-spend', null, 'brand_manager'), 'marketing');
+  assert.equal(getActiveParentId(tabs.filter(tab => tab.id !== 'marketing'), 'manual-ad-spend', 'marketing', 'brand_manager'), 'channels');
+
+  const salesOnly = new Set(['tab:channels', 'tab:manual-ad-spend']);
+  assert.equal(getOrderedAccessibleTabIds('sales_manager', salesOnly)[0], 'channels');
+  const salesTabs = buildVisibleTabs('sales_manager', salesOnly);
+  assert.equal(salesTabs.some(tab => tab.id === 'marketing'), false);
+  assert.deepEqual(salesTabs.find(tab => tab.id === 'channels')?.children?.map(tab => tab.id), ['manual-ad-spend']);
+  const spendOnly = buildVisibleTabs('sales_manager', new Set(['tab:manual-ad-spend']));
+  assert.deepEqual(spendOnly.map(tab => tab.id), ['channels']);
+  assert.deepEqual(getMobileTabs(spendOnly, 'sales_manager', new Set(['tab:manual-ad-spend'])).map(tab => tab.id), ['manual-ad-spend']);
+  assert.equal(buildVisibleTabs('sales_manager', new Set(['tab:channels'])).some(tab => tab.children?.some(child => child.id === 'manual-ad-spend')), false);
+});
+
 function loadActions(stubs: Record<string, unknown>, file = '../lib/manual-marketplace-ad-spend-actions.ts') {
   const source = readFileSync(new URL(file, import.meta.url), 'utf8');
   const output = transpileModule(source, { compilerOptions: { module: ModuleKind.CommonJS, target: ScriptTarget.ES2022 } }).outputText;
@@ -60,7 +89,7 @@ function loadActions(stubs: Record<string, unknown>, file = '../lib/manual-marke
   return exports as Record<string, (...args: any[]) => Promise<any>>;
 }
 
-test('owner/admin/Brand Manager/advertiser can write and delete, with active-workspace and input checks', async () => {
+test('owner/admin/Brand Manager/Sales Manager/advertiser can write and delete, with active-workspace and input checks', async () => {
   const calls: Array<[string, Record<string, unknown>]> = [];
   let role = 'advertiser';
   const actions = loadActions({
@@ -90,7 +119,7 @@ test('owner/admin/Brand Manager/advertiser can write and delete, with active-wor
   await assert.rejects(actions.saveManualMarketplaceSpend({ ...entry, workspaceId: 'workspace-b' }), /Workspace berubah/);
   await assert.rejects(actions.saveManualMarketplaceSpend({ ...entry, platform: 'meta_ads' }), /tidak valid/);
   await assert.rejects(actions.saveManualMarketplaceSpend({ ...entry, amount: -1 }), /tidak valid/);
-  for (const allowedRole of ['owner', 'admin', 'brand_manager', 'advertiser']) {
+  for (const allowedRole of ['owner', 'admin', 'brand_manager', 'sales_manager', 'advertiser']) {
     role = allowedRole;
     await actions.saveManualMarketplaceSpend(entry);
     await actions.saveManualMarketplaceSpend({ ...entry, id: 12, version: 1, amount: 0 });
@@ -102,10 +131,10 @@ test('owner/admin/Brand Manager/advertiser can write and delete, with active-wor
   }
   for (const deniedRole of ['staf_ops', 'pending', 'marketing_api_reviewer']) {
     role = deniedRole;
-    await assert.rejects(actions.saveManualMarketplaceSpend(entry), /Hanya owner, admin, Brand Manager, dan advertiser/);
-    await assert.rejects(actions.deleteManualMarketplaceSpend({ workspaceId: 'workspace-a', id: 12, version: 2 }), /Hanya owner, admin, Brand Manager, dan advertiser/);
+    await assert.rejects(actions.saveManualMarketplaceSpend(entry), /Hanya owner, admin, Brand Manager, Sales Manager, dan advertiser/);
+    await assert.rejects(actions.deleteManualMarketplaceSpend({ workspaceId: 'workspace-a', id: 12, version: 2 }), /Hanya owner, admin, Brand Manager, Sales Manager, dan advertiser/);
   }
-  assert.equal(calls.length, 13);
+  assert.equal(calls.length, 16);
 });
 
 function serviceStub(data: Record<string, unknown>, queries: Array<{ table: string; filters: unknown[][] }>, filterRows = false, errorTables: string[] = []) {
@@ -145,7 +174,7 @@ function serviceStub(data: Record<string, unknown>, queries: Array<{ table: stri
   } };
 }
 
-test('page enables both platforms for owner/admin/Brand Manager, while advertiser grants and history stay scoped', async () => {
+test('page enables both platforms for owner/admin/Brand Manager/Sales Manager, while advertiser grants and history stay scoped', async () => {
   let role = 'owner';
   let enabled = true;
   const queries: Array<{ table: string; filters: unknown[][] }> = [];
@@ -172,7 +201,7 @@ test('page enables both platforms for owner/admin/Brand Manager, while advertise
       MANUAL_MARKETPLACE_PLATFORMS: ['shopee_ads', 'tiktok_ads'],
     },
   });
-  for (const privilegedRole of ['owner', 'admin', 'brand_manager']) {
+  for (const privilegedRole of ['owner', 'admin', 'brand_manager', 'sales_manager']) {
     role = privilegedRole; queries.length = 0;
     const page = await actions.getManualMarketplaceSpendPage('2026-10');
     assert.equal(page.canInput, true);
@@ -280,7 +309,7 @@ test('assigned brands scope both platforms, sheet totals and both audit snapshot
   await assert.rejects(actions.getManualMarketplaceSpendPage('2026-10'), /Belum ada brand/);
   assert.equal(queries.some(q => q.table === 'manual_marketplace_ad_spend'), false);
 
-  for (role of ['owner', 'admin', 'brand_manager']) {
+  for (role of ['owner', 'admin', 'brand_manager', 'sales_manager']) {
     const privileged = await actions.getManualMarketplaceSpendPage('2026-10');
     assert.deepEqual(privileged.brands.map((b: any) => b.id), [1, 2, 3]);
     assert.equal(privileged.entries.length, 5);
@@ -289,9 +318,14 @@ test('assigned brands scope both platforms, sheet totals and both audit snapshot
   }
 });
 
-test('profile grants admin/Brand Manager navigation only in enabled workspaces and uses the active membership role', async () => {
+test('profile grants admin/Brand Manager/Sales Manager navigation only in enabled workspaces and uses the active membership role', async () => {
   for (const [profileRole, membershipRole, enabled, granted, expected] of [
     ['admin', 'admin', true, false, true],
+    ['sales_manager', 'sales_manager', true, false, true],
+    ['sales_manager', 'sales_manager', false, false, false],
+    ['advertiser', 'sales_manager', true, false, true],
+    ['sales_manager', 'advertiser', true, false, false],
+    ['sales_manager', 'staf_ops', true, true, false],
     ['brand_manager', 'brand_manager', true, false, true],
     ['brand_manager', 'brand_manager', false, false, false],
     ['advertiser', 'brand_manager', true, false, true],
@@ -325,7 +359,7 @@ test('profile grants admin/Brand Manager navigation only in enabled workspaces a
     }, '../app/api/auth/profile/route.ts');
     const result = await route.GET();
     assert.equal(result.permissions.includes('tab:manual-ad-spend'), expected, `${profileRole}/${membershipRole}/${enabled}/${granted}`);
-    if (['admin', 'brand_manager'].includes(membershipRole)) assert.equal(queries.some(q => q.table === 'workspace_advertiser_spend_access'), false);
+    if (['admin', 'brand_manager', 'sales_manager'].includes(membershipRole)) assert.equal(queries.some(q => q.table === 'workspace_advertiser_spend_access'), false);
   }
 });
 

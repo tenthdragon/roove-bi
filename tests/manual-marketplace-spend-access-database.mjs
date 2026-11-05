@@ -2,7 +2,7 @@ import { execFileSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { randomBytes } from 'node:crypto';
 
-// Only migration 244 runs, in a disposable database with minimal dependencies.
+// Only migration 245 runs, in a disposable database with minimal dependencies.
 // The shared local sample, its schema, and existing spend are never changed.
 const database = `manual_spend_access_test_${randomBytes(6).toString('hex')}`;
 const container = process.argv.includes('--ci') ? 'roove-access-requests-test' : 'supabase_db_roove-bi-local';
@@ -24,7 +24,7 @@ const roleHelpers = ['is_platform_owner', 'workspace_has_role'].map(name =>
 const tables = ['manual_marketplace_ad_spend_cutovers', 'workspace_advertiser_spend_access', 'manual_marketplace_ad_spend'].map(name =>
   definition(initial, new RegExp(`CREATE TABLE public\\.${name} \\([\\s\\S]*?\\n\\);`))).join('\n');
 const brandAssignments = definition(read('../supabase/migrations/224_advertiser_brand_access.sql'), /CREATE TABLE public\.workspace_advertiser_brands \([\s\S]*?\n\);/);
-const migration = read('../supabase/migrations/244_manual_marketplace_spend_brand_manager.sql');
+const migration = read('../supabase/migrations/245_manual_marketplace_spend_sales_manager.sql');
 
 docker('createdb', [database]);
 try {
@@ -56,6 +56,7 @@ ${migration}
 ${read('./manual-marketplace-spend-access-db.sql')}
 ${read('./manual-marketplace-spend-brand-scope-db.sql')}
 ${read('./manual-marketplace-spend-brand-manager-db.sql')}
+${read('./manual-marketplace-spend-sales-manager-db.sql')}
 `));
 } finally {
   docker('dropdb', ['--if-exists', database]);
