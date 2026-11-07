@@ -7,7 +7,7 @@ import { defaultParserConfig, validateParserConfig } from './config';
 import type { Catalog, ParserConfig } from './types';
 
 async function access(expectedWorkspace: string) {
-  const ctx=await requireDashboardTabAccess('marketplace-data-parser','Marketplace Data Parsing Tool');
+  const ctx=await requireDashboardTabAccess('marketplace-data-parser','Marketplace Data Parser');
   if (ctx.workspaceId!==expectedWorkspace) throw new Error('Workspace berubah. Muat ulang halaman sebelum melanjutkan.');
   if (!isWorkspaceModuleEnabled(ctx.workspace,'channels')) throw new Error('Sales Channel tidak aktif untuk workspace ini.');
   return ctx;

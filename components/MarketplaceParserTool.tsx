@@ -68,7 +68,7 @@ export default function MarketplaceParserTool({context,saveConfig}:Props) {
     <datalist id="parser-warehouses">{context.catalog.warehouses.map(w=><option key={w}>{w}</option>)}</datalist>
     <datalist id="parser-couriers">{[...new Set(COURIER_SERVICE_OPTIONS.map(c=>c.courier))].map(c=><option key={c}>{c}</option>)}</datalist>
     <datalist id="parser-services">{[...new Set(COURIER_SERVICE_OPTIONS.map(c=>c.service))].map(s=><option key={s}>{s}</option>)}</datalist>
-    <header className={styles.header}><div><h1>Marketplace Data Parsing Tool</h1><p>Ubah file marketplace menjadi CSV Scalev. Periksa hasil mapping dan nominal sebelum download.</p></div><button className={styles.secondary} disabled={saving} onClick={()=>{setDraft(structuredClone(config));setConfigOpen(v=>!v);}} aria-expanded={configOpen}><Settings2 size={16}/>Konfigurasi</button></header>
+    <header className={styles.header}><div><h1>Marketplace Data Parser</h1><p>Ubah file marketplace menjadi CSV Scalev. Periksa hasil mapping dan nominal sebelum download.</p></div><button className={styles.secondary} disabled={saving} onClick={()=>{setDraft(structuredClone(config));setConfigOpen(v=>!v);}} aria-expanded={configOpen}><Settings2 size={16}/>Konfigurasi</button></header>
     <ol className={styles.steps} aria-label="Alur parsing"><li aria-current={!file?'step':undefined}>Upload XLSX</li><li aria-current={file&&!reviewed?'step':undefined}>Periksa hasil</li><li aria-current={reviewed?'step':undefined}>Download CSV Scalev</li></ol>
     {(error||result.error)&&<div className={styles.error} role="alert"><AlertCircle size={18}/>{error||result.error}</div>}
     {notice&&<div className={styles.notice} role="status">{notice}</div>}

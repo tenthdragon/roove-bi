@@ -312,7 +312,7 @@ export const ALL_TABS: TabDef[] = [
   { id: 'channels',       label: 'Sales Channel',      icon: 'Share2', group: 'Main Menu', children: [
     { id: 'waba-management', label: 'WABA Management',   icon: 'MessageCircle' },
     { id: 'manual-ad-spend', label: 'Input Biaya Iklan', icon: 'PencilLine' },
-    { id: 'marketplace-data-parser', label: 'Marketplace Data Parsing Tool', icon: 'FileSpreadsheet' },
+    { id: 'marketplace-data-parser', label: 'MP Data Parser', icon: 'FileSpreadsheet' },
   ]},
   { id: 'financial-report', label: 'Financial Report', icon: 'FileText', group: 'Main Menu', children: [
     { id: 'cashflow',            label: 'Cash Flow',           icon: 'Banknote' },

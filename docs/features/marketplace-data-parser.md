@@ -1,8 +1,8 @@
-# Marketplace Data Parsing Tool
+# Marketplace Data Parser
 
 The tool at `/dashboard/marketplace-data-parser` converts original marketplace
 XLSX exports into reviewed Scalev CSV files. It is a child of **Sales Channel**
-and inherits `tab:channels` access and the workspace's `channels` module. Both
+with the sidebar label **MP Data Parser**, and inherits `tab:channels` access and the workspace's `channels` module. Both
 loading context and saving shared configuration enforce access on the server
 and reject a changed workspace.
 
@@ -175,13 +175,19 @@ SKU, quantity and price; four Advance lines remained incomplete. That replay
 used a synthetic catalog derived from the comparison CSVs, so it does not
 establish live catalog or warehouse validity. Customer samples are not tracked.
 
-Database verification was blocked by Docker permission denial, local server
-binding failed with `EPERM`, and browser `file://` access was explicitly denied.
-No migration was applied and no rendered visual acceptance was completed.
-Database authorization/history behavior and authenticated browser workflows
-still require verification in an allowed local environment. Development used
-an isolated local clone on `codex/marketplace-data-parser`, rebased onto current
-`main` at `ec144740b46e27e0c485e8327b381bac2bfecbd1`. Shell Git fetch was
-DNS-blocked; upstream Git objects were retrieved through the GitHub connection
-and verified against their exact SHA-1 object IDs before rebasing. The original
-checkout and its uncommitted work were preserved. No deployment occurred.
+Release review on 7 November 2026 completed the authenticated local browser
+check using the existing reduced Supabase sample. The parser configuration
+migration was applied locally; the real business catalog loaded, configuration
+revision 1 and its audit record were saved, and the revision survived a reload.
+Transaction-scoped database checks verified RLS, denied direct client access,
+history creation, stale-revision protection, and rejection of invalid revision
+increments; test changes were rolled back. All 31 parser/component and shared
+navigation tests, app typecheck, lint, and build passed. The sidebar and page
+titles were verified as **MP Data Parser** and **Marketplace Data Parser**.
+
+Operational acceptance with warehouse files remains separate: select the actual
+Business Roove and review store, warehouse, product, and courier mappings before
+the first production export. Local configuration and test records are not part
+of the release. Development uses the isolated local clone on
+`codex/marketplace-data-parser`; the original checkout and its uncommitted work
+are preserved.
