@@ -16,7 +16,7 @@ function resolveProduct(line: SourceLine, account: string, config: ParserConfig)
 }
 export function projectMarketplace(input: {file: ParsedFile;account: string;date: string;config: ParserConfig;revision: number;catalog: Catalog;edits?: Edits}): Projection {
   const {file,account,date,config,catalog}=input;const edits=input.edits||{lines:{},orders:{}};
-  validateParserConfig(config);
+  validateParserConfig(config, { allowUnassignedBusiness: true });
   if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || !Number.isFinite(Date.parse(date)) || new Date(date).toISOString().slice(0,10)!==date) throw new Error('Tanggal batch tidak valid.');
   if (!config.accounts.some(a=>a.id===account)) throw new Error('Pilih akun marketplace asal yang valid.');
   const orders: PreviewOrder[]=file.orders.map(source=>{
@@ -44,15 +44,13 @@ export function projectMarketplace(input: {file: ParsedFile;account: string;date
     const families=[...new Set(lines.map(l=>l.family).filter(f=>f && f!=='accessory'))];
     const matched=config.routes.filter(r=>r.account===account && families.includes(r.family));
     const edit=edits.orders[source.key];
-    const getBusiness=(b:string)=>source.platform==='lazada'?config.lazadaBusiness:b==='$roove'?config.rooveBusiness:b;
-    const targets=[...new Set(matched.map(r=>JSON.stringify([getBusiness(r.business),r.store,r.warehouse])))];
+    const targets=[...new Set(matched.map(r=>JSON.stringify([r.business,r.store,r.warehouse])))];
     if (families.some(f=>matched.filter(r=>r.family===f).length!==1) && !edit?.store) errors.push('Routing kelompok produk belum tersedia atau memiliki aturan ganda.');
     if ((targets.length!==1 || !families.length) && !edit?.store) errors.push('Tujuan order belum pasti. Pilih business, store, dan gudang.');
     const route=matched[0];
-    const business=(edit?.business ?? (route?getBusiness(route.business):'')).trim();
+    const business=(edit?.business ?? route?.business ?? '').trim();
     const store=(edit?.store ?? route?.store ?? '').trim();const warehouse=(edit?.warehouse ?? route?.warehouse ?? '').trim();
     if(edit && Object.keys(edit).some(k=>k!=='reason') && !edit.reason?.trim()) errors.push('Isi alasan koreksi tujuan order.');
-    if(source.platform==='lazada' && business!==config.lazadaBusiness) errors.push('Business Lazada harus mengikuti konfigurasi pengecualian platform.');
     if(!catalog.businesses.some(b=>b.code===business)) errors.push('Business tujuan belum dipilih atau tidak aktif.');
     if(!catalog.stores.some(s=>s.business===business && norm(s.name)===norm(store))) errors.push('Store tidak ditemukan dalam katalog business tujuan.');
     if(!warehouse) errors.push('Gudang tujuan belum diisi.');

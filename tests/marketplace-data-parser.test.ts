@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import * as XLSX from 'xlsx';
-import { defaultParserConfig, validateParserConfig } from '../lib/marketplace-parser/config';
+import { defaultParserConfig, loadParserConfig, validateParserConfig } from '../lib/marketplace-parser/config';
 import { parseWorkbook } from '../lib/marketplace-parser/read';
 import { projectMarketplace, exportBusinessCsv, orderReady } from '../lib/marketplace-parser/project';
 import { centsText, moneyCents } from '../lib/marketplace-parser/money';
@@ -10,7 +10,7 @@ import { buildVisibleTabs } from '../lib/dashboard-navigation';
 import { dashboardTabPermissionKeys } from '../lib/dashboard-permissions';
 
 const catalog:Catalog={businesses:[{code:'RTI',name:'Roove'},{code:'JHN',name:'JHN'},{code:'RLT',name:'RLT'}],stores:[{business:'RTI',name:'Roove Main Store - Marketplace'},{business:'RTI',name:'Pluve Main Store - Marketplace'},{business:'JHN',name:'Pluve Main Store JHN'},{business:'RLT',name:'Pluve Main Store - Marketplace'},{business:'RTI',name:'Purvu The Secret Store - Markerplace'}],bundles:[{business:'RTI',sku:'ROV20-295',name:'Roove'},{business:'RTI',sku:'SMini-0',name:'Shaker'},{business:'RTI',sku:'SRTARM-185',name:'Arum'},{business:'RTI',sku:'PLV20-245',name:'Pluve'},{business:'JHN',sku:'PLV20-245',name:'Pluve'},{business:'RLT',sku:'PLV20-245',name:'Pluve'}],warehouses:['Test warehouse']};
-function config():ParserConfig {const c=defaultParserConfig();c.rooveBusiness='RTI';return c;}
+function config():ParserConfig {const c=defaultParserConfig();c.routes=c.routes.map(r=>({...r,business:r.business||'RTI'}));return c;}
 function book(sheets:Record<string,Record<string,unknown>[]>) {const w=XLSX.utils.book_new();for(const [name,rows] of Object.entries(sheets))XLSX.utils.book_append_sheet(w,XLSX.utils.json_to_sheet(rows),name);return w;}
 function shopee(extra:Record<string,unknown>={}) {return {'No. Pesanan':'ORDER-TEST-1','Nomor Referensi SKU':'ROV20-295','Nama Produk':'Roove','Jumlah':2,'Harga Setelah Diskon':295000,'No. Resi':'00012345','Opsi Pengiriman':'SPX Standard','Username (Pembeli)':'pembeli-test',...extra};}
 function tiktok(extra:Record<string,unknown>={}) {return {'Order ID':'583648045861405949','Seller SKU':'ROV20-295','Product Name':'Roove','Quantity':2,'SKU Unit Original Price':295000,'SKU Subtotal Before Discount':590000,'SKU Seller Discount':100000,'SKU Platform Discount':30000,'Tracking ID':'00012345','Shipping Provider Name':'J&T Express','Buyer Username':'pembeli-test',...extra};}
@@ -54,10 +54,42 @@ test('conflicting routes, wrong-business SKU and an unknown source provider bloc
   const c=config();c.routes.push({...c.routes[1],id:'duplicate'});assert.ok(projection(f,c).orders[0].errors.some(e=>e.includes('ganda')));
   const unknown=parseWorkbook(book({orders:[shopee({'Nomor Referensi SKU':'ROV99-NEW'})]}));assert.ok(projection(unknown).orders[0].lines[0].errors.some(e=>e.includes('katalog')));
 });
-test('Lazada uses RLT override and unitPrice, not paidPrice; multi-item identity is blocked',()=>{
+test('Lazada uses the selected account route and unitPrice; multi-item identity is blocked',()=>{
   const row={orderNumber:'2771297423401190',orderItemId:'2771297423501190',unitPrice:'245000.00',paidPrice:'269950.00',sellerSku:'PLV20-245',trackingCode:'JZ-TEST',shippingProvider:'J&T',customerName:'test'};
-  const p=projection(parseWorkbook(book({sheet1:[row]})));assert.equal(p.orders[0].business,'RLT');assert.equal(p.orders[0].rows[0].price,'245000');assert.ok(orderReady(p.orders[0]));
+  const file=parseWorkbook(book({sheet1:[row]}));
+  const p=projection(file);assert.equal(p.orders[0].business,'RTI');assert.equal(p.orders[0].rows[0].price,'245000');assert.ok(orderReady(p.orders[0]));
+  const c=config();c.accounts.push({id:'lazada-pluve',label:'Lazada Pluve'});
+  c.routes.push({id:'lazada-pluve',account:'lazada-pluve',family:'pluve',business:'RLT',store:'Pluve Main Store - Marketplace',warehouse:'Test warehouse'});
+  const mapped=projection(file,c,undefined,'lazada-pluve');assert.equal(mapped.orders[0].business,'RLT');assert.ok(orderReady(mapped.orders[0]));
+  assert.ok(exportBusinessCsv(mapped,'RLT').includes('2771297423501190'));
+  assert.equal(projection(file,c,undefined,'pluve').orders[0].business,'JHN');
+  assert.equal(projection(file,c).orders[0].business,'RTI');
   assert.ok(!orderReady(projection(parseWorkbook(book({sheet1:[row,{...row,orderItemId:'2771297423501191'}]}))).orders[0]));
+});
+test('legacy config resolves only shared business references and preserves custom rules without mutation',()=>{
+  const current=config();
+  const legacy={...current,schemaVersion:1,rooveBusiness:'RTI',lazadaBusiness:'RLT',routes:current.routes.map(r=>({...r,business:r.account==='roove'?'$roove':r.business}))};
+  const before=structuredClone(legacy);const loaded=loadParserConfig(legacy);
+  assert.deepEqual(loaded,current);assert.deepEqual(legacy,before);
+  assert.equal('rooveBusiness' in loaded,false);assert.equal('lazadaBusiness' in loaded,false);
+  loaded.accounts[0].label='Changed';assert.equal(legacy.accounts[0].label,'MP Roove');
+  assert.throws(()=>validateParserConfig(legacy),/Muat ulang/);
+});
+test('unassigned legacy and default businesses remain editable and block saving/export until selected',()=>{
+  const defaults=defaultParserConfig();const loaded=loadParserConfig(defaults);
+  assert.equal(loaded.routes[1].business,'');assert.throws(()=>validateParserConfig(loaded),/setiap baris/);
+  const legacy={...defaults,schemaVersion:1,rooveBusiness:'',lazadaBusiness:'RLT',routes:defaults.routes.map(r=>({...r,business:r.business||'$roove'}))};
+  assert.deepEqual(loadParserConfig(legacy),defaults);
+  const p=projection(parseWorkbook(book({orders:[shopee()]})),loaded);
+  assert.ok(!orderReady(p.orders[0]));assert.throws(()=>exportBusinessCsv(p,'RTI'));
+  const invalid=config();invalid.routes[1].business='$roove';assert.throws(()=>validateParserConfig(invalid),/setiap baris/);
+});
+test('business is independent per route even within one source account',()=>{
+  const c=config();const route=c.routes.find(r=>r.account==='roove'&&r.family==='pluve')!;route.business='RLT';
+  const f=parseWorkbook(book({orders:[shopee(),shopee({'No. Pesanan':'PLUVE-2','No. Resi':'PLUVE-RECEIPT','Nomor Referensi SKU':'PLV20-245'})]}));
+  const p=projection(f,c);assert.deepEqual(p.orders.map(o=>o.business),['RTI','RLT']);assert.ok(p.orders.every(orderReady));
+  assert.ok(exportBusinessCsv(p,'RTI').includes('ORDER-TEST-1'));assert.ok(!exportBusinessCsv(p,'RTI').includes('PLUVE-2'));
+  assert.ok(exportBusinessCsv(p,'RLT').includes('PLUVE-2'));
 });
 test('missing values do not become zero/one, and corrections need a reason',()=>{
   const f=parseWorkbook(book({orders:[shopee({Jumlah:'','Harga Setelah Diskon':''})]}));
@@ -95,7 +127,7 @@ test('unsupported courier/service cross-pairs cannot become ready through an ord
 });
 test('config validation rejects malformed/incomplete mappings and duplicate identifiers',()=>{
   const c=config();validateParserConfig(c);c.routes.push({...c.routes[0]});assert.throws(()=>validateParserConfig(c),/unik/);
-  assert.throws(()=>validateParserConfig({schemaVersion:1}),/Format/);
+  assert.throws(()=>validateParserConfig({schemaVersion:2}),/Format/);
 });
 test('confirmed Gojek and Grab policy maps to Shopee Express REGULER while keeping source provider',()=>{
   for(const provider of ['Gojek','Grab']) {

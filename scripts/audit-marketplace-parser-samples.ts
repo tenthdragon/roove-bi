@@ -20,7 +20,7 @@ for(const pair of pairs) {
   const rows=XLSX.utils.sheet_to_json<Record<string,string>>(csv.Sheets[csv.SheetNames[0]],{defval:''});
   const expected=new Map<string,typeof rows>();let current='';
   for(const r of rows) {if(r.external_id)current=r.external_id;expected.set(current,[...(expected.get(current)||[]),r]);}
-  const config=defaultParserConfig();config.rooveBusiness='RTI';
+  const config=defaultParserConfig();config.routes=config.routes.map(r=>({...r,business:r.business||'RTI'}));
   const catalog:Catalog={businesses:['RTI','JHN','RLT'].map(code=>({code,name:code})),stores:[],bundles:[],warehouses:[]};
   for(const b of catalog.businesses) {
     for(const sku of new Set(rows.map(r=>r.sku)))catalog.bundles.push({business:b.code,sku,name:sku});

@@ -69,10 +69,13 @@ proof that the named business, store, SKU or warehouse is present in a workspace
 
 - Accounts start as **MP Roove**, **MP Pluve** and **MP Purvu**. The user must
   select the actual source account; it is not inferred from the filename.
-- **Business Roove is intentionally unset** and must be chosen from the active
-  business catalog. Lazada overrides destination business to **RLT** by default.
+- **Business is selected directly on each routing row** from the active business
+  catalog. MP Roove defaults leave business unassigned until each row is configured.
+  Lazada follows the selected source account and its routes, with no platform-wide
+  business override. Add a Lazada account under **Akun marketplace asal**, then
+  add its product-family routes with explicit business, store and warehouse.
 - MP Pluve + Pluve routes to **JHN / Pluve Main Store JHN**. MP Roove routes by
-  product family using the selected Business Roove, including Pluve products.
+  product family using each row's business, including Pluve products.
   MP Purvu has no default routes, and Dr Hyun has product mapping without a
   default route; these need an explicit destination rule or correction.
 
@@ -112,8 +115,12 @@ the required records. Business and store must exist together, and each SKU must
 match exactly one bundle in the selected business. No business API keys or
 webhook secrets are returned to the browser.
 
-Review and apply only
-`supabase/migrations/20261107195500_marketplace_parser_config.sql` to the intended
+The initial schema is
+`supabase/migrations/20261107195500_marketplace_parser_config.sql`. Existing
+installations need only the new reviewed
+`supabase/migrations/20261107220000_marketplace_parser_route_business.sql` migration,
+which allows configuration versions 1 and 2 without rewriting existing records.
+Apply pending reviewed migrations to the intended
 database through the normal [release workflow](../runbooks/development-staging-production.md).
 Before local database work, run `npm run db:local:verify` and coordinate against
 the existing local snapshot; do not reset it or replay historical migrations.
@@ -132,6 +139,17 @@ rules while disabling team saves. Other configuration/catalog load failures
 show a retryable error. Configurations allow at most 2,000 rules per type and a
 1 MB server-side save payload. Session edits and team configuration saves are
 separate actions.
+
+Version 2 stores a concrete business on each routing row and has no
+`rooveBusiness` or `lazadaBusiness` fields. Loading a saved version 1 configuration
+resolves each `$roove` reference to its previous `rooveBusiness` value in memory;
+explicit businesses and all other rules are preserved. An unset legacy business
+stays unassigned and blocks affected orders until selected. The previous Lazada
+override is removed; configure its source account and routes explicitly. Loading
+does not write to the database: an explicit team save stores version 2 with the
+next revision and retains the previous JSON in audit history. A stale version 1
+client must reload before saving. Unassigned businesses may be loaded for editing,
+but applying or saving rules requires a business on every row.
 
 ## Deliberate blockers
 
@@ -161,6 +179,7 @@ Local checks for this feature:
 
 ```sh
 node --import tsx --test tests/marketplace-data-parser.test.ts tests/marketplace-parser-interaction.test.ts
+node tests/marketplace-parser-config-database.mjs
 npm run typecheck:app
 npm run lint
 npm run build
@@ -186,8 +205,18 @@ navigation tests, app typecheck, lint, and build passed. The sidebar and page
 titles were verified as **MP Data Parser** and **Marketplace Data Parser**.
 
 Operational acceptance with warehouse files remains separate: select the actual
-Business Roove and review store, warehouse, product, and courier mappings before
-the first production export. Local configuration and test records are not part
+business on every routing row and review store, warehouse, product, and courier
+mappings before the first production export. Local configuration and test records are not part
 of the release. Development uses the isolated local clone on
-`codex/marketplace-data-parser`; the original checkout and its uncommitted work
+`codex/parser-routing-business`; the original checkout and its uncommitted work
 are preserved.
+
+The follow-up routing change passed 26 parser/interaction tests, an isolated
+database migration/history test, app typecheck, lint and production build. Local
+UI verification covered direct business choices, saving revision 2 to the real
+local database, reloading the saved configuration and the mobile layout.
+
+A rollback to the original PR 60 app cannot read configurations already saved
+as version 2. Keep a version-2-compatible reader or restore reviewed version 1
+configurations from history with new revisions before such an app rollback;
+do not overwrite or delete audit history.

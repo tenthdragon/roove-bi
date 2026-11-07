@@ -8,9 +8,7 @@ export type RouteRule = {
 };
 export type CourierRule = { platform: Platform; source: string; courier: string; service: string };
 export type ParserConfig = {
-  schemaVersion: 1;
-  rooveBusiness: string;
-  lazadaBusiness: string;
+  schemaVersion: 2;
   accounts: { id: string; label: string }[];
   routes: RouteRule[];
   products: ProductRule[];
