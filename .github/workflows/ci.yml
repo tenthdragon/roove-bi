@@ -45,6 +45,9 @@ jobs:
       - name: Check user access request boundaries
         run: npm run test:access-requests
 
+      - name: Check marketplace parser and reviewed CSV export
+        run: npm run test:marketplace-parser
+
       - name: Typecheck app
         run: npm run typecheck:app
 
