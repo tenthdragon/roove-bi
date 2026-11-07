@@ -3,7 +3,7 @@
 import { requireDashboardTabAccess } from '../dashboard-access';
 import { createServiceSupabase } from '../service-supabase';
 import { isWorkspaceModuleEnabled } from '../workspaces';
-import { defaultParserConfig, validateParserConfig } from './config';
+import { defaultParserConfig, loadParserConfig, validateParserConfig } from './config';
 import type { Catalog, ParserConfig } from './types';
 
 async function access(expectedWorkspace: string) {
@@ -39,7 +39,7 @@ export async function getParserContext(expectedWorkspace: string): Promise<{work
   const scopes=await db.from('marketplace_intake_source_store_scopes').select('scalev_warehouse_name').eq('workspace_id',ctx.workspaceId).eq('is_enabled',true);
   // Names are suggestions from existing configuration, not a live warehouse catalog.
   if(!scopes.error) catalog.warehouses=[...new Set((scopes.data||[]).map(s=>String(s.scalev_warehouse_name||'').trim()).filter(Boolean))];
-  const config=settings.data?.config || defaultParserConfig();validateParserConfig(config);
+  const config=loadParserConfig(settings.data?.config || defaultParserConfig());
   return {workspaceId:ctx.workspaceId,config,revision:settings.data?.revision||0,catalog,canSave:!missingSchema};
 }
 
