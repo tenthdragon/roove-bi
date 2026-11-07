@@ -71,7 +71,7 @@ test('shared input keeps one destination, contextual desktop links and one mobil
   assert.equal(getOrderedAccessibleTabIds('sales_manager', salesOnly)[0], 'channels');
   const salesTabs = buildVisibleTabs('sales_manager', salesOnly);
   assert.equal(salesTabs.some(tab => tab.id === 'marketing'), false);
-  assert.deepEqual(salesTabs.find(tab => tab.id === 'channels')?.children?.map(tab => tab.id), ['manual-ad-spend']);
+  assert.deepEqual(salesTabs.find(tab => tab.id === 'channels')?.children?.map(tab => tab.id), ['manual-ad-spend', 'marketplace-data-parser']);
   const spendOnly = buildVisibleTabs('sales_manager', new Set(['tab:manual-ad-spend']));
   assert.deepEqual(spendOnly.map(tab => tab.id), ['channels']);
   assert.deepEqual(getMobileTabs(spendOnly, 'sales_manager', new Set(['tab:manual-ad-spend'])).map(tab => tab.id), ['manual-ad-spend']);
