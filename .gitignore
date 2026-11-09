@@ -86,3 +86,5 @@ __pycache__/
 # Cloudflare Worker (mcp-server)
 .dev.vars
 .wrangler/
+
+!docs/runbooks/marketplace-data-parser.md

@@ -56,7 +56,7 @@
     "test:meta-brand-edit-db": "node tests/meta-brand-edit-database.mjs",
     "test:mcp-reader-db": "node tests/mcp-marketing-reader-database.mjs",
     "test:mcp-dimensions": "node --import tsx --test tests/marketing-dimensions-mcp.test.ts tests/meta-funnel-mcp.test.ts",
-    "test:marketplace-parser": "node --import tsx --test tests/marketplace-data-parser.test.ts tests/marketplace-parser-interaction.test.ts"
+    "test:marketplace-parser": "node --import tsx --test tests/marketplace-data-parser.test.ts tests/marketplace-parser-interaction.test.ts tests/marketplace-parser-actions.test.ts tests/marketplace-parser-catalog.test.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.30.0",
