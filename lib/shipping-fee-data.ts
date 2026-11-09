@@ -164,7 +164,7 @@ async function fetchShippingFeeRangeUncached(
 }
 
 const getCachedShippingFeeRange = unstable_cache(
-  async (workspaceId: string, from: string, to: string) =>
+  async (workspaceId: string, from: string, to: string, _financialRevision: number) =>
     fetchShippingFeeRangeUncached(workspaceId, from, to),
   ['shipping-fee-range-v2-workspace'],
   {
@@ -177,6 +177,7 @@ export async function getShippingFeeRange(
   workspaceId: string,
   from: string,
   to: string,
+  financialRevision = 0,
 ) {
-  return getCachedShippingFeeRange(workspaceId, from, to);
+  return getCachedShippingFeeRange(workspaceId, from, to, financialRevision);
 }
