@@ -15,10 +15,11 @@ const docker = (cmd, args, input) => execFileSync('docker', ['exec','-i',contain
 if (process.env.PGLITE_MODULE) {
   const { PGlite } = await import(pathToFileURL(process.env.PGLITE_MODULE).href);
   engine = new PGlite();
-  run = sql => engine.exec(sql);
+  run = sql => engine.exec("SELECT set_config('request.jwt.claim.role','service_role',false);\n" + sql);
 } else {
   docker('createdb',[database]);
-  run = async sql => docker('psql',['-X','-d',database,'-v','ON_ERROR_STOP=1','-q'],sql);
+  run = async sql => docker('psql',['-X','-d',database,'-v','ON_ERROR_STOP=1','-q'],
+    "SELECT set_config('request.jwt.claim.role','service_role',false);\n" + sql);
 }
 const w = '00000000-0000-4000-8000-000000000001';
 const other = '00000000-0000-4000-8000-000000000002';
@@ -68,8 +69,7 @@ try {
   `);
   await run(readFileSync(new URL('../supabase/migrations/188_serialize_scalev_order_line_writes.sql',import.meta.url),'utf8'));
   await run(readFileSync(new URL('../supabase/migrations/246_scalev_financial_corrections.sql',import.meta.url),'utf8'));
-  // Each call is its own transaction; session claim role is needed for subsequent calls.
-  await run(`SELECT set_config('request.jwt.claim.role','service_role',false);`);
+  // Each Docker invocation opens a new connection; run() sets its default claims.
   await run(save([
     {entity:'order',field:'net_revenue',amount:525000},
     {entity:'order',field:'gross_revenue',amount:525000},
@@ -141,10 +141,9 @@ try {
   await run(save([{entity:'line',line_key:'Product A',field:'discount_bt',active:false}],6));
   await run(`INSERT INTO scalev_order_lines VALUES(12,'${w}',1,'Product A',2,790000,789100,193384);`);
   await check(`(SELECT discount_bt=789100 FROM scalev_order_lines WHERE id=12)`, 'orphan cancellation not respected');
-  await run(`SELECT set_config('request.jwt.claim.role','authenticated',false); SELECT set_config('request.jwt.claim.sub','${stranger}',false);`);
-  await rejects(save([{entity:'order',field:'net_revenue',amount:1}],4),/another user/);
-  await run(`SET ROLE authenticated;`);
-  await rejects(`UPDATE scalev_financial_corrections SET corrected_amount=1`,/permission denied/);
+  await rejects(`SELECT set_config('request.jwt.claim.role','authenticated',false); SELECT set_config('request.jwt.claim.sub','${stranger}',false);`
+    + save([{entity:'order',field:'net_revenue',amount:1}],4),/another user/);
+  await rejects(`SET ROLE authenticated; UPDATE scalev_financial_corrections SET corrected_amount=1`,/permission denied/);
   await run(`RESET ROLE;`);
   console.log('PASS: source preservation, replay/upsert/replacement, partial writes, HPP, cancellation, atomicity, audit, versions and access');
 } catch (error) {
