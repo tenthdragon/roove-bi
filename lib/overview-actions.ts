@@ -90,7 +90,7 @@ async function fetchAllDateRangeRows(
   return rows;
 }
 
-async function loadOverviewCm3Month(workspaceId: string, from: string, to: string) {
+async function loadOverviewCm3Month(workspaceId: string, from: string, to: string, financialRevision: number) {
   const svc = createServiceSupabase();
   const [daily, ads, channel, shipping, overhead] = await Promise.all([
     fetchAllDateRangeRows(svc, 'daily_product_summary', 'date, product, net_sales, gross_profit', workspaceId, from, to)
@@ -102,7 +102,7 @@ async function loadOverviewCm3Month(workspaceId: string, from: string, to: strin
     fetchAllDateRangeRows(svc, 'daily_channel_data', 'date, product, mp_admin_cost', workspaceId, from, to)
       .then((data) => ({ data, error: null }))
       .catch((error: Error) => ({ data: [], error: `Histori MP fee CM3: ${error.message}` })),
-    getShippingFeeRange(workspaceId, from, to)
+    getShippingFeeRange(workspaceId, from, to, financialRevision)
       .then((data) => ({ data, error: null }))
       .catch((error: Error) => ({ data: [], error: `Histori shipping fee CM3: ${error.message}` })),
     svc.rpc('get_workspace_monthly_overhead', {
@@ -145,6 +145,12 @@ export async function getOverviewCm3HistoryData({
     accessScope,
     accessScope === 'channels' ? 'Sales Channel' : 'Overview',
   );
+  // A correction made through the service-role RPC also invalidates historical
+  // cache keys, without needing a running Next request to call revalidateTag.
+  const { data: revisionRow, error: revisionError } = await createServiceSupabase()
+    .from('workspace_financial_revisions').select('revision').eq('workspace_id', workspaceId).maybeSingle();
+  if (revisionError) throw new Error(`Revisi koreksi keuangan: ${revisionError.message}`);
+  const financialRevision = Number(revisionRow?.revision || 0);
   const historyEnd = new Date(`${to}T00:00:00Z`);
   const historyStartDate = new Date(Date.UTC(
     historyEnd.getUTCFullYear(),
@@ -174,8 +180,8 @@ export async function getOverviewCm3HistoryData({
 
   const historyMonthResults = await Promise.all(historyMonths.map((range) =>
     range.active
-      ? getActiveOverviewCm3Month(workspaceId, range.from, range.to)
-      : getCompletedOverviewCm3Month(workspaceId, range.from, range.to)
+      ? getActiveOverviewCm3Month(workspaceId, range.from, range.to, financialRevision)
+      : getCompletedOverviewCm3Month(workspaceId, range.from, range.to, financialRevision)
   ));
 
   return {
