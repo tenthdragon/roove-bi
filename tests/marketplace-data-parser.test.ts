@@ -1,116 +1,157 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import * as XLSX from 'xlsx';
-import { defaultParserConfig, validateParserConfig } from '../lib/marketplace-parser/config';
+import { defaultParserConfig, migrateParserConfig, validateParserConfig, validateCatalogConfig } from '../lib/marketplace-parser/config';
 import { parseWorkbook } from '../lib/marketplace-parser/read';
 import { projectMarketplace, exportBusinessCsv, orderReady } from '../lib/marketplace-parser/project';
 import { centsText, moneyCents } from '../lib/marketplace-parser/money';
 import { CSV_HEADERS, type Catalog, type ParserConfig, type ParsedFile, type Edits } from '../lib/marketplace-parser/types';
 import { buildVisibleTabs } from '../lib/dashboard-navigation';
 import { dashboardTabPermissionKeys } from '../lib/dashboard-permissions';
+import { catalogFixture,configFixture,book,shopee,tiktok } from './marketplace-parser-fixtures';
+const file = (...skus: string[]) => parseWorkbook(book({ orders: skus.map(sku => shopee({ 'Nomor Referensi SKU': sku })) }));
+function projection(f: ParsedFile,c = configFixture(),catalog = catalogFixture(),account?: string,edits?: Edits) { return projectMarketplace({ file: f,account: account || (f.orders[0].platform === 'shopee' ? 'roove' : f.orders[0].platform === 'tiktokshop' ? 'tiktok-roove' : 'lazada-roove'),date: '2026-11-09',config: c,revision: 3,catalog,edits }); }
+const blocked = (p: ReturnType<typeof projection>) => { assert.ok(p.orders.some(o => !orderReady(o))); assert.throws(() => exportBusinessCsv(p,p.orders[0].business)); };
 
-const catalog:Catalog={businesses:[{code:'RTI',name:'Roove'},{code:'JHN',name:'JHN'},{code:'RLT',name:'RLT'}],stores:[{business:'RTI',name:'Roove Main Store - Marketplace'},{business:'RTI',name:'Pluve Main Store - Marketplace'},{business:'JHN',name:'Pluve Main Store JHN'},{business:'RLT',name:'Pluve Main Store - Marketplace'},{business:'RTI',name:'Purvu The Secret Store - Markerplace'}],bundles:[{business:'RTI',sku:'ROV20-295',name:'Roove'},{business:'RTI',sku:'SMini-0',name:'Shaker'},{business:'RTI',sku:'SRTARM-185',name:'Arum'},{business:'RTI',sku:'PLV20-245',name:'Pluve'},{business:'JHN',sku:'PLV20-245',name:'Pluve'},{business:'RLT',sku:'PLV20-245',name:'Pluve'}],warehouses:['Test warehouse']};
-function config():ParserConfig {const c=defaultParserConfig();c.rooveBusiness='RTI';return c;}
-function book(sheets:Record<string,Record<string,unknown>[]>) {const w=XLSX.utils.book_new();for(const [name,rows] of Object.entries(sheets))XLSX.utils.book_append_sheet(w,XLSX.utils.json_to_sheet(rows),name);return w;}
-function shopee(extra:Record<string,unknown>={}) {return {'No. Pesanan':'ORDER-TEST-1','Nomor Referensi SKU':'ROV20-295','Nama Produk':'Roove','Jumlah':2,'Harga Setelah Diskon':295000,'No. Resi':'00012345','Opsi Pengiriman':'SPX Standard','Username (Pembeli)':'pembeli-test',...extra};}
-function tiktok(extra:Record<string,unknown>={}) {return {'Order ID':'583648045861405949','Seller SKU':'ROV20-295','Product Name':'Roove','Quantity':2,'SKU Unit Original Price':295000,'SKU Subtotal Before Discount':590000,'SKU Seller Discount':100000,'SKU Platform Discount':30000,'Tracking ID':'00012345','Shipping Provider Name':'J&T Express','Buyer Username':'pembeli-test',...extra};}
-function projection(file:ParsedFile,c=config(),edits?:Edits,account='roove') {return projectMarketplace({file,account,date:'2026-11-07',config:c,revision:2,catalog,edits});}
-
-test('TikTok price is unit original minus seller line discount / quantity; platform subsidy stays separate',()=>{
-  const p=projection(parseWorkbook(book({OrderSKUList:[tiktok()]})));
-  assert.equal(p.orders[0].lines[0].unitCents,24500000);assert.equal(p.orders[0].totalCents,49000000);assert.ok(orderReady(p.orders[0]));
-  assert.equal(p.orders[0].rows[0].price,'245000');assert.equal(p.orders[0].rows[0].quantity,'2');
+test('source account fixes Business; the same marketplace SKU resolves to the correct Business bundle',() => {
+  const f = file('PLV20-245');
+  const rti = projection(f), jhn = projection(f,configFixture(),catalogFixture(),'pluve');
+  assert.equal(rti.orders[0].business,'RTI'); assert.equal(rti.orders[0].storeId,11); assert.equal(rti.orders[0].lines[0].bundleId,102);
+  assert.equal(jhn.orders[0].business,'JHN'); assert.equal(jhn.orders[0].storeId,20); assert.equal(jhn.orders[0].lines[0].bundleId,201);
+  assert.ok(orderReady(rti.orders[0]) && orderReady(jhn.orders[0]));
 });
-test('multi-item order repeats CSV group id, header only once, and download serializes the preview rows',()=>{
-  const p=projection(parseWorkbook(book({orders:[shopee(),shopee({'Nomor Referensi SKU':'SMini-0','Nama Produk':'Shaker Mini Roove','Jumlah':1,'Harga Setelah Diskon':17900})]})));
-  assert.equal(p.orders.length,1);assert.ok(orderReady(p.orders[0]));
-  assert.deepEqual(p.orders[0].rows.map(r=>r.id),['1','1']);assert.equal(p.orders[0].rows[1].external_id,'');
-  const csv=exportBusinessCsv(p,'RTI');const rows=XLSX.utils.sheet_to_json(XLSX.read(csv,{type:'string',raw:true}).Sheets.Sheet1,{defval:''});
-  assert.deepEqual(rows,p.orders[0].rows);assert.equal(Object.keys(rows[0] as object).length,28);
+test('a source account cannot route or fall back into another Business',() => {
+  const c = configFixture(); c.routes.find(r => r.account === 'roove' && r.productId === 'pluve')!.storeId = 20;
+  assert.throws(() => validateCatalogConfig(c,catalogFixture()),/Business RTI/);
+  blocked(projection(file('PLV20-245'),c));
+  const catalog = catalogFixture(); catalog.bundles = catalog.bundles.filter(b => b.business !== 'RTI');
+  blocked(projection(file('PLV20-245'),configFixture(),catalog));
 });
-test('zero-priced items remain zero, and suffix -0 is not used to price a paid accessory',()=>{
-  const free=projection(parseWorkbook(book({OrderSKUList:[tiktok({'Seller SKU':'SRTARM-250','SKU Unit Original Price':185000,'Quantity':1,'SKU Subtotal Before Discount':185000,'SKU Seller Discount':185000})]})));
-  assert.equal(free.orders[0].rows[0].price,'0');assert.equal(free.orders[0].rows[0].sku,'SRTARM-185');assert.ok(orderReady(free.orders[0]));
+test('two SKU items remain two different Scalev bundles in one order, with exact quantity and CSV continuation rows',() => {
+  const p = projection(parseWorkbook(book({ orders: [shopee(),shopee({ 'Nomor Referensi SKU': 'PLV20-245','Jumlah': 3,'Harga Setelah Diskon': 245000 })] })));
+  assert.ok(orderReady(p.orders[0])); assert.equal(p.orders[0].storeId,10);
+  assert.deepEqual(p.orders[0].lines.map(l => l.bundleId),[101,102]); assert.deepEqual(p.orders[0].rows.map(r => r.quantity),['2','3']);
+  assert.deepEqual(p.orders[0].rows.map(r => r.id),['1','1']); assert.equal(p.orders[0].rows[1].external_id,'');
+  const csv = exportBusinessCsv(p,'RTI'), rows = XLSX.utils.sheet_to_json(XLSX.read(csv,{ type: 'string',raw: true }).Sheets.Sheet1,{ defval: '' });
+  assert.deepEqual(rows,p.orders[0].rows); assert.equal(Object.keys(rows[0] as object).length,28);
 });
-test('header-only first sheet is ignored, real Advance Fulfilment rows are retained and blocked',()=>{
-  const w=book({'Advance Fulfilment':[{'Booking SN':'BOOKING-TEST','No. Resi':'ADV-01','Nama Produk':'Arum'}],orders:[shopee()]});
-  const p=projection(parseWorkbook(w));assert.equal(p.orders.length,2);assert.equal(p.orders[0].source.idKind,'booking');assert.equal(p.orders[0].lines[0].quantity,null);assert.equal(p.orders[0].lines[0].unitCents,null);assert.ok(!orderReady(p.orders[0]));
-  assert.throws(()=>exportBusinessCsv(p,'RTI')); // No silent partial download inside a business.
-  const header=XLSX.utils.aoa_to_sheet([['Booking SN','No. Resi']]);w.Sheets['Advance Fulfilment']=header;
-  assert.equal(parseWorkbook(w).orders.length,1);
+test('contains rule routes any order with the configured Product, without a hardcoded Roove condition',() => {
+  const c = configFixture(); c.combinations[0] = { id: 'custom',account: 'roove',productIds: ['globite'],match: 'contains',priority: 50,storeId: 12 };
+  const p = projection(file('GLB-150','OGD-100'),c); assert.equal(p.orders[0].storeId,12); assert.ok(orderReady(p.orders[0]));
+  c.combinations[0].storeId = 11; blocked(projection(file('GLB-150','OGD-100'),c));
 });
-test('source name+variation can resolve a blank SKU; unexpected variants stay unresolved',()=>{
-  const f=parseWorkbook(book({OrderSKUList:[tiktok({'Seller SKU':'','Product Name':'Roove Collagen Drink Kemasan 20 Sachet',Variation:'BLUEBERRY'})]}));
-  assert.equal(projection(f).orders[0].rows[0].sku,'ROV20-295');
-  f.orders[0].lines[0].variation='NEW';assert.ok(!orderReady(projection(f).orders[0]));
+test('exact combination does not match an order containing an extra Product',() => {
+  const c = configFixture(); c.combinations = [{ id: 'pair',account: 'roove',productIds: ['globite','pluve'],match: 'exact',priority: 10,storeId: 11 }];
+  assert.ok(orderReady(projection(file('GLB-150','PLV20-245'),c).orders[0]));
+  blocked(projection(file('GLB-150','PLV20-245','OGD-100'),c));
 });
-test('routing uses source account plus product; Pluve in MP Roove never goes to JHN automatically',()=>{
-  const f=parseWorkbook(book({orders:[shopee({'Nomor Referensi SKU':'PLV20-245'})]}));
-  assert.equal(projection(f).orders[0].business,'RTI');assert.equal(projection(f).orders[0].store,'Pluve Main Store - Marketplace');
-  assert.equal(projection(f,config(),undefined,'pluve').orders[0].business,'JHN');
+test('priority picks one combination; tied different destinations block the whole batch',() => {
+  const c = configFixture(); c.combinations.push({ id: 'pair',account: 'roove',productIds: ['roove','pluve'],match: 'exact',priority: 200,storeId: 11 });
+  const catalog = catalogFixture(); catalog.bundles[0].storeIds.push(11);
+  assert.equal(projection(file('ROV20-295','PLV20-245'),c,catalog).orders[0].storeId,11);
+  c.combinations[1].priority = 100; blocked(projection(file('ROV20-295','PLV20-245'),c,catalog));
 });
-test('conflicting routes, wrong-business SKU and an unknown source provider block export',()=>{
-  const f=parseWorkbook(book({orders:[shopee({'Opsi Pengiriman':'NEW CARRIER'})]}));assert.ok(projection(f).orders[0].errors.some(e=>e.includes('kurir')));
-  const c=config();c.routes.push({...c.routes[1],id:'duplicate'});assert.ok(projection(f,c).orders[0].errors.some(e=>e.includes('ganda')));
-  const unknown=parseWorkbook(book({orders:[shopee({'Nomor Referensi SKU':'ROV99-NEW'})]}));assert.ok(projection(unknown).orders[0].lines[0].errors.some(e=>e.includes('katalog')));
+test('two distinct SKU variants in the same Product use a single Product route',() => {
+  const c = configFixture(); c.combinations = [];
+  const p = projection(file('ROV20-295','ROV10-150'),c); assert.ok(orderReady(p.orders[0])); assert.deepEqual(p.orders[0].lines.map(l => l.bundleId),[101,105]);
 });
-test('Lazada uses RLT override and unitPrice, not paidPrice; multi-item identity is blocked',()=>{
-  const row={orderNumber:'2771297423401190',orderItemId:'2771297423501190',unitPrice:'245000.00',paidPrice:'269950.00',sellerSku:'PLV20-245',trackingCode:'JZ-TEST',shippingProvider:'J&T',customerName:'test'};
-  const p=projection(parseWorkbook(book({sheet1:[row]})));assert.equal(p.orders[0].business,'RLT');assert.equal(p.orders[0].rows[0].price,'245000');assert.ok(orderReady(p.orders[0]));
-  assert.ok(!orderReady(projection(parseWorkbook(book({sheet1:[row,{...row,orderItemId:'2771297423501191'}]}))).orders[0]));
+test('a unique shared Store is reverse-resolved from bundle relations without per-order or per-SKU routing',() => {
+  const c = configFixture(); c.products = []; c.groups = []; c.routes = []; c.combinations = [];
+  const p = projection(file('ROV20-295','ROV10-150'),c); assert.ok(orderReady(p.orders[0])); assert.equal(p.orders[0].storeId,10);
+  blocked(projection(file('PLV20-245'),c));
 });
-test('missing values do not become zero/one, and corrections need a reason',()=>{
-  const f=parseWorkbook(book({orders:[shopee({Jumlah:'','Harga Setelah Diskon':''})]}));
-  const key=f.orders[0].lines[0].key;assert.ok(!orderReady(projection(f).orders[0]));
-  const edits:Edits={orders:{},lines:{[key]:{quantity:'1',price:'245000'}}};assert.ok(!orderReady(projection(f,config(),edits).orders[0]));
-  edits.lines[key].reason='Dikonfirmasi dari laporan pesanan';assert.ok(orderReady(projection(f,config(),edits).orders[0]));
+test('an unmapped Product cannot bypass a potentially applicable combination',() => {
+  const c = configFixture(); c.products = c.products.filter(r => r.value !== 'PLV');
+  blocked(projection(file('ROV20-295','PLV20-245'),c));
 });
-test('malformed source financials require a full, reasoned quantity and price correction',()=>{
-  const f=parseWorkbook(book({orders:[shopee({'Harga Setelah Diskon':'invalid'})]}));const key=f.orders[0].lines[0].key;
-  const edits:Edits={orders:{},lines:{[key]:{quantity:'2',price:'295000',reason:'Confirmed against order detail'}}};
-  const p=projection(f,config(),edits);assert.ok(orderReady(p.orders[0]));assert.ok(p.orders[0].warnings.some(w=>w.includes('diganti')));
-  assert.ok(p.orders[0].source.lines[0].errors.length); // Original evidence is retained.
+test('selected Store universe is enforced even if broader catalog data is provided',() => {
+  const c = configFixture(); c.stores = c.stores.filter(s => s.storeId !== 10);
+  c.routes = c.routes.filter(r => r.storeId !== 10); c.combinations = [];
+  blocked(projection(file('ROV20-295'),c));
 });
-test('duplicate lines, duplicate order/booking receipt, canceled status and unsafe numeric IDs are rejected',()=>{
-  const dup=projection(parseWorkbook(book({orders:[shopee(),shopee()]})));assert.ok(dup.orders[0].errors.some(e=>e.includes('identik')));
-  const same=projection(parseWorkbook(book({orders:[shopee()],Advance:[{'Booking SN':'OTHER','No. Resi':'00012345'}]})));assert.ok(same.orders.every(o=>o.errors.some(e=>e.includes('Resi'))));
-  assert.ok(!orderReady(projection(parseWorkbook(book({orders:[shopee({'Status Pesanan':'Dibatalkan'})]}))).orders[0]));
-  assert.throws(()=>parseWorkbook(book({OrderSKUList:[tiktok({'Order ID':583648045861405949})]})),/presisi/);
+test('bundle found elsewhere in the Business is not sufficient for the destination Store',() => {
+  const catalog = catalogFixture(); catalog.bundles.find(b => b.id === 102)!.storeIds = [11];
+  const p = projection(file('ROV20-295','PLV20-245'),configFixture(),catalog); assert.equal(p.orders[0].storeId,10); blocked(p);
 });
-test('ID strings and leading zero receipts survive; CSV escapes quotes and rejects formula prefixes',()=>{
-  const p=projection(parseWorkbook(book({OrderSKUList:[tiktok({'Buyer Username':'User, "test"'})]})));
-  const csv=exportBusinessCsv(p,'RTI');assert.ok(csv.includes('583648045861405949'));assert.ok(csv.includes('00012345'));assert.ok(csv.includes('"User, ""test"""'));
-  assert.ok(!orderReady(projection(parseWorkbook(book({orders:[shopee({'Username (Pembeli)':'=1+1'})]}))).orders[0]));
+test('same code on different Store-specific bundles is valid; duplicate code inside the destination Store blocks',() => {
+  const catalog = catalogFixture(); catalog.bundles.push({ id: 999,business: 'RTI',sku: 'ROV20-295',name: 'Another Store bundle',storeIds: [11],syncedAt: null });
+  assert.ok(orderReady(projection(file('ROV20-295'),configFixture(),catalog).orders[0]));
+  catalog.bundles.at(-1)!.storeIds = [10]; blocked(projection(file('ROV20-295'),configFixture(),catalog));
 });
-test('money is exact; ambiguous malformed values and fractional cents cannot silently round',()=>{
-  assert.equal(moneyCents('Rp 245.000'),24500000);assert.equal(moneyCents('245000.00'),24500000);assert.equal(moneyCents('245.000,50'),24500050);assert.equal(moneyCents(''),null);assert.equal(moneyCents('0'),0);
-  assert.equal(centsText(12345),'123.45');assert.throws(()=>moneyCents('oops'));assert.throws(()=>moneyCents('1.2345'));
-  assert.throws(()=>moneyCents(1.234),/desimal/);assert.equal(moneyCents('1.234'),123400);assert.equal(moneyCents(0.29),29);
-  const f=parseWorkbook(book({OrderSKUList:[tiktok({Quantity:3,'SKU Unit Original Price':100,'SKU Subtotal Before Discount':300,'SKU Seller Discount':1})]}));assert.equal(f.orders[0].lines[0].unitCents,null);assert.ok(!orderReady(projection(f).orders[0]));
+test('missing bundle, blank SKU, changed case and old alias never fall back to product names',() => {
+  for (const sku of ['NEW-CODE','','rov20-295','SRTARM-250']) { const p = projection(file(sku)); blocked(p); assert.equal(p.orders[0].lines[0].sku,sku); }
 });
-test('unsupported courier/service cross-pairs cannot become ready through an order correction',()=>{
-  const f=parseWorkbook(book({orders:[shopee()]}));
-  const edits:Edits={lines:{},orders:{[f.orders[0].key]:{courier:'Shopee Express',service:'EZ',reason:'test invalid pair'}}};
-  assert.ok(projection(f,config(),edits).orders[0].errors.some(e=>e.includes('Pasangan kurir')));
+test('a failed or unloaded Store catalog blocks download even when matching bundles are cached',() => {
+  const catalog = catalogFixture(); catalog.storeSyncs[0].status = 'failed'; blocked(projection(file('ROV20-295'),configFixture(),catalog));
+  catalog.storeSyncs[0].status = 'ready'; catalog.loadedStoreIds = [11,12,20]; blocked(projection(file('ROV20-295'),configFixture(),catalog));
 });
-test('config validation rejects malformed/incomplete mappings and duplicate identifiers',()=>{
-  const c=config();validateParserConfig(c);c.routes.push({...c.routes[0]});assert.throws(()=>validateParserConfig(c),/unik/);
-  assert.throws(()=>validateParserConfig({schemaVersion:1}),/Format/);
+test('manual overrides of Business, Store, Warehouse or SKU are rejected',() => {
+  for (const field of ['business','store','warehouse']) assert.throws(() => projection(file('ROV20-295'),configFixture(),catalogFixture(),undefined,{ lines: {},orders: { 'shopee:order:ORDER-TEST-1': { [field]: 'OTHER',reason: 'test' } } } as Edits),/tidak boleh/);
+  assert.throws(() => projection(file('ROV20-295'),configFixture(),catalogFixture(),undefined,{ orders: {},lines: { 'orders:2': { sku: 'PLV20-245',reason: 'test' } } } as Edits),/tidak boleh/);
 });
-test('confirmed Gojek and Grab policy maps to Shopee Express REGULER while keeping source provider',()=>{
-  for(const provider of ['Gojek','Grab']) {
-    const p=projection(parseWorkbook(book({OrderSKUList:[tiktok({'Shipping Provider Name':provider})]})));
-    assert.equal(p.orders[0].rows[0].courier,'Shopee Express');assert.equal(p.orders[0].rows[0].courier_service,'REGULER');
-    assert.equal(p.orders[0].source.provider,provider);assert.ok(orderReady(p.orders[0]));
-  }
+test('Warehouse follows global Store setting and must be connected to its Business',() => {
+  const c = configFixture(); c.stores[0].warehouseId = 2; blocked(projection(file('ROV20-295'),c)); assert.throws(() => validateCatalogConfig(c,catalogFixture()),/Warehouse/);
+  const catalog = catalogFixture(); catalog.warehouses[1].businesses.push('RTI'); const p = projection(file('ROV20-295'),c,catalog); assert.equal(p.orders[0].rows[0].warehouse,'Warehouse B'); assert.ok(orderReady(p.orders[0]));
 });
-test('preview snapshot stays fixed when source config is edited afterwards',()=>{
-  const c=config();const p=projection(parseWorkbook(book({orders:[shopee()]})),c);const before=exportBusinessCsv(p,'RTI');c.routes[1].store='Changed';
-  assert.equal(exportBusinessCsv(p,'RTI'),before);assert.equal(p.configSnapshot.routes[1].store,'Roove Main Store - Marketplace');
+test('a wrong Marketplace account blocks upload results instead of changing Business',() => { blocked(projection(parseWorkbook(book({ TikTok: [tiktok()] })),configFixture(),catalogFixture(),'roove')); });
+test('one invalid order prevents downloading all other valid orders',() => {
+  const f = parseWorkbook(book({ orders: [shopee(),shopee({ 'No. Pesanan': 'OTHER','No. Resi': 'OTHER-TRACK','Nomor Referensi SKU': 'MISSING' })] }));
+  const p = projection(f); assert.ok(orderReady(p.orders[0])); blocked(p);
 });
-test('menu is under Sales Channel and follows its permission for sales managers',()=>{
+test('TikTok seller discount determines price; platform subsidy stays separate and long IDs stay exact',() => {
+  const p = projection(parseWorkbook(book({ TikTok: [tiktok()] }))); assert.ok(orderReady(p.orders[0])); assert.equal(p.orders[0].lines[0].unitCents,24500000); assert.equal(p.orders[0].totalCents,49000000); assert.equal(p.orders[0].rows[0].external_id,'583648045861405949');
+});
+test('zero-priced items stay zero; SKU suffix never sets price',() => {
+  const p = projection(file('SMini-0')); assert.equal(p.orders[0].rows[0].price,'295000');
+  const free = projection(parseWorkbook(book({ orders: [shopee({ 'Harga Setelah Diskon': 0 })] }))); assert.ok(orderReady(free.orders[0])); assert.equal(free.orders[0].rows[0].price,'0');
+});
+test('decimal cents are exact; partial TikTok unit cents and missing quantity block',() => {
+  assert.equal(moneyCents('Rp 1.234,56'),123456); assert.equal(centsText(123456),'1234.56');
+  blocked(projection(parseWorkbook(book({ TikTok: [tiktok({ Quantity: 3,'SKU Unit Original Price': 100,'SKU Subtotal Before Discount': 300,'SKU Seller Discount': 100 })] }))));
+  blocked(projection(parseWorkbook(book({ orders: [shopee({ Jumlah: '' })] }))));
+});
+test('Advance Fulfilment incomplete item remains present; empty auxiliary sheet does not hide valid orders',() => {
+  const w = book({ 'Advance Fulfilment': [{ 'Booking SN': 'BOOK','No. Resi': 'ADV','Nama Produk': 'Roove' }],orders: [shopee()] });
+  assert.equal(projection(parseWorkbook(w)).orders.length,2); blocked(projection(parseWorkbook(w)));
+  w.Sheets['Advance Fulfilment'] = XLSX.utils.aoa_to_sheet([['Booking SN','No. Resi']]); assert.equal(parseWorkbook(w).orders.length,1);
+});
+test('Lazada keeps account Business and existing multi-item external ID guard',() => {
+  const row = { orderNumber: 'LAZ-1',orderItemId: 'ITEM-1',unitPrice: '245000.00',sellerSku: 'PLV20-245',trackingCode: 'TRACK',shippingProvider: 'J&T',customerName: 'test' };
+  const p = projection(parseWorkbook(book({ Lazada: [row] }))); assert.equal(p.orders[0].business,'RTI'); assert.ok(orderReady(p.orders[0]));
+  blocked(projection(parseWorkbook(book({ Lazada: [row,{ ...row,orderItemId: 'ITEM-2' }] }))));
+});
+test('duplicate receipt, cancellation, formula text and unknown courier remain blocking',() => {
+  for (const extra of [{ 'Status Pesanan': 'Dibatalkan' },{ 'Username (Pembeli)': '=SUM(A1)' },{ 'Opsi Pengiriman': 'NEW' }]) blocked(projection(parseWorkbook(book({ orders: [shopee(extra)] }))));
+  blocked(projection(parseWorkbook(book({ orders: [shopee(),shopee({ 'No. Pesanan': 'DUP' })] }))));
+});
+test('financial corrections require a reason and invalidate raw source errors only when both fields are supplied',() => {
+  const f = parseWorkbook(book({ orders: [shopee({ Jumlah: 'invalid' })] }));
+  blocked(projection(f,configFixture(),catalogFixture(),undefined,{ orders: {},lines: { 'orders:2': { quantity: '2',price: '295000' } } }));
+  const p = projection(f,configFixture(),catalogFixture(),undefined,{ orders: {},lines: { 'orders:2': { quantity: '2',price: '295000',reason: 'Invoice checked' } } }); assert.ok(orderReady(p.orders[0]));
+});
+test('no customer-specific accounts, routes, products or warehouse names are hardcoded in new defaults',() => {
+  const c = defaultParserConfig(); for (const key of ['accounts','stores','groups','products','routes','combinations'] as const) assert.deepEqual(c[key],[]); validateParserConfig(c);
+});
+test('legacy migration preserves history input, derives Business only from consistent data, and discards SKU replacement',() => {
+  const legacy = { schemaVersion: 1,rooveBusiness: 'RTI',lazadaBusiness: 'JHN',accounts: [{ id: 'old',label: 'MP Example' }],routes: [{ id: 'r',account: 'old',family: 'pluve',business: '$roove',store: 'Pluve Main Store - Marketplace',warehouse: 'Warehouse A' }],products: [{ id: 'p',account: '*',sourceSku: 'OLD',targetSku: 'PLV20-245',family: 'pluve' }],couriers: defaultParserConfig().couriers };
+  const before = structuredClone(legacy), migrated = migrateParserConfig(legacy,catalogFixture());
+  assert.deepEqual(legacy,before); assert.equal(migrated.config.accounts.length,3); assert.ok(migrated.config.accounts.every(a => a.business === 'RTI')); assert.equal(migrated.config.products[0].value,'OLD'); assert.equal('targetSku' in migrated.config.products[0],false); assert.ok(migrated.notes.length); validateCatalogConfig(migrated.config,catalogFixture());
+  legacy.routes.push({ ...legacy.routes[0],id: 'other',business: 'JHN' }); const conflict = migrateParserConfig(legacy,catalogFixture()); assert.ok(conflict.config.accounts.every(a => !a.business)); assert.throws(() => validateParserConfig(conflict.config));
+});
+test('duplicate product routes, malformed combinations and stale config schemas are rejected',() => {
+  const c = configFixture(); c.routes.push({ ...c.routes[0],id: 'dup' }); assert.throws(() => validateParserConfig(c),/satu routing/);
+  const invalid = configFixture(); invalid.combinations[0].productIds = ['unknown']; assert.throws(() => validateParserConfig(invalid),/kombinasi/);
+  assert.throws(() => validateParserConfig({ schemaVersion: 2 }),/Muat ulang/);
+});
+test('menu remains under Sales Channel with its permission gate and 28-column CSV format',() => {
   assert.deepEqual(dashboardTabPermissionKeys('marketplace-data-parser'),['tab:channels']);
-  const tabs=buildVisibleTabs('sales_manager',new Set(['tab:channels']));assert.ok(tabs.find(t=>t?.id==='channels')?.children?.some(c=>c.id==='marketplace-data-parser'));
-  assert.ok(!buildVisibleTabs('advertiser',new Set(['tab:marketing'])).some(t=>t?.children?.some(c=>c.id==='marketplace-data-parser')));
-  assert.equal(CSV_HEADERS.length,28);
+  assert.ok(buildVisibleTabs('sales_manager',new Set(['tab:channels'])).find(t => t?.id === 'channels')?.children?.some(c => c.id === 'marketplace-data-parser'));
+  assert.ok(!buildVisibleTabs('advertiser',new Set(['tab:marketing'])).some(t => t?.children?.some(c => c.id === 'marketplace-data-parser'))); assert.equal(CSV_HEADERS.length,28);
+});
+
+test('a Warehouse without a verified CSV integration label blocks export instead of inventing its name', () => {
+  const catalog = catalogFixture(); catalog.warehouses[0].exportName = null;
+  const p = projection(file('ROV20-295'), configFixture(), catalog);
+  blocked(p); assert.equal(p.orders[0].rows[0].warehouse, '');
+  assert.match(p.orders[0].errors.join(' '), /Nama ekspor Scalev/);
 });

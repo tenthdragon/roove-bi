@@ -1,27 +1,34 @@
 export type Platform = 'shopee' | 'tiktokshop' | 'lazada';
-export type ProductRule = {
-  id: string; account: string; sourceSku: string; name: string; variation: string;
-  prefix: string; targetSku: string; family: string;
-};
-export type RouteRule = {
-  id: string; account: string; family: string; business: string; store: string; warehouse: string;
-};
+export type MarketplaceAccount = { id: string; label: string; marketplace: Platform; business: string };
+export type ProductGroup = { id: string; name: string };
+export type ProductRule = { id: string; account: string; match: 'sku' | 'prefix'; value: string; productIds: string[] };
+export type StoreScope = { storeId: number; warehouseId: number | null };
+export type RouteRule = { id: string; account: string; productId: string; storeId: number };
+export type CombinationRule = { id: string; account: string; productIds: string[]; match: 'contains' | 'exact'; priority: number; storeId: number };
 export type CourierRule = { platform: Platform; source: string; courier: string; service: string };
 export type ParserConfig = {
-  schemaVersion: 1;
-  rooveBusiness: string;
-  lazadaBusiness: string;
-  accounts: { id: string; label: string }[];
-  routes: RouteRule[];
+  schemaVersion: 3;
+  accounts: MarketplaceAccount[];
+  stores: StoreScope[];
+  groups: ProductGroup[];
   products: ProductRule[];
+  routes: RouteRule[];
+  combinations: CombinationRule[];
   couriers: CourierRule[];
 };
+export type CatalogStore = { id: number; business: string; name: string };
+export type CatalogBundle = { id: number; business: string; sku: string; name: string; storeIds: number[]; syncedAt: string | null };
+export type CatalogWarehouse = { id: number; name: string; exportName: string | null; businesses: string[] };
 export type Catalog = {
-  businesses: { code: string; name: string }[];
-  stores: { business: string; name: string }[];
-  bundles: { business: string; sku: string; name: string }[];
-  warehouses: string[];
+  version: string;
+  businesses: { id: number; code: string; name: string }[];
+  stores: CatalogStore[];
+  bundles: CatalogBundle[];
+  warehouses: CatalogWarehouse[];
+  loadedStoreIds: number[];
+  storeSyncs: { storeId: number; checkedAt: string | null; bundleCount: number; status: 'ready' | 'unknown' | 'failed' }[];
 };
+export type ParserContext = { workspaceId: string; config: ParserConfig; revision: number; catalog: Catalog; canSave: boolean; canSync: boolean; migrationNotes: string[] };
 export type SourceLine = {
   key: string; sheet: string; row: number; sku: string; name: string; variation: string;
   quantity: number | null; unitCents: number | null; totalCents: number | null;
@@ -33,14 +40,14 @@ export type SourceOrder = {
   lines: SourceLine[]; errors: string[]; warnings: string[];
 };
 export type ParsedFile = { filename: string; orders: SourceOrder[]; sheets: string[]; ignoredSheets: string[] };
-export type LineEdit = { sku?: string; quantity?: string; price?: string; family?: string; reason?: string };
-export type OrderEdit = { business?: string; store?: string; warehouse?: string; courier?: string; service?: string; username?: string; reason?: string };
+export type LineEdit = { quantity?: string; price?: string; reason?: string };
+export type OrderEdit = { courier?: string; service?: string; username?: string; reason?: string };
 export type Edits = { lines: Record<string, LineEdit>; orders: Record<string, OrderEdit> };
 export const CSV_HEADERS = ['external_id','platform','id','timestamp','store','name','username','phone','email','address','subdistrict','city','payment_method','bank','account_holder','account_number','item_type','sku','price','quantity','shipping_cost','other_income','weight_bump','courier','courier_service','warehouse','shipment_receipt','notes'] as const;
 export type CsvRow = Record<typeof CSV_HEADERS[number], string>;
-export type PreviewLine = { source: SourceLine; sku: string; family: string; quantity: number | null; unitCents: number | null; totalCents: number | null; mappingRule: string; errors: string[]; reason: string };
+export type PreviewLine = { source: SourceLine; sku: string; productIds: string[]; bundleId: number | null; bundleName: string; quantity: number | null; unitCents: number | null; totalCents: number | null; mappingRule: string; errors: string[]; reason: string };
 export type PreviewOrder = {
-  source: SourceOrder; business: string; store: string; warehouse: string; courier: string; service: string;
+  source: SourceOrder; business: string; storeId: number | null; store: string; warehouse: string; courier: string; service: string;
   lines: PreviewLine[]; errors: string[]; warnings: string[]; totalCents: number; routeIds: string[]; rows: CsvRow[];
 };
 export type Projection = { orders: PreviewOrder[]; date: string; account: string; configRevision: number; configSnapshot: ParserConfig; editsSnapshot: Edits };

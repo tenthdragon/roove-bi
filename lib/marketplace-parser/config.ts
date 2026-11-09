@@ -1,7 +1,6 @@
-import type { ParserConfig, ProductRule } from './types';
+import type { Catalog, ParserConfig, Platform } from './types';
 
-const warehouse = "Roove Lautan Barat's Warehouse";
-const jhnWarehouse = "Jejak Herba Nusantara's Warehouse";
+export const MARKETPLACE_LABELS: Record<Platform, string> = { shopee: 'Shopee', tiktokshop: 'TikTok Shop', lazada: 'Lazada' };
 // User-supplied Scalev names, including the intentional REGULAR/REGULER distinction.
 export const COURIER_SERVICE_OPTIONS = [
   {courier:'SiCepat Express Cashless',service:'REG'},
@@ -16,32 +15,9 @@ export const COURIER_SERVICE_OPTIONS = [
   {courier:'Shopee Express',service:'HEMAT'},
   {courier:'AnterAja Cashless',service:'REGULAR'},
 ];
+
 export function defaultParserConfig(): ParserConfig {
-  const product = (id: string, values: Partial<ProductRule>): ProductRule => ({ id, account: '*', sourceSku: '', name: '', variation: '', prefix: '', targetSku: '', family: '', ...values });
-  return {
-    schemaVersion: 1, rooveBusiness: '', lazadaBusiness: 'RLT',
-    accounts: [{ id: 'roove', label: 'MP Roove' }, { id: 'pluve', label: 'MP Pluve' }, { id: 'purvu', label: 'MP Purvu' }],
-    routes: [
-      { id: 'pluve-pluve', account: 'pluve', family: 'pluve', business: 'JHN', store: 'Pluve Main Store JHN', warehouse },
-      ...[
-        ['roove','Roove Main Store - Marketplace'], ['globite','Globite Store - Marketplace'],
-        ['osgard','Osgard Oil Store'], ['pluve','Pluve Main Store - Marketplace'],
-        ['purvu','Purvu Store - Marketplace'], ['purvu_the_secret','Purvu The Secret Store - Markerplace'],
-      ].map(([family,store]) => ({ id: `roove-${family}`, account: 'roove', family, business: '$roove', store, warehouse: family === 'purvu_the_secret' ? jhnWarehouse : warehouse })),
-    ],
-    products: [
-      ...[['ROV','roove'],['GLB','globite'],['2GLB','globite'],['OGD','osgard'],['PLV','pluve'],['SRT','purvu_the_secret'],['PRVA-ARM','purvu_the_secret'],['PRVA-ASH','purvu_the_secret'],['PRVA-AM','purvu'],['PAM','purvu'],['PMS','purvu'],['DHF','drhyun']].map(([prefix,family]) => product(`prefix-${prefix}`,{ prefix, family })),
-      product('arum-alias',{ sourceSku:'SRTARM-250',targetSku:'SRTARM-185',family:'purvu_the_secret' }),
-      product('mini-sku',{ sourceSku:'SMini-0',family:'accessory' }),
-      ...[
-        ['Shaker Mini Roove','','SMini-0','accessory'], ['Shaker Mini Roove Collagen','Default','SMini-0','accessory'],
-        ['DR HYUN Minuman Tinggi Serat Rasa Jeruk Isi 30 Sachet','Default','DHF-305','drhyun'],
-        ['Roove Collagen Drink Kemasan 20 Sachet','BLUEBERRY','ROV20-295','roove'],
-        ['Mini Pack Purvu The Secret Series: Arum','Default','SRTARM3-40','purvu_the_secret'],
-        ['The Secret Series: Arum by Purvu','Default','SRTARM-185','purvu_the_secret'],
-        ['Parfum Aroma Aquatic Premium yang Sophisticated, Aman untuk Ngantor & Santai | Parfum Purvu Mediterranean Sea','Default','PMS30-155','purvu'],
-      ].map(([name,variation,targetSku,family],i) => product(`name-${i}`,{name,variation,targetSku,family})),
-    ],
+  return { schemaVersion: 3, accounts: [], stores: [], groups: [], products: [], routes: [], combinations: [],
     couriers: [
       ...['J&T Express','J&T'].map(source => ({ platform:'tiktokshop' as const,source,courier:'J&T Express Cashless',service:'EZ' })),
       { platform:'lazada',source:'J&T',courier:'J&T Express Cashless',service:'EZ' },
@@ -56,23 +32,84 @@ export function defaultParserConfig(): ParserConfig {
   };
 }
 
-export function validateParserConfig(input: unknown): asserts input is ParserConfig {
+function fail(message: string): never { throw new Error(message); }
+const text = (value: unknown): value is string => typeof value === 'string' && value.length <= 500 && !/[\u0000-\u001f]/.test(value);
+const filled = (value: unknown): value is string => text(value) && !!value.trim();
+const id = (value: unknown): value is number => Number.isSafeInteger(value) && Number(value) > 0;
+const list = (value: unknown): value is unknown[] => Array.isArray(value) && value.length <= 2000;
+const unique = (values: unknown[]) => new Set(values).size === values.length;
+export function validateParserConfig(input: unknown, options: { allowIncomplete?: boolean } = {}): asserts input is ParserConfig {
   const c = input as ParserConfig;
-  if (!c || c.schemaVersion !== 1 || !Array.isArray(c.accounts) || !Array.isArray(c.routes) || !Array.isArray(c.products) || !Array.isArray(c.couriers)) throw new Error('Format konfigurasi parser tidak valid.');
-  const text = (v: unknown) => typeof v === 'string' && v.length <= 500 && !/[\u0000-\u001f]/.test(v);
-  if (!text(c.rooveBusiness) || !text(c.lazadaBusiness)) throw new Error('Business konfigurasi tidak valid.');
-  for (const rows of [c.accounts,c.routes,c.products,c.couriers]) {
-    if (rows.length > 2000) throw new Error('Konfigurasi terlalu besar (maksimal 2.000 aturan per jenis).');
-    if (rows.some(row => !row || Object.values(row).some(v => !text(v)))) throw new Error('Setiap nilai konfigurasi harus berupa teks tanpa karakter kontrol.');
+  if ([1,2].includes(Number((input as { schemaVersion?: number })?.schemaVersion))) fail('Aturan parsing telah diperbarui. Muat ulang halaman sebelum menyimpan.');
+  if (!c || c.schemaVersion !== 3 || !['accounts','stores','groups','products','routes','combinations','couriers'].every(k => list((c as unknown as Record<string, unknown>)[k]))) fail('Format konfigurasi parser tidak valid.');
+  for (const rows of [c.accounts,c.groups,c.products,c.routes,c.combinations]) {
+    if (rows.some(r => !r || !filled(r.id)) || !unique(rows.map(r => r.id))) fail('ID pengaturan harus unik dan tidak kosong.');
   }
-  for (const rows of [c.accounts,c.routes,c.products]) {
-    if (rows.some(r => !r.id) || new Set(rows.map(r => r.id)).size !== rows.length) throw new Error('ID aturan harus unik dan tidak kosong.');
-  }
-  const fields = (o: object, keys: string[]) => keys.every(k => text((o as Record<string, unknown>)[k]));
-  if (c.accounts.some(r => !fields(r,['id','label']) || !r.label.trim()) || c.routes.some(r => !fields(r,['id','account','family','business','store','warehouse'])) || c.products.some(r => !fields(r,['id','account','sourceSku','name','variation','prefix','targetSku','family'])) || c.couriers.some(r => !fields(r,['platform','source','courier','service']) || !['shopee','tiktokshop','lazada'].includes(r.platform))) throw new Error('Kolom konfigurasi tidak lengkap.');
-  const accounts = new Set(c.accounts.map(a => a.id));
-  if (c.routes.some(r => !accounts.has(r.account) || !r.family.trim() || !r.business.trim() || !r.store.trim() || !r.warehouse.trim())) throw new Error('Routing membutuhkan akun, kelompok produk, business, store, dan gudang.');
-  if (c.products.some(r => (r.account !== '*' && !accounts.has(r.account)) || !r.family.trim() || [r.sourceSku,r.name,r.prefix].filter(s=>s.trim()).length !== 1)) throw new Error('Aturan produk membutuhkan satu pencocokan (SKU, nama, atau prefix), akun, dan kelompok produk.');
-  if (c.couriers.some(r => !r.source.trim() || !r.courier.trim() || !r.service.trim())) throw new Error('Aturan kurir harus lengkap.');
-  if (c.couriers.some(r=>!COURIER_SERVICE_OPTIONS.some(p=>p.courier===r.courier && p.service===r.service))) throw new Error('Pasangan kurir/layanan harus sesuai daftar Scalev.');
+  if (c.accounts.some(a => !filled(a.label) || !Object.hasOwn(MARKETPLACE_LABELS,a.marketplace) || !text(a.business) || (!options.allowIncomplete && !a.business))) fail('Lengkapi nama akun, Marketplace, dan Business pada setiap akun.');
+  if (!unique(c.accounts.map(a => a.marketplace + ':' + a.label.trim().toLowerCase()))) fail('Nama akun dalam Marketplace yang sama harus unik.');
+  if (c.groups.some(g => !filled(g.name)) || !unique(c.groups.map(g => g.name.trim().toLowerCase()))) fail('Nama Produk harus terisi dan unik.');
+  if (c.stores.some(s => !s || !id(s.storeId) || (s.warehouseId !== null && !id(s.warehouseId))) || !unique(c.stores.map(s => s.storeId))) fail('Pilihan Store tidak valid atau ganda.');
+  const accounts = new Set(c.accounts.map(a => a.id)), groups = new Set(c.groups.map(g => g.id)), stores = new Set(c.stores.map(s => s.storeId));
+  const products = (values: unknown): values is string[] => Array.isArray(values) && values.length > 0 && values.length <= 200 && unique(values) && values.every(v => groups.has(v));
+  if (c.products.some(r => !['sku','prefix'].includes(r.match) || !filled(r.value) || !products(r.productIds) || (r.account !== '*' && !accounts.has(r.account)))) fail('Pengenalan Produk membutuhkan kode SKU atau awalan kode, Produk, dan akun yang valid.');
+  if (c.routes.some(r => !accounts.has(r.account) || !groups.has(r.productId) || (!stores.has(r.storeId) && !(options.allowIncomplete && r.storeId === 0)))) fail('Routing Produk membutuhkan akun, Produk, dan Store yang digunakan.');
+  if (!unique(c.routes.map((r: any) => r.account + ':' + r.productId))) fail('Satu akun + Produk hanya boleh memiliki satu routing Store.');
+  if (c.combinations.some(r => !accounts.has(r.account) || !products(r.productIds) || !['contains','exact'].includes(r.match) || !Number.isSafeInteger(r.priority) || r.priority < 0 || r.priority > 9999 || !stores.has(r.storeId))) fail('Lengkapi akun, kondisi Produk, prioritas, dan Store pada aturan kombinasi.');
+  if (c.couriers.some(r => !r || !Object.hasOwn(MARKETPLACE_LABELS,r.platform) || !filled(r.source) || !filled(r.courier) || !filled(r.service) || !COURIER_SERVICE_OPTIONS.some(p => p.courier === r.courier && p.service === r.service))) fail('Lengkapi mapping kurir dengan pasangan kurir/layanan Scalev yang valid.');
 }
+
+export function validateCatalogConfig(config: ParserConfig, catalog: Catalog) {
+  validateParserConfig(config);
+  for (const account of config.accounts) if (!catalog.businesses.some(b => b.code === account.business)) fail(`Business akun ${account.label} tidak aktif atau tidak tersedia.`);
+  for (const scope of config.stores) {
+    const store = catalog.stores.find(s => s.id === scope.storeId);
+    if (!store || !config.accounts.some(a => a.business === store.business)) fail('Pilih Store dari Business yang digunakan oleh akun asal.');
+    if (!catalog.warehouses.some(w => w.id === scope.warehouseId && w.businesses.includes(store.business))) fail(`Pilih Warehouse yang terhubung dengan Business ${store.business} untuk ${store.name}.`);
+  }
+  for (const route of [...config.routes,...config.combinations]) {
+    const account = config.accounts.find(a => a.id === route.account)!;
+    if (!catalog.stores.some(s => s.id === route.storeId && s.business === account.business)) fail(`Store routing ${account.label} harus berada dalam Business ${account.business}.`);
+  }
+}
+
+// Legacy references are resolved from the actual catalog, never from invented
+// Store/Business names. Reading never rewrites configuration or audit history.
+export function migrateParserConfig(input: unknown, catalog: Catalog): { config: ParserConfig; notes: string[] } {
+  if (!input) return { config: defaultParserConfig(), notes: [] };
+  const legacy = input as Record<string, any>;
+  if (legacy.schemaVersion === 3) { validateParserConfig(input, { allowIncomplete: true }); return { config: structuredClone(input), notes: [] }; }
+  if (![1,2].includes(legacy.schemaVersion) || !Array.isArray(legacy.accounts) || !Array.isArray(legacy.routes) || !Array.isArray(legacy.products) || !Array.isArray(legacy.couriers)) fail('Konfigurasi tersimpan tidak dikenali.');
+  const config = defaultParserConfig(); config.couriers = structuredClone(legacy.couriers);
+  const notes = ['Konfigurasi lama disiapkan sebagai rancangan. Periksa akun, Store, Warehouse, dan Produk lalu simpan untuk mengaktifkannya. Penggantian SKU dan pencocokan nama tidak digunakan lagi.'];
+  const familyNames = [...new Set<string>([...legacy.products,...legacy.routes].map(r => String(r.family || '').trim()).filter(Boolean))];
+  config.groups = familyNames.map(name => ({ id: name, name }));
+  for (const a of legacy.accounts) {
+    if (!a || !filled(a.id) || !filled(a.label)) continue;
+    const routes = legacy.routes.filter((r: any) => r.account === a.id);
+    const codes = [...new Set<string>(routes.map((r: any) => String(r.business === '$roove' ? legacy.rooveBusiness || '' : r.business || '')).filter(Boolean))];
+    const business = codes.length === 1 ? codes[0] : '';
+    if (!business) notes.push(`Tentukan satu Business untuk akun ${a.label}; aturan lama belum memiliki satu Business yang konsisten.`);
+    for (const marketplace of Object.keys(MARKETPLACE_LABELS) as Platform[]) {
+      const accountId = `${a.id}:${marketplace}`;
+      config.accounts.push({ id: accountId, label: `${MARKETPLACE_LABELS[marketplace]} ${a.label.replace(/^MP\s+/i,'')}`, marketplace, business });
+      for (const route of routes) {
+        const store = catalog.stores.find(s => s.business === business && s.name === route.store);
+        if (store && !config.stores.some(s => s.storeId === store.id)) {
+          const warehouse = catalog.warehouses.find(w => w.businesses.includes(business) && w.name === route.warehouse);
+          config.stores.push({ storeId: store.id, warehouseId: warehouse?.id || null });
+        }
+        if (route.family) config.routes.push({ id: `${route.id}:${marketplace}`, account: accountId, productId: route.family, storeId: store?.id || 0 });
+      }
+      for (const rule of legacy.products.filter((r: any) => r.account === a.id || r.account === '*')) {
+        const value = String(rule.sourceSku || rule.prefix || '').trim();
+        if (value && rule.family) config.products.push({ id: `${rule.id}:${accountId}`, account: accountId, match: rule.sourceSku ? 'sku' : 'prefix', value, productIds: [rule.family] });
+      }
+    }
+  }
+  // Conflicting legacy routes remain visibly incomplete rather than selecting a winner.
+  const seen = new Set<string>();
+  config.routes = config.routes.filter(route => { const key = route.account + ':' + route.productId; if (seen.has(key)) { const prior = config.routes.find(r => r.account === route.account && r.productId === route.productId); if (prior) prior.storeId = 0; notes.push('Routing lama ganda perlu diperiksa kembali.'); return false; } seen.add(key); return true; });
+  validateParserConfig(config, { allowIncomplete: true });
+  return { config, notes: [...new Set(notes)] };
+}
+export function loadParserConfig(input: unknown, catalog: Catalog): ParserConfig { return migrateParserConfig(input,catalog).config; }
