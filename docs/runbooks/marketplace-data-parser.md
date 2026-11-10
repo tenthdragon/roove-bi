@@ -134,6 +134,15 @@ Optional legacy identifiers are resolved live before an explicit action, never
 guessed. Per-Store leases cover repair plus sync. Request/outcome audits use
 `warehouse_activity_log`.
 
+The compact panel shows Bundle → Business → Store status before repair controls.
+A unique configured Store or active BPO is selected automatically; otherwise the
+Store precedes the BPO choice. The single primary action applies to the selected
+missing bundles; a single candidate has no batch checkbox. **Detail & aksi lain**
+contains ownership, sync timestamps, database reload, explicit Store sync and
+global routing settings. Unknown cached BPOs promote Store sync to the main
+action. Incomplete snapshots never show a successful installed status. The order
+total is displayed separately and is not replaced by the selected BPO price.
+
 Writes are not automatically replayed. Partial results identify completed
 sharing/attachment stages. Sync failure keeps download blocked. A successful sync
 replaces the catalog, reprojects the entire uploaded batch (including filtered

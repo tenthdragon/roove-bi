@@ -52,6 +52,15 @@ Use compact tables on desktop, contained horizontal scrolling for comparison
 rows on small screens, and single-column forms where applicable. Preserve useful
 validation detail, disabled download states, keyboard labels and visible focus.
 
+The repair panel leads with Bundle → Business → Store status, pairing icons and
+short text. Show price-option choices only after the installation Store is known;
+one configured Store or one active option needs no redundant picker. Use one
+primary repair action for the selected missing bundles, with checkboxes only for
+multiple candidates. Keep the source order total visible and unchanged. Ownership,
+timestamps, database reload, explicit Store sync and global routing settings live
+under **Detail & aksi lain**; missing metadata promotes sync when needed. Keep
+incomplete syncs, permissions, sharing consequences and partial failures visible.
+
 The sidebar label is MP Data Parser. Existing illustrative defaults are replaced
 by workspace configuration. Synthetic acceptance fixtures are labeled SYNTHETIC
 and are never represented as real customer orders or sent to Scalev.
