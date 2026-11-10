@@ -7,7 +7,7 @@ import { getParserContext } from './actions';
 import { readParserCatalog } from './catalog';
 import { allowedRepairStores, diagnoseBundles, messageOf, repairBundles, type CatalogConnection, type DiagnosisStore } from './diagnosis';
 import { signDiagnosis, verifyDiagnosis } from './diagnosis-token';
-import { ParserScalevClient } from './scalev-client';
+import { ParserScalevClient, ScalevReadError } from './scalev-client';
 import { assertParserStoreClaim, claimParserStore, failParserStoreClaim, syncParserStore } from './sync';
 import type { DiagnosisRequest, RepairRequest, RepairResult } from './diagnosis-types';
 
@@ -50,7 +50,16 @@ export async function diagnoseParserCase(workspaceId: string, input: DiagnosisRe
   const all = await connections(workspaceId), target = all.find(c => c.code === account?.business);
   if (!account || !target) throw new Error('Business akun asal belum terhubung atau tidak aktif. Perbaiki aturan akun.');
   const scoped = await stores(workspaceId,target.id,context.config.stores.map(s => s.storeId));
-  const result = await diagnoseBundles({ workspaceId,actorId: ctx.profile.id,revision: context.revision,account: account.id,skus: [...new Set(input.skus.map(s => s.trim()))],config: context.config,target,connections: all,stores: scoped });
+  const skus = [...new Set(input.skus.map(s => s.trim()))];
+  let result: Awaited<ReturnType<typeof diagnoseBundles>>;
+  try {
+    result = await diagnoseBundles({ workspaceId,actorId: ctx.profile.id,revision: context.revision,account: account.id,skus,config: context.config,target,connections: all,stores: scoped });
+  } catch (error) {
+    // Next.js masks thrown Server Action errors in production. Return a safe,
+    // incomplete diagnosis as data; never mint a repair permit after a failed read.
+    const message = error instanceof ScalevReadError ? error.message : 'Diagnosis Scalev belum dapat diselesaikan. Periksa koneksi Business, lalu pilih Periksa ulang Scalev.';
+    return { checkedAt: new Date().toISOString(),business: target.code,account: account.label,stores: [],suggestedStoreId: null,items: skus.map(sku => ({ sku,status: 'unavailable' as const,bundles: [],message })),issues: [message],token: '' };
+  }
   return { ...result.diagnosis,token: signDiagnosis(result.permit) };
 }
 

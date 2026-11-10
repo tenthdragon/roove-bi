@@ -29,6 +29,7 @@ export class ParserScalevClient {
       }
       if (!response.ok) throw new ScalevReadError(response.status, response.status === 401 || response.status === 403
         ? 'Koneksi Scalev tidak memiliki izin untuk operasi ini. Periksa izin business pemilik dan business tujuan.'
+        : response.status === 429 ? 'Scalev sedang membatasi jumlah permintaan (HTTP 429). Tunggu sebentar, lalu pilih Periksa ulang Scalev.'
         : `Scalev belum menyelesaikan permintaan (HTTP ${response.status}). Periksa ulang atau coba lagi.`);
       if (body && response.status === 204) return {};
       try { return await response.json(); } catch { throw new Error('Respons Scalev tidak lengkap. Periksa ulang status sebelum melanjutkan.'); }

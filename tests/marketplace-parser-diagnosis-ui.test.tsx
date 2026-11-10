@@ -73,3 +73,17 @@ test('local mode and unsaved configuration prevent external diagnosis',async () 
   await act(async () => { view = create(<Diagnosis {...f.props} dirty/>); });
   assert.equal(calls,0); assert.match(content(view!.root),/Simpan atau batalkan/); view!.unmount();
 });
+test('an incomplete production diagnosis explains rate limiting, offers retry, and exposes no mutation controls',async () => {
+  const f = fixture(); let calls = 0;
+  const failed: ParserDiagnosis = { ...f.data,stores: [],suggestedStoreId: null,token: '',issues: ['Scalev sedang membatasi jumlah permintaan (HTTP 429). Tunggu sebentar, lalu pilih Periksa ulang Scalev.'],items: [{ sku: 'ROV20-295',status: 'unavailable',bundles: [],message: 'Pemeriksaan belum selesai.' }] };
+  let view: ReturnType<typeof create>;
+  await act(async () => { view = create(<Diagnosis {...f.props} diagnose={async () => ++calls === 1 ? failed : f.data}/>); });
+  try {
+    assert.match(content(view!.root),/HTTP 429/);
+    assert.equal(button(view!.root,'Bagikan & tambahkan ke Store'),undefined);
+    assert.equal(button(view!.root,'Perbarui katalog').props.disabled,true);
+    await act(async () => button(view!.root,'Periksa ulang Scalev').props.onClick());
+    assert.match(content(view!.root),/Pemilik: RLB/); assert.doesNotMatch(content(view!.root),/HTTP 429/);
+    assert.equal(f.calls.length,0);
+  } finally { view!.unmount(); }
+});
