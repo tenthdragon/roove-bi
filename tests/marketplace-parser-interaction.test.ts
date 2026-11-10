@@ -22,7 +22,15 @@ function uploadFile(sku = 'ROV20-295') {
   const bytes = XLSX.write(book({ orders: [shopee({ 'Nomor Referensi SKU': sku })] }),{ type: 'buffer',bookType: 'xlsx' });
   return { name: 'synthetic.xlsx',size: bytes.length,arrayBuffer: async () => bytes.buffer.slice(bytes.byteOffset,bytes.byteOffset + bytes.byteLength) };
 }
-async function upload(root: ReactTestInstance,sku?: string) { await act(async () => { root.findByProps({ type: 'file' }).props.onChange({ target: { files: [uploadFile(sku)],value: '' } }); await new Promise(r => setTimeout(r,50)); }); }
+async function uploadData(root: ReactTestInstance,file: ReturnType<typeof uploadFile>) {
+  await act(async () => { root.findByProps({ type: 'file' }).props.onChange({ target: { files: [file],value: '' } }); });
+  const deadline = Date.now() + 5000;
+  while (root.findByProps({ type: 'file' }).props.disabled && Date.now() < deadline) {
+    await act(async () => { await new Promise(resolve => setTimeout(resolve,10)); });
+  }
+  assert.equal(root.findByProps({ type: 'file' }).props.disabled,false,'Upload should finish before inspecting the preview');
+}
+async function upload(root: ReactTestInstance,sku?: string) { await uploadData(root,uploadFile(sku)); }
 async function review(root: ReactTestInstance) { await act(async () => { root.findByProps({ 'aria-label': 'Konfirmasi hasil parsing' }).props.onChange({ target: { checked: true } }); }); }
 async function click(root: ReactTestInstance,label: string) { await act(async () => { await buttons(root,label)[0].props.onClick(); }); }
 function interceptDownload() {
@@ -101,7 +109,7 @@ test('repair replaces the catalog and revalidates every order, including filtere
   const rendered = create(React.createElement(Tool,{ ...p,diagnoseCase: async () => data,repairCase: async () => { mutations++; return { result: { synced: true,message: 'Seluruh batch divalidasi ulang',items: [] },catalog: completeCatalog }; } }));
   try {
     const bytes = XLSX.write(book({ orders: [shopee(),shopee({ 'No. Pesanan': 'ORDER-TEST-2','No. Resi': '00054321' })] }),{ type: 'buffer',bookType: 'xlsx' });
-    await act(async () => { rendered.root.findByProps({ type: 'file' }).props.onChange({ target: { files: [{ name: 'synthetic-two-orders.xlsx',size: bytes.length,arrayBuffer: async () => bytes.buffer.slice(bytes.byteOffset,bytes.byteOffset + bytes.byteLength) }],value: '' } }); await new Promise(r => setTimeout(r,50)); });
+    await uploadData(rendered.root,{ name: 'synthetic-two-orders.xlsx',size: bytes.length,arrayBuffer: async () => bytes.buffer.slice(bytes.byteOffset,bytes.byteOffset + bytes.byteLength) });
     assert.match(content(rendered.root),/2 perlu diselesaikan/);
     await act(async () => rendered.root.findByProps({ type: 'search' }).props.onChange({ target: { value: 'ORDER-TEST-1' } }));
     await click(rendered.root,'Periksa masalah');

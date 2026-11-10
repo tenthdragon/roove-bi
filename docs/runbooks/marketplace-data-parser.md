@@ -87,50 +87,92 @@ to production.
 
 ## Validation
 
-### Live diagnosis and repair
+### Database diagnosis and explicit Scalev repair
 
-**Periksa masalah** expands in the existing order row. It performs a complete,
-exact `custom_id` lookup with the receiving Business credential, checking the
-configured destination Store. If absent, it checks other active connections in
-the same workspace. An unreadable connection means incomplete diagnosis, never
-confirmed absence. Names and SKU price suffixes are not matching rules.
+**Periksa masalah** and **Muat ulang data aplikasi** perform indexed, exact
+`custom_id` lookups in the application database. They read only requested SKUs,
+active workspace Businesses and configured Store links. They do not load API
+credentials, call Scalev, scan whole Business catalogs, or expire completed
+snapshots based on age. Orders reuse the same synchronized database catalog.
+Missing cache data means **not recorded in the app**, not confirmed absent in
+Scalev. Failed/running Business syncs cannot authorize a missing/unique conclusion;
+Store syncs and catalog generation changes prevent partial snapshots from
+unlocking download. Names and SKU price suffixes are not matching rules.
 
+Ownership uses verified `scalev_owner_uid`, matched to the connections'
+`scalev_business_uid`. Legacy `owner_business_id/code` fields were sometimes
+inferred from the receiving Business and are not trusted for diagnosis or sharing.
+Missing owner/BPO metadata remains unknown, without fabricated options or prices.
+
+- **Sinkronkan Store dari Scalev** refreshes known diagnosed bundle IDs (including
+  those not yet installed), then synchronizes the selected Store. A completely
+  unknown SKU points to **Katalog & Master Data → External Catalog · Scalev** for
+  explicit Business catalog sync, then database reload. It does not scan every
+  connected Business automatically.
+- Full Business and Store syncs use paginated `/v3/bundles` (ownership and full
+  metadata) plus `/v3/bundles/simplified` (active BPOs). Store sync supplies
+  `store_id` to both lists. IDs/codes must agree before cache replacement. No
+  per-bundle detail fan-out is used to fill a whole catalog.
 - Available to the receiving Business: install a chosen bundle price option.
-- Not yet shared: identify the actual owner with `/v3/business-users/me`, then
-  `POST /v3/bundles/{id}/partners` with the receiver's `partner_unique_id` using
-  the owner's credential. A reseller's credential cannot authorize sharing.
+  Not yet shared: verify the owner identity live, then share with
+  `POST /v3/bundles/{id}/partners`, passing the receiver's `partner_unique_id`
+  with the owner's credential. A reseller cannot authorize sharing.
 - Install with `POST /v3/stores/{id}/bundle-price-options` and explicit `bpo_ids`
-  using the receiving Business credential. More than one available option
-  requires a choice; it never replaces marketplace transaction prices.
-- Already installed: refresh the Store catalog. Missing or duplicate identifiers
-  link to Scalev for correction. Routing/combination/Warehouse issues link back
-  to the global parser settings, without per-order destination overrides.
+  using the receiving Business credential. Multiple BPOs require a choice;
+  hidden storefront options remain valid. Marketplace transaction prices remain.
+- Repairs revalidate identities, bundle IDs/codes, options and Store membership
+  live. Direct bundle-by-ID reads replace full Business scans; exact database
+  identifiers plus the selected Store's live catalog guard against duplicates.
+  New/changed codes outside the synchronized data require a Business catalog sync.
 
-Diagnosis/refresh require parser access and the enabled Channels module. Sharing
+Diagnosis/sync require parser access and the enabled Channels module. Sharing
 and installation also require `whs:mapping` (or platform owner access). Local
-development blocks all live Scalev calls. API credentials stay server-side.
-The user-bound, workspace-bound signed diagnosis expires after ten minutes and
-binds the saved config revision, account, SKU, bundle, options and allowed Stores.
-The server rechecks permissions, config, identities and live membership before
-writes. Request/outcome audits use `warehouse_activity_log`. No new migration is
-needed; the existing per-Store sync row locks the whole repair and sync sequence.
+development permits database diagnosis and blocks live Scalev calls. Credentials
+stay server-side. The signed, actor/workspace-bound diagnosis expires after ten
+minutes and binds the config revision, account, SKU, bundle, options and Stores.
+Optional legacy identifiers are resolved live before an explicit action, never
+guessed. Per-Store leases cover repair plus sync. Request/outcome audits use
+`warehouse_activity_log`.
 
-Writes are not automatically retried after uncertain responses. Another attempt
-checks current sharing/Store membership before writing. Partial results identify
-completed sharing/attachment stages. The same affected Store is synchronized
-even after a partial item failure; failed sync leaves its catalog unready.
-The client replaces the catalog, reprojects the entire uploaded batch (including
-filtered/paginated orders), and clears download confirmation. Normal server-side
-download validation remains mandatory.
+Writes are not automatically replayed. Partial results identify completed
+sharing/attachment stages. Sync failure keeps download blocked. A successful sync
+replaces the catalog, reprojects the entire uploaded batch (including filtered
+orders), and clears download confirmation. Server-side download validation stays
+mandatory. Routing/combination/Warehouse issues use global parser settings;
+there are no per-order destination overrides.
+
+### Shared API request budget and rollout
+
+Apply **only** `20261110120000_parser_cached_diagnosis.sql` before activating this
+release and its workers. It adds nullable owner/BPO metadata, an exact identifier
+index and a service-only API budget table/RPC. It does not rewrite old catalog
+rows, team configuration, or external Scalev data. An old app remains compatible
+with this additive migration. Missing RPC/schema fails closed for live requests.
+
+The parser, normal catalog sync and order-sync API adapter reserve PostgreSQL
+slots per SHA-256 credential hash, shared across processes and workspaces using
+the same key. Starts are spaced 250 ms apart. HTTP 429 or exhausted quota records
+provider `Retry-After` (seconds/date), falling back to `X-Ratelimit-Reset` epoch.
+Queued calls recheck cooldown and reserve a new spaced slot if needed. Waits over
+20 seconds return a retry time rather than sleeping through an hourly reset.
+No raw API key, customer payload, or upstream error body is stored in this table.
+Calls from outside these adapters/other apps are not coordinated by this budget.
+
+After release, explicitly sync the Businesses/Stores in use to populate owner
+UIDs and BPO choices for legacy data. Existing SKU and membership cache can be
+read immediately. Old rows without BPO metadata require sync before offering
+installation; incomplete owner identity cannot authorize sharing. Apply no local
+fixtures or database dumps to production. A code rollback leaves the additive
+migration in place and requires no data rollback.
 
 ### Checks
 
 - `npm run test:marketplace-parser`: domain, interaction, server access/export,
-  catalog scope, warehouse labels, Scalev pagination, exact live diagnosis,
+  catalog scope, warehouse labels, Scalev pagination, exact database diagnosis with zero Scalev calls,
   sharing/attachment retry, signed action scope, management access, partial
   failures, BPO selection, bulk actions and whole-batch revalidation regressions.
 - `node tests/marketplace-parser-config-database.mjs`: isolated PostgreSQL checks
-  for config history/CAS, v1/v2/v3 compatibility, sync-state constraints and RLS.
+  for config history/CAS, v1/v2/v3 compatibility, sync-state constraints, RLS and the shared request-budget RPC.
 - `npm run typecheck:app`, `npm run lint`, `npm run build`.
 - Browser acceptance: synthetic XLSX orders against the real local catalog,
   automatic RTI/JHN destinations, two bundle lines in a mixed order, blocked

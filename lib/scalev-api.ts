@@ -4,6 +4,7 @@
 import { createClient } from '@supabase/supabase-js';
 import { parseScalevHeaderFinancialFields } from './scalev-header-financials';
 import { requireExplicitWorkspaceId } from './workspace-scope';
+import { scalevFetch } from './scalev-request-budget';
 
 function getServiceSupabase() {
   return createClient(
@@ -86,7 +87,7 @@ export async function fetchOrderListWithFilters(
 
   const url = `${baseUrl}/order?${params.toString()}`;
 
-  const res = await fetch(url, {
+  const res = await scalevFetch(apiKey,url, {
     headers: { 'Authorization': `Bearer ${apiKey}` },
   });
 
@@ -165,9 +166,9 @@ export async function fetchOrderDetail(
   baseUrl: string,
   orderId: string
 ): Promise<any> {
-  const res = await fetch(`${baseUrl}/order/${orderId}`, {
+  const res = await scalevFetch(apiKey,`${baseUrl}/order/${orderId}`, {
     headers: { 'Authorization': `Bearer ${apiKey}` },
-    signal: AbortSignal.timeout(15000),
+    timeoutMs: 15000,
   });
 
   if (!res.ok) {
@@ -431,7 +432,7 @@ export async function fetchStoreList(
     let url = `${baseUrl}/stores?page_size=25`;
     if (lastId > 0) url += `&last_id=${lastId}`;
 
-    const res = await fetch(url, {
+    const res = await scalevFetch(apiKey,url, {
       headers: { 'Authorization': `Bearer ${apiKey}` },
     });
 

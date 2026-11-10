@@ -1,8 +1,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { allowedRepairStores, diagnoseBundles, repairBundles, type CatalogConnection } from '../lib/marketplace-parser/diagnosis';
+import { allowedRepairStores, repairBundles, type CatalogConnection } from '../lib/marketplace-parser/diagnosis';
 import { ParserScalevClient, type ScalevBundle } from '../lib/marketplace-parser/scalev-client';
 import { signDiagnosis, verifyDiagnosis } from '../lib/marketplace-parser/diagnosis-token';
+import { readCachedDiagnosis } from '../lib/marketplace-parser/cached-diagnosis';
+import { diagnosisDb } from './marketplace-parser-diagnosis-db-fixture';
 import { configFixture } from './marketplace-parser-fixtures';
 
 function fixture() {
@@ -30,9 +32,18 @@ function fixture() {
   } };
   const config = configFixture();
   const input = { workspaceId: 'w',actorId: 'u',revision: 3,account: 'roove',skus: ['ROV20-295'],config,target,connections: [target,owner],stores: [{ id: 10,name: 'Marketplace',scalevId: 15443,uniqueId: null }] };
-  const diagnose = () => diagnoseBundles(input);
-  const repair = async (permit: Awaited<ReturnType<typeof diagnose>>['permit'], changes: Record<string,unknown> = {}) => repairBundles({ permit,request: { token: '',storeId: 10,mode: 'attach',items: [{ sku: 'ROV20-295',bundleId: 2,optionId: 4050,share: true,...changes }] },target,connections: [target,owner],ensureCurrent: async () => { state.checks++; },audit: async stage => { state.audits.push(stage); } });
-  return { state,input,target,owner,diagnose,repair };
+  const diagnose = () => {
+    const row = (businessId: number,id = 2) => ({ workspace_id: 'w',id: businessId*100+id,business_id: businessId,scalev_bundle_id: id,custom_id: state.sku,name: bundle.name,scalev_owner_uid: ownerIdentity.unique_id,scalev_owner_name: 'RLB',price_options: state.options,last_synced_at: '2026-11-10T00:00:00Z' });
+    return readCachedDiagnosis(input,diagnosisDb({
+      scalev_webhook_businesses: [target,owner].map(c => ({ workspace_id: 'w',id: c.id,business_code: c.code,scalev_business_uid: c.id === target.id ? targetIdentity.unique_id : ownerIdentity.unique_id,is_active: true })),
+      scalev_catalog_bundles: [row(owner.id),...(state.visible ? [row(target.id),...(state.duplicate ? [row(target.id,3)] : [])] : [])],
+      scalev_catalog_sync_state: state.failOther ? [{ workspace_id: 'w',business_id: owner.id,sync_status: 'failed' }] : [],
+      scalev_catalog_bundle_store_links: state.installed ? [{ id: 1,workspace_id: 'w',business_id: target.id,scalev_bundle_id: 2,scalev_store_id: 15443,store_name: 'Marketplace',is_available: true }] : [],
+    }) as any);
+  };
+  const assertUnique = async () => { if (state.duplicate) throw new Error('Duplicate identifier'); };
+  const repair = async (permit: Awaited<ReturnType<typeof diagnose>>['permit'], changes: Record<string,unknown> = {}) => repairBundles({ assertUnique,permit,request: { token: '',storeId: 10,mode: 'attach',items: [{ sku: 'ROV20-295',bundleId: 2,optionId: 4050,share: true,...changes }] },target,connections: [target,owner],ensureCurrent: async () => { state.checks++; },audit: async stage => { state.audits.push(stage); } });
+  return { state,input,target,owner,diagnose,repair,assertUnique };
 }
 test('diagnosis separates owner, receiving Business and Store and signs only exact, unique candidates',async () => {
   const f = fixture(), { diagnosis,permit } = await f.diagnose();
@@ -46,7 +57,7 @@ test('diagnosis separates owner, receiving Business and Store and signs only exa
   assert.deepEqual(refreshed.diagnosis.items[0].bundles[0].installedStoreIds,[10]);
   assert.equal(refreshed.diagnosis.items[0].bundles[0].canShare,false);
 });
-test('failed/partial cross-Business reads never report missing or enable writes',async () => {
+test('failed/partial cross-Business syncs never report missing or enable writes',async () => {
   const f = fixture(); f.state.failOther = true;
   const result = await f.diagnose();
   assert.equal(result.diagnosis.items[0].status,'unavailable'); assert.equal(result.permit.bundles.length,0);
@@ -75,7 +86,7 @@ test('routing and mixed-product combinations restrict the installation Store glo
   config.products = []; config.routes = [];
   assert.equal(allowedRepairStores(config,'roove',['ANY'],stores).stores.length,3);
 });
-test('without explicit routing, a unique common live Store is suggested automatically',async () => {
+test('without explicit routing, a unique common cached Store is suggested automatically',async () => {
   const f = fixture(); f.input.config.routes = []; f.input.config.combinations = []; f.state.visible = true; f.state.installed = true;
   f.input.stores.push({ id: 11,name: 'Other Store',scalevId: 15444,uniqueId: null });
   f.target.client.stores = async () => [{ id: 15443,name: 'Marketplace' },{ id: 15444,name: 'Other Store' }];
@@ -120,8 +131,8 @@ test('forged options, missing sharing consent, changed codes, revoked options an
 test('revision/lease or audit failures stop before a write',async () => {
   const f = fixture(), { permit } = await f.diagnose();
   const request = { token: '',storeId: 10,mode: 'attach' as const,items: [{ sku: 'ROV20-295',bundleId: 2,optionId: 4050,share: true }] };
-  await assert.rejects(repairBundles({ permit,request,target: f.target,connections: f.input.connections,ensureCurrent: async () => { throw new Error('Revision changed'); },audit: async () => {} }),/Revision changed/);
-  const result = await repairBundles({ permit,request,target: f.target,connections: f.input.connections,ensureCurrent: async () => {},audit: async () => { throw new Error('Audit unavailable'); } });
+  await assert.rejects(repairBundles({ assertUnique: f.assertUnique,permit,request,target: f.target,connections: f.input.connections,ensureCurrent: async () => { throw new Error('Revision changed'); },audit: async () => {} }),/Revision changed/);
+  const result = await repairBundles({ assertUnique: f.assertUnique,permit,request,target: f.target,connections: f.input.connections,ensureCurrent: async () => {},audit: async () => { throw new Error('Audit unavailable'); } });
   assert.match(result[0].message,/Audit unavailable/); assert.deepEqual(f.state.writes,[]);
 });
 test('diagnosis permit is bound to actor/workspace and rejects tampering and expiry',async () => {

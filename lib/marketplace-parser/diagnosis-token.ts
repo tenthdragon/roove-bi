@@ -1,9 +1,9 @@
 import { createHmac, timingSafeEqual } from 'node:crypto';
 export type DiagnosisPermit = {
   workspaceId: string; actorId: string; revision: number; account: string; expiresAt: number;
-  targetBusinessId: number; targetUid: string; skus: string[];
-  stores: { id: number; scalevId: number; name: string }[];
-  bundles: { sku: string; id: number; sourceBusinessId: number; ownerUid: string; optionIds: number[]; canShare: boolean }[];
+  targetBusinessId: number; targetUid: string | null; skus: string[];
+  stores: { id: number; scalevId: number | null; name: string }[];
+  bundles: { sku: string; id: number; sourceBusinessId: number; ownerUid: string | null; optionIds: number[]; canShare: boolean }[];
 };
 function signature(data: string) {
   const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
