@@ -3,10 +3,12 @@ import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
 import { contextFixture } from './marketplace-parser-fixtures';
 import { signDiagnosis, type DiagnosisPermit } from '../lib/marketplace-parser/diagnosis-token';
+import { ScalevReadError } from '../lib/marketplace-parser/scalev-client';
 const require = createRequire(import.meta.url);
 let context = contextFixture(), forbidden = false, manager = true, channels = true, revision = 3, reads = 0, writes = 0, claims = 0, released = 0, syncs = 0, syncFail = false, installed = false;
 let audits: string[] = [];
 let legacyStoreColumns = false;
+let catalogError: Error | null = null;
 const identity = { id: 9,unique_id: 'RTI_UID' }, storeName = 'Roove Main Store - Marketplace';
 const bundle = { id: 2,name: 'Roove',custom_id: 'ROV20-295',business: identity };
 const oldKey = process.env.SUPABASE_SERVICE_ROLE_KEY, oldLocal = process.env.ROOVE_LOCAL_DEV;
@@ -22,11 +24,11 @@ require.cache[require.resolve('../lib/marketplace-parser/sync')] = { exports: {
   failParserStoreClaim: async () => { released++; context.catalog.storeSyncs.forEach(s => { s.status = 'failed'; }); },
   syncParserStore: async (_w: string,_s: number,lease: unknown) => { assert.ok(lease); syncs++; if (syncFail) throw new Error('Sync failed'); },
 } } as any;
-require.cache[require.resolve('../lib/marketplace-parser/scalev-client')] = { exports: { ParserScalevClient: class {
+require.cache[require.resolve('../lib/marketplace-parser/scalev-client')] = { exports: { ScalevReadError,ParserScalevClient: class {
   async identity() { reads++; return identity; }
   async stores() { reads++; return [{ id: 15443,name: storeName }]; }
   async store() { reads++; return { id: 15443,name: storeName,business: identity }; }
-  async bundles() { reads++; return [bundle]; }
+  async bundles() { reads++; if (catalogError) throw catalogError; return [bundle]; }
   async bundle() { reads++; return bundle; }
   async options() { reads++; return [{ id: 4050,name: '295',price: '295000' }]; }
   async storeBundles() { reads++; return installed ? [bundle] : []; }
@@ -52,7 +54,22 @@ require.cache[require.resolve('../lib/service-supabase')] = { exports: { createS
 const actions = require('../lib/marketplace-parser/case-actions') as typeof import('../lib/marketplace-parser/case-actions');
 const permit = (): DiagnosisPermit => ({ workspaceId: 'synthetic-test',actorId: 'u',revision: 3,account: 'roove',expiresAt: Date.now() + 60000,targetBusinessId: 4,targetUid: 'RTI_UID',skus: ['ROV20-295'],stores: [{ id: 10,name: storeName,scalevId: 15443 }],bundles: [{ sku: 'ROV20-295',id: 2,sourceBusinessId: 4,ownerUid: 'RTI_UID',optionIds: [4050],canShare: false }] });
 const request = () => ({ token: signDiagnosis(permit()),storeId: 10,mode: 'attach' as const,items: [{ sku: 'ROV20-295',bundleId: 2,optionId: 4050,share: false }] });
-beforeEach(() => { context = contextFixture(); forbidden = false; manager = true; channels = true; revision = 3; reads = writes = claims = released = syncs = 0; syncFail = installed = legacyStoreColumns = false; audits = []; });
+beforeEach(() => { context = contextFixture(); forbidden = false; manager = true; channels = true; revision = 3; reads = writes = claims = released = syncs = 0; syncFail = installed = legacyStoreColumns = false; audits = []; catalogError = null; });
+test('upstream rate limits survive production action serialization without declaring missing bundles or issuing a repair token',async () => {
+  catalogError = new ScalevReadError(429,'Scalev sedang membatasi jumlah permintaan (HTTP 429). Tunggu sebentar, lalu pilih Periksa ulang Scalev.');
+  const diagnosis = JSON.parse(JSON.stringify(await actions.diagnoseParserCase('synthetic-test',{ account: 'roove',revision: 3,skus: ['ROV20-295'] })));
+  assert.match(diagnosis.issues[0],/HTTP 429/);
+  assert.equal(diagnosis.items[0].status,'unavailable');
+  assert.deepEqual(diagnosis.stores,[]); assert.equal(diagnosis.token,'');
+  assert.equal(writes + claims + syncs,0);
+});
+test('unexpected diagnosis errors do not expose internal details in returned data',async () => {
+  catalogError = new Error('private upstream response or credential');
+  const diagnosis = await actions.diagnoseParserCase('synthetic-test',{ account: 'roove',revision: 3,skus: ['ROV20-295'] });
+  assert.match(diagnosis.issues[0],/Periksa ulang Scalev/);
+  assert.doesNotMatch(JSON.stringify(diagnosis),/private upstream/);
+  assert.equal(diagnosis.token,''); assert.equal(writes + claims + syncs,0);
+});
 test('diagnosis is readable without mutation permission; repair enforces permission before any external access',async () => {
   manager = false;
   const diagnosis = await actions.diagnoseParserCase('synthetic-test',{ account: 'roove',revision: 3,skus: ['ROV20-295'] });
