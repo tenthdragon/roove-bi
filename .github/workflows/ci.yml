@@ -50,6 +50,9 @@ jobs:
       - name: Check marketplace parser and reviewed CSV export
         run: npm run test:marketplace-parser
 
+      - name: Check tax withholding domain rules and master import parser
+        run: npm run test:tax-withholding
+
       - name: Typecheck app
         run: npm run typecheck:app
 

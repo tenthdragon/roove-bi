@@ -395,6 +395,16 @@ Dua workbook per PT (RTI dan PT lain) diimpor terpisah; `entity` dipilih di UI.
   248): platform owner, workspace owner, atau role yang punya `tab:tax-withholding`
   di workspace baris itu. Diuji oleh `npm run test:tax-withholding-db` (juga di CI).
   Peran yang boleh mengubah: owner, admin, direktur_finance, staf_finance.
+- Identitas fasilitas ditegakkan di database (migration 249): unik per
+  `(counterparty_id, facility_code, document_number, valid_from)` dengan NULLS NOT
+  DISTINCT, sehingga impor bersamaan tidak menggandakan sertifikat tetapi
+  perpanjangan dengan periode baru tetap tersimpan sebagai riwayat.
+- Impor pratinjau dan impor final terikat ke workspace yang sama: pratinjau
+  mengembalikan `workspaceId`, impor final mengirimnya kembali dan server menolak
+  bila workspace aktif sudah berganti (cookie workspace dibagi antar tab).
+- Tanggal berlaku fasilitas yang tidak valid tidak diimpor (vendor tetap masuk,
+  nilai asli disimpan di catatan). Workbook sistem tanggal 1904 dibaca dengan
+  epoch yang benar.
 - Kode objek diseed global dari sheet REF template (198 kode) ditambah 12 kode
   PPh 26 (`27-xxx`) dari referensi e-Bupot lama; KAP/KJS dilengkapi dari pasal dan
   segmen tengah kode bila tidak ada di referensi lama.

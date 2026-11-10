@@ -829,10 +829,11 @@ function ImportSection({ canManage, onChanged, notify }: {
   const [error, setError] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
-  const buildFormData = () => {
+  const buildFormData = (workspaceId?: string) => {
     if (!file) throw new Error('Pilih file workbook dahulu.');
     const formData = new FormData();
     formData.append('file', file);
+    if (workspaceId) formData.append('workspaceId', workspaceId);
     return formData;
   };
 
@@ -856,7 +857,7 @@ function ImportSection({ canManage, onChanged, notify }: {
     setBusy('commit');
     setError(null);
     try {
-      const outcome = await commitCounterpartyImport(buildFormData());
+      const outcome = await commitCounterpartyImport(buildFormData(preview.workspaceId));
       setResult(outcome);
       setPreview(null);
       setFile(null);

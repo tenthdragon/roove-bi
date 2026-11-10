@@ -118,3 +118,37 @@ DO $$ BEGIN
   END IF;
 END $$;
 SELECT 'PASS: tax master reads limited to finance access, isolated per workspace, revocable, writes service-role only';
+
+-- Facility identity: exact duplicates collapse, legitimate history survives.
+INSERT INTO public.tax_counterparty_facilities (workspace_id, counterparty_id, facility_code, document_number, applies_to, valid_from)
+VALUES ('00000000-0000-4000-8000-000000000101', 1, 'TaxExAr23', 'KET-00032/2026', ARRAY['pph23'], DATE '2026-03-17')
+ON CONFLICT (counterparty_id, facility_code, document_number, valid_from) DO NOTHING;
+INSERT INTO public.tax_counterparty_facilities (workspace_id, counterparty_id, facility_code, document_number, applies_to, valid_from)
+VALUES ('00000000-0000-4000-8000-000000000101', 1, 'TaxExAr23', 'KET-00032/2026', ARRAY['pph23'], DATE '2026-03-17')
+ON CONFLICT (counterparty_id, facility_code, document_number, valid_from) DO NOTHING;
+-- Same certificate renewed for a new period is history, not a duplicate.
+INSERT INTO public.tax_counterparty_facilities (workspace_id, counterparty_id, facility_code, document_number, applies_to, valid_from)
+VALUES ('00000000-0000-4000-8000-000000000101', 1, 'TaxExAr23', 'KET-00032/2026', ARRAY['pph23'], DATE '2027-01-01')
+ON CONFLICT (counterparty_id, facility_code, document_number, valid_from) DO NOTHING;
+-- NULL number and NULL date are still an identity (NULLS NOT DISTINCT).
+INSERT INTO public.tax_counterparty_facilities (workspace_id, counterparty_id, facility_code, applies_to)
+VALUES ('00000000-0000-4000-8000-000000000101', 2, 'SKD', ARRAY['pph26'])
+ON CONFLICT (counterparty_id, facility_code, document_number, valid_from) DO NOTHING;
+INSERT INTO public.tax_counterparty_facilities (workspace_id, counterparty_id, facility_code, applies_to)
+VALUES ('00000000-0000-4000-8000-000000000101', 2, 'SKD', ARRAY['pph26'])
+ON CONFLICT (counterparty_id, facility_code, document_number, valid_from) DO NOTHING;
+DO $$ BEGIN
+  IF (SELECT count(*) FROM public.tax_counterparty_facilities WHERE counterparty_id = 1 AND document_number = 'KET-00032/2026') <> 2 THEN
+    RAISE EXCEPTION 'Facility identity constraint lost history or kept a duplicate';
+  END IF;
+  IF (SELECT count(*) FROM public.tax_counterparty_facilities WHERE counterparty_id = 2 AND facility_code = 'SKD') <> 1 THEN
+    RAISE EXCEPTION 'NULL document/date facilities were not treated as one identity';
+  END IF;
+  BEGIN
+    INSERT INTO public.tax_counterparty_facilities (workspace_id, counterparty_id, facility_code, document_number, applies_to, valid_from)
+    VALUES ('00000000-0000-4000-8000-000000000101', 1, 'TaxExAr23', 'KET-00032/2026', ARRAY['pph23'], DATE '2026-03-17');
+    RAISE EXCEPTION 'Plain insert of a duplicate facility must fail';
+  EXCEPTION WHEN unique_violation THEN NULL;
+  END;
+END $$;
+SELECT 'PASS: facility identity enforced by the database while renewals stay distinct';

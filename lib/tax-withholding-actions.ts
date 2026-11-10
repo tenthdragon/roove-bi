@@ -7,6 +7,7 @@ import {
   FACILITY_CODES,
   TAX_ARTICLES,
   UNIQUE_IDENTITY_TYPES,
+  checkImportWorkspace,
   normalizeCounterpartyInput,
   normalizeEntityInput,
   normalizeFacilityInput,
@@ -286,6 +287,8 @@ export async function deleteCounterpartyFacility(id: number): Promise<void> {
 // ---------------------------------------------------------------------------
 
 export type CounterpartyImportPreview = {
+  /** Workspace the preview was computed for; the commit must send it back. */
+  workspaceId: string;
   fileName: string;
   sheetName: string;
   headerRowNumber: number;
@@ -317,7 +320,7 @@ type ExistingCounterparty = {
   notes: string | null;
 };
 
-async function readMasterSheet(formData: FormData): Promise<{ fileName: string; sheetName: string; rows: SheetRow[] }> {
+async function readMasterSheet(formData: FormData): Promise<{ fileName: string; sheetName: string; rows: SheetRow[]; date1904: boolean }> {
   const file = formData.get('file');
   if (!(file instanceof File)) throw new Error('File workbook tidak ditemukan.');
   if (file.size === 0) throw new Error('File kosong.');
@@ -326,6 +329,8 @@ async function readMasterSheet(formData: FormData): Promise<{ fileName: string; 
 
   // Dates stay as Excel serials: the xlsx Date conversion drifts by seconds across time zones.
   const workbook = XLSX.read(await file.arrayBuffer(), { type: 'array' });
+  // Legacy Mac workbooks count serials from 1904; the parser needs to know.
+  const date1904 = Boolean(workbook.Workbook?.WBProps?.date1904);
   const requestedSheet = String(formData.get('sheet') ?? '').trim();
   const candidates = requestedSheet
     ? [requestedSheet]
@@ -344,7 +349,7 @@ async function readMasterSheet(formData: FormData): Promise<{ fileName: string; 
       ...XLSX.utils.sheet_to_json<SheetRow>(sheet, { header: 1, defval: null, raw: true, blankrows: true }),
     ];
     const headerText = rows.slice(0, 15).map((row) => row.map((cell) => String(cell ?? '').toLowerCase()).join('|')).join('\n');
-    if (headerText.includes('nama lawan transaksi')) return { fileName: file.name, sheetName, rows };
+    if (headerText.includes('nama lawan transaksi')) return { fileName: file.name, sheetName, rows, date1904 };
   }
   throw new Error('Sheet "MASTER LAWAN TRANSAKSI" tidak ditemukan di workbook ini.');
 }
@@ -371,8 +376,8 @@ function matchExisting(row: ParsedCounterparty, existing: ExistingCounterparty[]
 
 export async function previewCounterpartyImport(formData: FormData): Promise<CounterpartyImportPreview> {
   const { workspaceId } = await requireTaxManageAccess();
-  const { fileName, sheetName, rows } = await readMasterSheet(formData);
-  const parsed = parseCounterpartyMaster(rows);
+  const { fileName, sheetName, rows, date1904 } = await readMasterSheet(formData);
+  const parsed = parseCounterpartyMaster(rows, { date1904 });
   const existing = await loadExistingCounterparties(workspaceId);
 
   let newCount = 0;
@@ -406,6 +411,7 @@ export async function previewCounterpartyImport(formData: FormData): Promise<Cou
   }
 
   return {
+    workspaceId,
     fileName,
     sheetName,
     headerRowNumber: parsed.headerRowNumber,
@@ -421,8 +427,10 @@ export async function previewCounterpartyImport(formData: FormData): Promise<Cou
 
 export async function commitCounterpartyImport(formData: FormData): Promise<CounterpartyImportResult> {
   const { workspaceId, profile } = await requireTaxManageAccess();
-  const { rows } = await readMasterSheet(formData);
-  const parsed = parseCounterpartyMaster(rows);
+  const workspaceMismatch = checkImportWorkspace(formData.get('workspaceId'), workspaceId);
+  if (workspaceMismatch) throw new Error(workspaceMismatch);
+  const { rows, date1904 } = await readMasterSheet(formData);
+  const parsed = parseCounterpartyMaster(rows, { date1904 });
   if (parsed.rows.length === 0) throw new Error('Tidak ada baris lawan transaksi yang bisa diimpor.');
 
   const svc = createServiceSupabase();
@@ -522,9 +530,18 @@ export async function commitCounterpartyImport(formData: FormData): Promise<Coun
       }
     }
     for (let offset = 0; offset < facilityRows.length; offset += 100) {
-      const result = await svc.from('tax_counterparty_facilities').insert(facilityRows.slice(offset, offset + 100));
+      // The identity constraint (migration 249) makes this safe under
+      // concurrent imports: duplicates are dropped by the database, and only
+      // the rows actually inserted come back.
+      const result = await svc
+        .from('tax_counterparty_facilities')
+        .upsert(facilityRows.slice(offset, offset + 100), {
+          onConflict: 'counterparty_id,facility_code,document_number,valid_from',
+          ignoreDuplicates: true,
+        })
+        .select('id');
       if (result.error) throw result.error;
-      facilitiesInserted += Math.min(100, facilityRows.length - offset);
+      facilitiesInserted += (result.data ?? []).length;
     }
   }
 

@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
+  checkImportWorkspace,
   facilityExpiryStatus,
   formatNpwp,
   isFacilityActiveOn,
@@ -68,6 +69,20 @@ test('facility input defaults articles per facility and checks the validity wind
 
   const reversed = normalizeFacilityInput({ counterpartyId: 1, facilityCode: 'PP23', validFrom: '2026-02-01', validTo: '2026-01-01' });
   assert.match(reversed.errors.join(' '), /akhir berlaku/);
+
+  const explicitlyEmpty = normalizeFacilityInput({ counterpartyId: 1, facilityCode: 'TaxExAr23', appliesTo: [] });
+  assert.equal(explicitlyEmpty.value, null);
+  assert.match(explicitlyEmpty.errors.join(' '), /minimal satu pasal/);
+  const omitted = normalizeFacilityInput({ counterpartyId: 1, facilityCode: 'TaxExAr23', appliesTo: null });
+  assert.deepEqual(omitted.value?.applies_to, ['pph23']);
+});
+
+test('import commit must carry the previewed workspace', () => {
+  const workspace = '00000000-0000-4000-8000-000000000001';
+  assert.equal(checkImportWorkspace(workspace, workspace), null);
+  assert.match(checkImportWorkspace(null, workspace) ?? '', /Pratinjau/);
+  assert.match(checkImportWorkspace('', workspace) ?? '', /Pratinjau/);
+  assert.match(checkImportWorkspace('00000000-0000-4000-8000-000000000002', workspace) ?? '', /Workspace aktif berubah/);
 });
 
 test('facility activity and expiry follow the validity window', () => {
@@ -85,7 +100,9 @@ test('normalizeIsoDate accepts ISO, dd/mm/yyyy and Date values and rejects garba
   assert.equal(normalizeIsoDate('17/03/2026'), '2026-03-17');
   assert.equal(normalizeIsoDate(new Date(2026, 2, 17)), '2026-03-17');
   assert.equal(normalizeIsoDate(new Date(2026, 2, 16, 23, 59, 48)), '2026-03-17'); // xlsx near-midnight drift
-  assert.equal(normalizeIsoDate(46098), '2026-03-17'); // Excel serial
+  assert.equal(normalizeIsoDate(46098), '2026-03-17'); // Excel serial, 1900 system
+  assert.equal(normalizeIsoDate(44636, { date1904: true }), '2026-03-17'); // same day, 1904 system
+  assert.equal(normalizeIsoDate(44636), '2022-03-16'); // the 1900 reading of that serial is a different day
   assert.equal(normalizeIsoDate(16), undefined);
   assert.equal(normalizeIsoDate(''), null);
   assert.equal(normalizeIsoDate('31/02/2026'), undefined);
@@ -107,12 +124,13 @@ test('master sheet parser maps legacy columns, identities and facilities', () =>
     [null, 8, 'HALODOC', '99.900.000.0-099.9000', null, null, 'NPWP', null, null, null, null, null, null, null, null, null, null],
     [null, 9, 'BAGAS', null, '327312411297000', '327312411297000', 'NIK', null, null, null, null, null, null, null, null, null, null],
     [null, 10, 'DELLA DENGAN PLACEHOLDER', '99.900.000.0-099.9000', '3273124112970001', '3273124112970001', 'NIK', null, null, null, null, null, null, null, null, null, null],
+    [null, 11, 'PT TANGGAL RUSAK', '11.111.111.1-111.000', null, null, 'NPWP', null, null, null, null, 'SKB', 'KET-RUSAK/2026', null, 'SKB', null, '31/02/2026'],
     [null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null],
   ];
 
   const parsed = parseCounterpartyMaster(rows);
   assert.equal(parsed.headerRowNumber, 2);
-  assert.equal(parsed.rows.length, 8);
+  assert.equal(parsed.rows.length, 9);
 
   const tokopedia = parsed.rows[0];
   assert.equal(tokopedia.identity_type, 'npwp');
@@ -149,6 +167,12 @@ test('master sheet parser maps legacy columns, identities and facilities', () =>
   assert.equal(nikOverPlaceholder.identity_type, 'nik');
   assert.equal(nikOverPlaceholder.identity_number, '3273124112970001');
 
+  const badDate = parsed.rows[8];
+  assert.equal(badDate.identity_type, 'npwp');
+  assert.deepEqual(badDate.facilities, []);
+  assert.match(badDate.notes ?? '', /31\/02\/2026/);
+  assert.ok(parsed.issues.some((issue) => issue.level === 'error' && issue.rowNumber === 13 && /tidak valid/.test(issue.message)));
+
   const badNik = parsed.rows[6];
   assert.equal(badNik.identity_type, 'unknown');
   assert.match(badNik.notes ?? '', /327312411297000$/);
@@ -162,6 +186,13 @@ test('master sheet parser maps legacy columns, identities and facilities', () =>
   assert.ok(parsed.issues.some((issue) => issue.level === 'warning' && issue.rowNumber === 8 && /dilewati/.test(issue.message)));
   assert.ok(parsed.issues.some((issue) => issue.level === 'error' && issue.rowNumber === 9));
   assert.equal(parsed.skipped, 2);
+});
+
+test('master sheet parser honours the 1904 date system when told', () => {
+  const header = [null, 'NO', 'NAMA LAWAN TRANSAKSI', 'NPWP', 'KTP', 'NPWP / NIK', 'STATUS', 'STATUS PKP', 'TIN', 'ALAMAT', 'KODE NEGARA', 'JENIS FASILITAS', 'NO. SKD / SKB', 'ATURAN DTP', 'JENIS FASILITAS', 'NOMOR SUKET PP23', 'TGL BERLAKU SKD/SKB/PP23'];
+  const row = [null, 1, 'PT MAC', '11.111.111.1-111.000', null, null, 'NPWP', null, null, null, null, 'SKB', 'KET-MAC/2026', null, 'SKB', null, 44636];
+  assert.equal(parseCounterpartyMaster([header, row], { date1904: true }).rows[0].facilities[0].valid_from, '2026-03-17');
+  assert.equal(parseCounterpartyMaster([header, row]).rows[0].facilities[0].valid_from, '2022-03-16');
 });
 
 test('master sheet parser reports a missing header', () => {

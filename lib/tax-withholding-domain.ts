@@ -317,10 +317,12 @@ export function normalizeFacilityInput(input: FacilityInput): { value: Normalize
   if (!Number.isInteger(input.counterpartyId) || input.counterpartyId <= 0) errors.push('Lawan transaksi wajib dipilih.');
   if (!FACILITY_CODES.includes(input.facilityCode)) errors.push('Jenis fasilitas tidak valid.');
 
-  const appliesTo = (input.appliesTo && input.appliesTo.length > 0
-    ? input.appliesTo
-    : FACILITY_DEFAULT_ARTICLES[input.facilityCode] ?? []
-  ).filter((article): article is TaxArticle => TAX_ARTICLES.includes(article));
+  // Defaults apply only when the caller did not choose; an explicit empty
+  // selection (every checkbox cleared) is an error, not a silent default.
+  const appliesToSource = input.appliesTo === null || input.appliesTo === undefined
+    ? FACILITY_DEFAULT_ARTICLES[input.facilityCode] ?? []
+    : input.appliesTo;
+  const appliesTo = appliesToSource.filter((article): article is TaxArticle => TAX_ARTICLES.includes(article));
   if (appliesTo.length === 0) errors.push('Pilih minimal satu pasal PPh yang dikenai fasilitas.');
 
   let rateOverride: number | null = null;
@@ -352,13 +354,24 @@ export function normalizeFacilityInput(input: FacilityInput): { value: Normalize
   };
 }
 
+export type DateOptions = {
+  /** Workbook uses the 1904 date system (Excel for Mac legacy); serials are 1,462 days smaller. */
+  date1904?: boolean;
+};
+
+const EXCEL_EPOCH_1900 = Date.UTC(1899, 11, 30);
+const EXCEL_EPOCH_1904 = Date.UTC(1904, 0, 1);
+
 /** Returns null for empty, the ISO date for valid input, undefined for invalid input. */
-export function normalizeIsoDate(value: unknown): string | null | undefined {
+export function normalizeIsoDate(value: unknown, options: DateOptions = {}): string | null | undefined {
   if (value === null || value === undefined) return null;
   if (typeof value === 'number') {
-    // Excel serial date (days since 1899-12-30). Anything else numeric is not a date.
-    if (!Number.isFinite(value) || value < 20_000 || value > 80_000) return undefined;
-    const date = new Date(Date.UTC(1899, 11, 30) + Math.round(value) * 86_400_000);
+    // Excel serial date. Anything numeric outside 1950..2119 is not treated as a date.
+    const epoch = options.date1904 ? EXCEL_EPOCH_1904 : EXCEL_EPOCH_1900;
+    if (!Number.isFinite(value)) return undefined;
+    const date = new Date(epoch + Math.round(value) * 86_400_000);
+    const year = date.getUTCFullYear();
+    if (year < 1950 || year > 2119) return undefined;
     return date.toISOString().slice(0, 10);
   }
   if (value instanceof Date) {
@@ -382,6 +395,21 @@ function checkDate(year: number, month: number, day: number): string | undefined
   const date = new Date(Date.UTC(year, month - 1, day));
   if (date.getUTCMonth() !== month - 1 || date.getUTCDate() !== day) return undefined;
   return date.toISOString().slice(0, 10);
+}
+
+/**
+ * The import preview and commit must target the same workspace. The active
+ * workspace cookie is shared across tabs, so the commit carries the workspace
+ * that was previewed and the server rejects a mismatch instead of writing the
+ * workbook into whichever workspace happens to be active now.
+ */
+export function checkImportWorkspace(expected: unknown, actual: string): string | null {
+  const text = String(expected ?? '').trim();
+  if (!text) return 'Pratinjau impor belum dilakukan untuk workspace ini. Jalankan Pratinjau dahulu.';
+  if (text !== actual) {
+    return 'Workspace aktif berubah sejak pratinjau. Buka kembali workspace yang dipratinjau atau ulangi Pratinjau di workspace ini.';
+  }
+  return null;
 }
 
 export function cleanOptional(value: unknown): string | null {

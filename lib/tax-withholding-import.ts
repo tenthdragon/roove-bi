@@ -11,6 +11,7 @@ import {
   normalizeIsoDate,
   normalizeNik,
   normalizeNpwp,
+  type DateOptions,
   type FacilityCode,
   type IdentityType,
   type TaxArticle,
@@ -127,7 +128,7 @@ function mapLegacyFacility(label: string): FacilityCode | null {
   return null;
 }
 
-export function parseCounterpartyMaster(rows: SheetRow[]): ParsedMaster {
+export function parseCounterpartyMaster(rows: SheetRow[], options: DateOptions = {}): ParsedMaster {
   const headerIndex = findHeaderRow(rows);
   if (headerIndex < 0) {
     return {
@@ -253,18 +254,32 @@ export function parseCounterpartyMaster(rows: SheetRow[]): ParsedMaster {
           ? dtpRule || skbNumber
           : skbNumber || pp23Number;
       const validFromCell = columns.validFrom?.map((c) => row[c]).find((v) => cellText(v));
-      const validFrom = normalizeIsoDate(validFromCell);
-      if (validFrom === undefined) warnings.push(`Tanggal berlaku fasilitas "${cellText(validFromCell)}" tidak dikenali; disimpan tanpa tanggal.`);
-      if (!documentNumber) warnings.push('Fasilitas tanpa nomor dokumen.');
-      facilities.push({
-        facility_code: facilityCode,
-        document_number: documentNumber || null,
-        applies_to: FACILITY_DEFAULT_ARTICLES[facilityCode],
-        rate_override: null,
-        valid_from: validFrom ?? null,
-        valid_to: null,
-        notes: 'Diimpor dari MASTER LAWAN TRANSAKSI',
-      });
+      const validFrom = normalizeIsoDate(validFromCell, options);
+      if (validFrom === undefined) {
+        // A malformed date must not become unbounded validity: the vendor is
+        // still imported, the facility is withheld and the raw value is kept
+        // for correction.
+        const rawDate = cellText(validFromCell);
+        const label = `${facilityCode}${documentNumber ? ` ${documentNumber}` : ''}`;
+        issues.push({
+          level: 'error',
+          rowNumber,
+          name,
+          message: `Fasilitas ${label} tidak diimpor: tanggal berlaku "${rawDate}" tidak valid. Perbaiki tanggalnya lalu tambahkan fasilitas secara manual.`,
+        });
+        notesExtra.push(`Fasilitas ${label} belum diimpor; tanggal berlaku asli "${rawDate}" tidak valid`);
+      } else {
+        if (!documentNumber) warnings.push('Fasilitas tanpa nomor dokumen.');
+        facilities.push({
+          facility_code: facilityCode,
+          document_number: documentNumber || null,
+          applies_to: FACILITY_DEFAULT_ARTICLES[facilityCode],
+          rate_override: null,
+          valid_from: validFrom,
+          valid_to: null,
+          notes: 'Diimpor dari MASTER LAWAN TRANSAKSI',
+        });
+      }
     }
 
     const pkpText = firstText(row, columns.pkp).toUpperCase();
