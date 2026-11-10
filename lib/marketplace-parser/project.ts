@@ -13,6 +13,27 @@ export function classifySku(sku: string, account: string, config: ParserConfig) 
   const sets = new Set(top.map(c => JSON.stringify([...c.rule.productIds].sort())));
   return { productIds: sets.size === 1 ? [...top[0].rule.productIds] : [], rule: top.map(c => c.rule.id).join(', '), ambiguous: sets.size > 1 };
 }
+// Shared by projection and repair: installing a bundle must not bypass the
+// account's Product/combination routing, even before its catalog is complete.
+export function configuredOrderRoute(skus: string[], account: string, config: ParserConfig) {
+  const classified = skus.map(sku => classifySku(sku,account,config));
+  const productIds = new Set(classified.flatMap(line => line.productIds));
+  const allClassified = classified.every(line => line.productIds.length > 0);
+  const combinationRules = config.combinations.filter(r => r.account === account);
+  const matching = allClassified ? combinationRules.filter(r => r.productIds.every(id => productIds.has(id)) && (r.match === 'contains' || r.productIds.length === productIds.size)).sort((a,b) => b.priority - a.priority) : [];
+  const combinations = matching.filter(r => r.priority === matching[0]?.priority);
+  const routes = config.routes.filter(r => r.account === account && productIds.has(r.productId));
+  const rules = combinations.length ? combinations : routes;
+  const targetIds = [...new Set(rules.map(r => r.storeId))], errors: string[] = [];
+  if (combinations.length && targetIds.length !== 1) errors.push('Aturan kombinasi dengan prioritas sama memilih Store berbeda. Perbaiki prioritas atau tujuan aturan.');
+  if (!combinations.length && routes.length) {
+    if (!allClassified || [...productIds].some(id => routes.filter(r => r.productId === id).length !== 1)) errors.push('Routing Produk belum lengkap. Lengkapi pengenalan Produk dan routing akun ini.');
+    if (targetIds.length !== 1) errors.push('Produk dalam order memilih Store berbeda. Tambahkan aturan kombinasi untuk menentukan satu Store tujuan.');
+  }
+  if (combinationRules.length && !allClassified) errors.push('Produk pada sebagian SKU belum dikenali. Lengkapi pengenalan Produk sebelum mengevaluasi aturan kombinasi.');
+  if (classified.some(line => line.ambiguous)) errors.push('Pengenalan Produk ambigu. Perbaiki aturan Produk.');
+  return { targetIds,routeIds: rules.map(r => r.id),errors,hasRules: rules.length > 0 };
+}
 function validateEdits(edits: Edits) {
   if (!edits || typeof edits !== 'object' || !edits.lines || !edits.orders) throw new Error('Format koreksi tidak valid.');
   for (const [kind, allowed] of [['lines',['quantity','price','reason']],['orders',['courier','service','username','reason']]] as const) {
@@ -63,27 +84,16 @@ export function projectMarketplace(input: { file: ParsedFile; account: string; d
       if (total !== line.totalCents && edit?.reason?.trim()) warnings.push(`Total item baris ${line.row} dikoreksi: ${edit.reason}`);
       return { source: line, sku, productIds: classified.productIds, bundleId: null, bundleName: '', quantity: q, unitCents: unit, totalCents: total, mappingRule: classified.rule, errors: lineErrors, reason: edit?.reason || '' };
     });
-    const productIds = new Set(lines.flatMap(line => line.productIds));
-    const allClassified = lines.every(line => line.productIds.length > 0);
-    const combinationRules = config.combinations.filter(r => r.account === account);
-    const matchingCombinations = allClassified ? combinationRules.filter(r => r.productIds.every(id => productIds.has(id)) && (r.match === 'contains' || r.productIds.length === productIds.size)).sort((a,b) => b.priority - a.priority) : [];
-    const matchedCombinations = matchingCombinations.filter(r => r.priority === matchingCombinations[0]?.priority);
-    const routes = config.routes.filter(r => r.account === account && productIds.has(r.productId));
-    let targetIds: number[] = [], routeIds: string[] = [];
-    if (matchedCombinations.length) {
-      targetIds = [...new Set(matchedCombinations.map(r => r.storeId))]; routeIds = matchedCombinations.map(r => r.id);
-      if (targetIds.length !== 1) errors.push('Aturan kombinasi dengan prioritas sama memilih Store berbeda. Perbaiki prioritas atau tujuan aturan.');
-    } else if (routes.length) {
-      if (!allClassified || [...productIds].some(id => routes.filter(r => r.productId === id).length !== 1)) errors.push('Routing Produk belum lengkap. Lengkapi pengenalan Produk dan routing akun ini.');
-      targetIds = [...new Set(routes.map(r => r.storeId))]; routeIds = routes.map(r => r.id);
-      if (targetIds.length !== 1) errors.push('Produk dalam order memilih Store berbeda. Tambahkan aturan kombinasi untuk menentukan satu Store tujuan.');
-    } else {
+    const routing = configuredOrderRoute(lines.map(line => line.sku),account,config);
+    errors.push(...routing.errors);
+    let targetIds = routing.targetIds;
+    const routeIds = routing.routeIds;
+    if (!routing.hasRules) {
       // With no applicable route, a unique common Store can be derived from the
       // bundle relations. Never select the first of several possible Stores.
       targetIds = [...storeIds].filter(id => lines.every(line => (skuIndex.get(line.sku) || []).some(bundle => bundle.storeIds.includes(id))));
       if (targetIds.length !== 1) errors.push(targetIds.length ? 'Bundle tersedia di beberapa Store. Atur Produk dan routing untuk akun ini.' : 'Tidak ada satu Store yang menyediakan seluruh SKU order. Perbaiki bundle atau aturan Store.');
     }
-    if (combinationRules.length && !allClassified) errors.push('Produk pada sebagian SKU belum dikenali. Lengkapi pengenalan Produk sebelum mengevaluasi aturan kombinasi.');
     const storeId = targetIds.length === 1 ? targetIds[0] : null;
     const store = catalog.stores.find(s => s.id === storeId && s.business === business && storeIds.has(s.id));
     if (!store) errors.push('Store tujuan belum pasti atau berada di luar Business akun asal. Perbaiki aturan parsing.');
