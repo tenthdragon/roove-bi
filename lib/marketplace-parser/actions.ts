@@ -1,6 +1,6 @@
 'use server';
 
-import { requireDashboardTabAccess } from '../dashboard-access';
+import { requireDashboardTabAccess, requireDashboardPermissionAccess } from '../dashboard-access';
 import { createServiceSupabase } from '../service-supabase';
 import { isWorkspaceModuleEnabled } from '../workspaces';
 import { migrateParserConfig, validateCatalogConfig, validateParserConfig } from './config';
@@ -23,7 +23,9 @@ export async function getParserContext(expectedWorkspace: string): Promise<Parse
   const metadata = await readParserCatalog(ctx.workspaceId,[],db);
   const migrated = migrateParserConfig(settings.data?.config,metadata);
   const catalog = migrated.config.stores.length ? await readParserCatalog(ctx.workspaceId,migrated.config.stores.map(s => s.storeId).filter(id => metadata.stores.some(s => s.id === id)),db) : metadata;
-  return { workspaceId: ctx.workspaceId,config: migrated.config,revision: settings.data?.revision || 0,catalog,canSave: !missingSchema,canSync: process.env.ROOVE_LOCAL_DEV !== '1',migrationNotes: migrated.notes };
+  let canManageCatalog = false;
+  try { const manager = await requireDashboardPermissionAccess('whs:mapping','Pengelolaan katalog Scalev'); canManageCatalog = manager.workspaceId === ctx.workspaceId && manager.profile.id === ctx.profile.id; } catch { /* Diagnosis remains available to parser readers. */ }
+  return { workspaceId: ctx.workspaceId,config: migrated.config,revision: settings.data?.revision || 0,catalog,canSave: !missingSchema,canSync: process.env.ROOVE_LOCAL_DEV !== '1',canManageCatalog,migrationNotes: migrated.notes };
 }
 export async function getParserCatalog(expectedWorkspace: string, storeIds: number[]) {
   const ctx = await access(expectedWorkspace);

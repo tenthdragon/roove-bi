@@ -28,7 +28,7 @@ export type Catalog = {
   loadedStoreIds: number[];
   storeSyncs: { storeId: number; checkedAt: string | null; bundleCount: number; status: 'ready' | 'unknown' | 'failed' }[];
 };
-export type ParserContext = { workspaceId: string; config: ParserConfig; revision: number; catalog: Catalog; canSave: boolean; canSync: boolean; migrationNotes: string[] };
+export type ParserContext = { workspaceId: string; config: ParserConfig; revision: number; catalog: Catalog; canSave: boolean; canSync: boolean; canManageCatalog?: boolean; migrationNotes: string[] };
 export type SourceLine = {
   key: string; sheet: string; row: number; sku: string; name: string; variation: string;
   quantity: number | null; unitCents: number | null; totalCents: number | null;

@@ -1,16 +1,20 @@
 'use client';
 
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { AlertCircle, CheckCircle2, ChevronDown, Download, FileSpreadsheet, RefreshCw, Settings2, Upload } from 'lucide-react';
 import { projectMarketplace, exportBusinessCsv, orderReady } from '@/lib/marketplace-parser/project';
 import { COURIER_SERVICE_OPTIONS, validateCatalogConfig } from '@/lib/marketplace-parser/config';
 import { centsText } from '@/lib/marketplace-parser/money';
 import { CSV_HEADERS, type Catalog, type Edits, type ParsedFile, type ParserConfig, type ParserContext, type PreviewOrder } from '@/lib/marketplace-parser/types';
 import MarketplaceParserConfig from './MarketplaceParserConfig';
+import MarketplaceParserDiagnosis from './MarketplaceParserDiagnosis';
+import type { DiagnosisRequest, ParserDiagnosis, RepairRequest, RepairResult } from '@/lib/marketplace-parser/diagnosis-types';
 import styles from './MarketplaceParserTool.module.css';
 
 type Props = {
   context: ParserContext;
+  diagnoseCase?: (workspace: string,input: DiagnosisRequest) => Promise<ParserDiagnosis>;
+  repairCase?: (workspace: string,input: RepairRequest) => Promise<{ result: RepairResult; catalog: Catalog }>;
   saveConfig: (workspace: string,revision: number,config: ParserConfig) => Promise<{ workspaceId: string; revision: number }>;
   loadCatalog: (workspace: string,storeIds: number[]) => Promise<Catalog>;
   syncStore: (workspace: string,storeId: number) => Promise<{ storeId: number; bundleCount: number }>;
@@ -23,7 +27,7 @@ function saveText(text: string,name: string,type: string) {
   const url = URL.createObjectURL(new Blob([text],{ type })), anchor = document.createElement('a');
   anchor.href = url; anchor.download = name; document.body.appendChild(anchor); anchor.click(); anchor.remove(); setTimeout(() => URL.revokeObjectURL(url),1000);
 }
-export default function MarketplaceParserTool({ context,saveConfig,loadCatalog,syncStore,reloadContext,prepareDownload }: Props) {
+export default function MarketplaceParserTool({ context,saveConfig,loadCatalog,syncStore,reloadContext,prepareDownload,diagnoseCase,repairCase }: Props) {
   const [config,setConfig] = useState(context.config), [draft,setDraft] = useState(context.config), [revision,setRevision] = useState(context.revision);
   const [catalog,setCatalog] = useState(context.catalog), [migrationNotes,setMigrationNotes] = useState(context.migrationNotes);
   const [configOpen,setConfigOpen] = useState(!context.config.accounts.length || !!context.migrationNotes.length);
@@ -34,13 +38,30 @@ export default function MarketplaceParserTool({ context,saveConfig,loadCatalog,s
   const [error,setError] = useState(''), [notice,setNotice] = useState(''), [catalogError,setCatalogError] = useState(false);
   const [search,setSearch] = useState(''), [status,setStatus] = useState('all'), [page,setPage] = useState(0), [expanded,setExpanded] = useState<string | null>(null);
   const [showCsv,setShowCsv] = useState(false), [reviewed,setReviewed] = useState(false), [downloaded,setDownloaded] = useState(false);
+  const [repairing,setRepairing] = useState(false);
   const request = useRef(0), catalogRequest = useRef(0), mounted = useRef(true);
   const errorSummary = useRef<HTMLDivElement>(null);
+  const settingsSection = useRef<HTMLElement>(null);
   const dirty = JSON.stringify(config) !== JSON.stringify(draft);
   const storeKey = [...draft.stores.map(s => s.storeId)].sort((a,b) => a - b).join(',');
   const loadedKey = [...catalog.loadedStoreIds].sort((a,b) => a - b).join(',');
-  const busy = reading || saving || loadingCatalog || syncing || downloading;
+  const busy = reading || saving || loadingCatalog || syncing || downloading || repairing;
   function changed() { setReviewed(false); setDownloaded(false); setNotice(''); }
+  function openSettings() { setConfigOpen(true); requestAnimationFrame(() => { settingsSection.current?.focus({ preventScroll: true }); settingsSection.current?.scrollIntoView({ block: 'start',behavior: 'auto' }); }); }
+  async function repairOrder(input: RepairRequest) {
+    if (!repairCase) throw new Error('Perbaikan katalog belum tersedia.');
+    setRepairing(true); setError(''); changed();
+    try {
+      const next = await repairCase(context.workspaceId,input);
+      if (mounted.current) {
+        setCatalog(next.catalog); setCatalogError(!next.result.synced);
+        if (next.result.synced && next.result.items.every(i => i.stage === 'ready')) setNotice(next.result.message);
+        else setError(next.result.message);
+      }
+      return next.result;
+    } catch (e) { if (mounted.current) setCatalogError(true); throw e; }
+    finally { if (mounted.current) setRepairing(false); }
+  }
   useEffect(() => {
     const fileRequests = request, catalogRequests = catalogRequest;
     mounted.current = true;
@@ -141,7 +162,7 @@ export default function MarketplaceParserTool({ context,saveConfig,loadCatalog,s
     {notice && <div className={styles.notice} role="status">{notice}</div>}
     {!!migrationNotes.length && <div className={styles.hint}><AlertCircle size={18}/><div>{migrationNotes.map(note => <p key={note}>{note}</p>)}</div></div>}
     {dirty && <div className={styles.hint} role="status">Ada perubahan aturan yang belum disimpan. Simpan untuk tim sebelum melanjutkan download.</div>}
-    {configOpen && <section className={styles.section} aria-label="Konfigurasi parser"><div className={styles.sectionHeading}><div><h2>Aturan parsing</h2><p>Berlaku bersama untuk tim · versi {revision || 'belum disimpan'}. Perubahan akan memvalidasi ulang batch yang sedang dibuka.</p></div><button className={styles.secondary} disabled={busy || dirty} onClick={reloadSettings}><RefreshCw size={15}/>Muat ulang aturan</button></div>
+    {configOpen && <section ref={settingsSection} tabIndex={-1} className={styles.section} aria-label="Konfigurasi parser"><div className={styles.sectionHeading}><div><h2>Aturan parsing</h2><p>Berlaku bersama untuk tim · versi {revision || 'belum disimpan'}. Perubahan akan memvalidasi ulang batch yang sedang dibuka.</p></div><button className={styles.secondary} disabled={busy || dirty} onClick={reloadSettings}><RefreshCw size={15}/>Muat ulang aturan</button></div>
       <fieldset className={styles.configFieldset} disabled={busy}><MarketplaceParserConfig config={draft} setConfig={changeDraft} catalog={catalog} busy={busy} canSync={context.canSync} refresh={refreshCatalog} sync={synchronize}/></fieldset>
       {loadingCatalog && <p className={styles.loading} role="status">Memuat bundle dari Store terpilih…</p>}
       <div className={styles.actions}>{!context.canSave && <p role="status">Penyimpanan aturan belum tersedia. Hubungi pengelola aplikasi.</p>}<button className={styles.secondary} disabled={busy || !dirty} onClick={() => { setDraft(structuredClone(config)); changed(); }}>Batalkan perubahan</button><button className={styles.primary} disabled={busy || !context.canSave} onClick={applyConfig}>{saving ? 'Menyimpan…' : 'Simpan konfigurasi tim'}</button></div>
@@ -163,7 +184,7 @@ export default function MarketplaceParserTool({ context,saveConfig,loadCatalog,s
             <td className={styles.product}><strong>{line.sku || 'Nomor Referensi SKU kosong'}</strong>{line.bundleName || line.source.name}<small>{line.bundleId ? `Bundle #${line.bundleId}` : 'Bundle belum cocok'}</small>{line.productIds.length > 0 && <small>{line.productIds.map(id => config.groups.find(g => g.id === id)?.name).join(' + ')}</small>}</td>
             <td className={styles.number}>{line.quantity ?? '—'}</td><td className={styles.number}>{line.unitCents === null ? '—' : money(line.unitCents)}</td><td className={styles.number}>{line.totalCents === null ? '—' : money(line.totalCents)}</td>
             {index === 0 && <><td rowSpan={order.lines.length}><strong>{order.business || 'Business akun belum ditetapkan'}</strong><small>{order.store || 'Store belum dapat ditentukan'}</small><small>{order.warehouse || 'Warehouse belum dipilih'}</small><small>{order.courier} {order.service}</small></td><td rowSpan={order.lines.length}><span className={orderReady(order) ? styles.good : styles.bad}>{orderReady(order) ? <CheckCircle2 size={14}/> : <AlertCircle size={14}/ >}{orderReady(order) ? 'Valid' : 'Download diblokir'}</span><small>{order.errors[0] || line.errors[0] || (order.warnings.length ? `${order.warnings.length} catatan sumber` : '')}</small></td></>}
-          </tr>)}{expanded === order.source.key && <tr><td colSpan={7} className={styles.detailCell}><OrderDetails order={order} edits={edits} busy={busy} lineEdit={lineEdit} orderEdit={orderEdit} openSettings={() => setConfigOpen(true)} reset={() => { setEdits(old => { const next = structuredClone(old); delete next.orders[order.source.key]; order.lines.forEach(l => delete next.lines[l.source.key]); return next; }); changed(); }}/></td></tr>}</tbody>)}</>}
+          </tr>)}{expanded === order.source.key && <tr><td colSpan={7} className={styles.detailCell}><OrderDetails order={order} edits={edits} busy={busy} lineEdit={lineEdit} orderEdit={orderEdit} openSettings={openSettings} reset={() => { setEdits(old => { const next = structuredClone(old); delete next.orders[order.source.key]; order.lines.forEach(l => delete next.lines[l.source.key]); return next; }); changed(); }} diagnosis={diagnoseCase && repairCase ? <MarketplaceParserDiagnosis key={`${account}:${revision}:${order.source.key}`} workspace={context.workspaceId} account={account} revision={revision} skus={order.lines.map(l => l.sku)} enabled={context.canSync} canManage={!!context.canManageCatalog} busy={busy} dirty={dirty} diagnose={diagnoseCase} repair={repairOrder} openSettings={openSettings}/> : null}/></td></tr>}</tbody>)}</>}
         </table>{!shown.length && <p className={styles.noResults}>Tidak ada order yang sesuai filter.</p>}</div>
         <div className={styles.pagination}><span>{visible.length ? currentPage * 25 + 1 : 0}–{Math.min((currentPage + 1) * 25,visible.length)} dari {visible.length} order</span><button className={styles.secondary} disabled={!currentPage} onClick={() => setPage(currentPage - 1)}>Sebelumnya</button><button className={styles.secondary} disabled={(currentPage + 1) * 25 >= visible.length} onClick={() => setPage(currentPage + 1)}>Berikutnya</button></div>
       </section>
@@ -175,10 +196,11 @@ export default function MarketplaceParserTool({ context,saveConfig,loadCatalog,s
     </>}
   </div>;
 }
-function OrderDetails({ order,edits,busy,lineEdit,orderEdit,reset,openSettings }: { order: PreviewOrder; edits: Edits; busy: boolean; lineEdit: (key: string,field: 'quantity' | 'price' | 'reason',value: string) => void; orderEdit: (key: string,field: 'courier' | 'service' | 'username' | 'reason',value: string) => void; reset: () => void; openSettings: () => void }) {
+function OrderDetails({ order,edits,busy,lineEdit,orderEdit,reset,openSettings,diagnosis }: { order: PreviewOrder; edits: Edits; busy: boolean; lineEdit: (key: string,field: 'quantity' | 'price' | 'reason',value: string) => void; orderEdit: (key: string,field: 'courier' | 'service' | 'username' | 'reason',value: string) => void; reset: () => void; openSettings: () => void; diagnosis?: ReactNode }) {
   const edit = edits.orders[order.source.key];
   return <div className={styles.details}><div className={styles.sectionHeading}><h3>Order {order.source.externalId}</h3><button className={styles.secondary} disabled={busy} onClick={openSettings}>Buka aturan parsing</button></div>
     <p className={styles.routeSummary}><strong>{order.business || 'Business belum ditetapkan'}</strong> → {order.store || 'Store belum ditentukan'} · {order.warehouse || 'Warehouse belum dipilih'}</p>
+    {diagnosis}
     {!!order.errors.length && <ul className={styles.issues}>{order.errors.map(e => <li key={e}>{e}</li>)}</ul>}{!!order.warnings.length && <ul className={styles.notes}>{order.warnings.map(e => <li key={e}>{e}</li>)}</ul>}
     {order.lines.map(line => <section className={styles.lineEditor} key={line.source.key}><h4>{line.sku || 'SKU kosong'} · {line.bundleName || line.source.name}</h4><small>{line.source.sheet}, baris {line.source.row}{line.bundleId ? ` · Bundle #${line.bundleId}` : ''}</small>{!!line.errors.length && <ul className={styles.issues}>{line.errors.map((e,i) => <li key={i}>{e}</li>)}</ul>}
       <details><summary>Data mentah dan koreksi nominal</summary><fieldset className={styles.configFieldset} disabled={busy}><div className={styles.fields}><label>Quantity<input inputMode="numeric" value={edits.lines[line.source.key]?.quantity ?? (line.quantity === null ? '' : String(line.quantity))} onChange={e => lineEdit(line.source.key,'quantity',e.target.value)}/></label><label>Harga satuan (Rp)<input inputMode="decimal" value={edits.lines[line.source.key]?.price ?? (line.unitCents === null ? '' : centsText(line.unitCents))} onChange={e => lineEdit(line.source.key,'price',e.target.value)}/></label><label>Alasan / bukti koreksi item<input value={edits.lines[line.source.key]?.reason || ''} onChange={e => lineEdit(line.source.key,'reason',e.target.value)}/></label></div></fieldset><dl className={styles.raw}>{Object.entries(line.source.raw).filter(([,value]) => value).map(([key,value]) => <div key={key}><dt>{key}</dt><dd>{value}</dd></div>)}</dl></details>

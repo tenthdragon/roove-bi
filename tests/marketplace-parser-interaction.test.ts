@@ -92,3 +92,22 @@ test('save failure focuses and reveals the error summary even from a distant act
     assert.equal(rendered.root.findByProps({role:'alert'}).props.tabIndex,-1);
   } finally { rendered.unmount(); }
 });
+
+test('repair replaces the catalog and revalidates every order, including filtered-out orders, while requiring review again',async () => {
+  const p = props(), completeCatalog = structuredClone(p.context.catalog);
+  p.context.canManageCatalog = true; p.context.catalog.bundles = [];
+  const data = { checkedAt: '2026-11-10T00:00:00Z',business: 'RTI',account: 'Shopee Roove',stores: [{ id: 10,name: 'Roove Main Store - Marketplace' }],suggestedStoreId: 10,issues: [],token: 'test',items: [{ sku: 'ROV20-295',status: 'found',message: 'Tersedia',bundles: [{ id: 101,name: 'Roove A',sku: 'ROV20-295',owner: 'RLB',ownerBusinessId: 8,availableInBusiness: true,installedStoreIds: [],canShare: false,options: [{ id: 4050,name: '295',price: '295000' }] }] }] };
+  let mutations = 0;
+  const rendered = create(React.createElement(Tool,{ ...p,diagnoseCase: async () => data,repairCase: async () => { mutations++; return { result: { synced: true,message: 'Seluruh batch divalidasi ulang',items: [] },catalog: completeCatalog }; } }));
+  try {
+    const bytes = XLSX.write(book({ orders: [shopee(),shopee({ 'No. Pesanan': 'ORDER-TEST-2','No. Resi': '00054321' })] }),{ type: 'buffer',bookType: 'xlsx' });
+    await act(async () => { rendered.root.findByProps({ type: 'file' }).props.onChange({ target: { files: [{ name: 'synthetic-two-orders.xlsx',size: bytes.length,arrayBuffer: async () => bytes.buffer.slice(bytes.byteOffset,bytes.byteOffset + bytes.byteLength) }],value: '' } }); await new Promise(r => setTimeout(r,50)); });
+    assert.match(content(rendered.root),/2 perlu diselesaikan/);
+    await act(async () => rendered.root.findByProps({ type: 'search' }).props.onChange({ target: { value: 'ORDER-TEST-1' } }));
+    await click(rendered.root,'Periksa masalah');
+    await click(rendered.root,'Tambahkan ke Store');
+    assert.equal(mutations,1); assert.match(content(rendered.root),/2 order valid/);
+    assert.equal(rendered.root.findByProps({ 'aria-label': 'Konfirmasi hasil parsing' }).props.checked,false);
+    assert.equal(buttons(rendered.root,'Download CSV')[0].props.disabled,true);
+  } finally { rendered.unmount(); }
+});

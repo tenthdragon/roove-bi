@@ -20,6 +20,17 @@ Indonesian and the existing Roove BI dashboard design system.
   be skipped. Business and Store are populated automatically.
 - Team configuration is versioned. Changes require revalidation, including on
   the server at download. Per-order routing overrides are not supported.
+- The existing **Periksa masalah** expansion includes live Scalev diagnosis and
+  repair, without another modal. Show bundle ownership separately from the
+  account's receiving Business and Store. Installation and sharing change the
+  global Scalev catalog; they never override an order's routing.
+- Readable diagnostics distinguish complete absence, incomplete API reads,
+  duplicate identifiers, availability to the Business, and Store membership.
+  A single available price option can be selected automatically; multiple
+  options require an explicit choice. These options never change source prices.
+- Readers can refresh the catalog; sharing/installation requires the existing
+  catalog management permission. Repairs sync the affected Store and revalidate
+  the entire batch. Partial failures remain actionable and do not unlock export.
 
 ## Interface contract
 

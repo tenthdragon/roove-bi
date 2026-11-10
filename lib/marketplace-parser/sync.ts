@@ -28,25 +28,42 @@ export async function readScalevPages(apiKey: string, path: string, fetcher: typ
   }
   throw new Error('Katalog melewati batas sinkronisasi. Hubungi pengelola integrasi.');
 }
-export async function syncParserStore(workspaceId: string, storeId: number) {
+export async function claimParserStore(workspaceId: string, storeId: number) {
+  const db = createServiceSupabase();
+  const inserted = await db.from('marketplace_parser_store_syncs').upsert({ workspace_id: workspaceId,store_id: storeId,status: 'failed' },{ onConflict: 'workspace_id,store_id',ignoreDuplicates: true });
+  if (inserted.error) throw new Error('Status sinkronisasi belum tersedia. Terapkan migration parser terbaru.');
+  const started = new Date().toISOString();
+  const claimed = await db.from('marketplace_parser_store_syncs').update({ status: 'syncing',updated_at: started }).eq('workspace_id',workspaceId).eq('store_id',storeId).or(`status.neq.syncing,updated_at.lt.${new Date(Date.now() - 30 * 60000).toISOString()}`).select('store_id').maybeSingle();
+  if (claimed.error || !claimed.data) throw new Error('Store ini sedang diproses. Tunggu proses selesai lalu periksa lagi.');
+  return started;
+}
+export async function assertParserStoreClaim(workspaceId: string, storeId: number, started: string) {
+  const result = await createServiceSupabase().from('marketplace_parser_store_syncs').select('store_id').eq('workspace_id',workspaceId).eq('store_id',storeId).eq('status','syncing').eq('updated_at',started).maybeSingle();
+  if (result.error || !result.data || Date.now() - Date.parse(started) > 25 * 60000) throw new Error('Proses Store kedaluwarsa atau telah diganti. Periksa ulang sebelum melanjutkan.');
+}
+export async function failParserStoreClaim(workspaceId: string, storeId: number, started: string) {
+  const result = await createServiceSupabase().from('marketplace_parser_store_syncs').update({ status: 'failed',updated_at: new Date().toISOString() }).eq('workspace_id',workspaceId).eq('store_id',storeId).eq('status','syncing').eq('updated_at',started);
+  if (result.error) throw new Error('Status katalog belum berhasil diperbarui. Sinkronkan ulang sebelum download.');
+}
+export async function syncParserStore(workspaceId: string, storeId: number, lease?: { started: string; scalevStoreId: number }) {
   const db = createServiceSupabase();
   const store = await db.from('scalev_store_channels').select('id,business_id,store_name').eq('workspace_id',workspaceId).eq('id',storeId).eq('is_active',true).single();
   if (store.error) throw new Error('Store tidak aktif atau tidak tersedia dalam workspace ini.');
   const business = await db.from('scalev_webhook_businesses').select('id,business_code,api_key').eq('workspace_id',workspaceId).eq('id',store.data.business_id).eq('is_active',true).single();
   if (business.error || !business.data.api_key) throw new Error('Koneksi Scalev untuk Business ini belum tersedia.');
-  const inserted = await db.from('marketplace_parser_store_syncs').upsert({ workspace_id: workspaceId,store_id: storeId,status: 'failed' },{ onConflict: 'workspace_id,store_id',ignoreDuplicates: true });
-  if (inserted.error) throw new Error('Status sinkronisasi belum tersedia. Terapkan migration parser terbaru.');
-  const started = new Date().toISOString();
-  const claimed = await db.from('marketplace_parser_store_syncs').update({ status: 'syncing',updated_at: started }).eq('workspace_id',workspaceId).eq('store_id',storeId).or(`status.neq.syncing,updated_at.lt.${new Date(Date.now() - 30 * 60000).toISOString()}`).select('store_id').maybeSingle();
-  if (claimed.error || !claimed.data) throw new Error('Store ini sedang disinkronkan. Tunggu proses selesai lalu muat ulang katalog.');
+  const started = lease?.started || await claimParserStore(workspaceId,storeId);
   try {
+    await assertParserStoreClaim(workspaceId,storeId,started);
     const liveStores = await readScalevPages(business.data.api_key,'stores');
     const matching = liveStores.filter(row => row.name === store.data.store_name);
     if (matching.length !== 1) throw new Error('Nama Store di aplikasi tidak cocok dengan satu Store Scalev. Perbarui master Store terlebih dahulu.');
     const liveStore = matching[0];
+    if (lease && liveStore.id !== lease.scalevStoreId) throw new Error('Identitas Store berubah setelah perbaikan. Perbarui master Store lalu sinkronkan kembali.');
     const bundles = await readScalevPages(business.data.api_key,`stores/${liveStore.id}/bundles`);
     const at = new Date().toISOString();
+    await assertParserStoreClaim(workspaceId,storeId,started);
     for (let offset = 0; offset < bundles.length; offset += 200) {
+      await assertParserStoreClaim(workspaceId,storeId,started);
       const batch = bundles.slice(offset,offset + 200);
       const old = await db.from('scalev_catalog_bundles').select('scalev_bundle_id,visibility_kind,owner_business_id,owner_business_code,processor_business_id,processor_business_code').eq('workspace_id',workspaceId).eq('business_id',business.data.id).in('scalev_bundle_id',batch.map(row => row.id));
       if (old.error) throw new Error('Metadata bundle lama belum dapat dibaca.');
@@ -60,10 +77,11 @@ export async function syncParserStore(workspaceId: string, storeId: number) {
       const links = await db.from('scalev_catalog_bundle_store_links').upsert(batch.map(bundle => ({ workspace_id: workspaceId,business_id: business.data.id,business_code: business.data.business_code,scalev_bundle_id: bundle.id,scalev_store_id: liveStore.id,store_unique_id: liveStore.unique_id || null,store_name: store.data.store_name,is_available: true,availability_source: 'scalev.store_bundle_list',last_checked_at: at })),{ onConflict: 'workspace_id,business_id,scalev_bundle_id,store_name' });
       if (links.error) throw new Error('Relasi bundle–Store belum berhasil disimpan. Sinkronkan ulang sebelum download.');
     }
+    await assertParserStoreClaim(workspaceId,storeId,started);
     const stale = await db.from('scalev_catalog_bundle_store_links').update({ is_available: false,last_checked_at: at,availability_source: 'scalev.store_bundle_list' }).eq('workspace_id',workspaceId).eq('business_id',business.data.id).eq('store_name',store.data.store_name).neq('last_checked_at',at);
     if (stale.error) throw new Error('Relasi bundle lama belum berhasil diperbarui.');
-    const complete = await db.from('marketplace_parser_store_syncs').update({ status: 'ready',synced_at: at,bundle_count: bundles.length,updated_at: at }).eq('workspace_id',workspaceId).eq('store_id',storeId).eq('updated_at',started);
-    if (complete.error) throw new Error('Status akhir sinkronisasi belum berhasil disimpan.');
+    const complete = await db.from('marketplace_parser_store_syncs').update({ status: 'ready',synced_at: at,bundle_count: bundles.length,updated_at: at }).eq('workspace_id',workspaceId).eq('store_id',storeId).eq('status','syncing').eq('updated_at',started).select('store_id').maybeSingle();
+    if (complete.error || !complete.data) throw new Error('Status akhir sinkronisasi belum berhasil disimpan.');
     await recordWarehouseActivityLog({ workspaceId,scope: 'scalev_catalog_sync',action: 'parser_store_sync',screen: 'marketplace-data-parser',summary: `Sinkronisasi ${bundles.length} bundle untuk ${store.data.store_name}`,businessCode: business.data.business_code,targetType: 'store',targetId: storeId,afterState: { bundles: bundles.length,syncedAt: at } });
     return { storeId,bundleCount: bundles.length,syncedAt: at };
   } catch (error) {
