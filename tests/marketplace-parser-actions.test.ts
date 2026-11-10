@@ -88,6 +88,11 @@ test('context retains an inactive selected Store for correction but does not que
   assert.ok(context.config.stores.some(scope => scope.storeId === 10));
   assert.deepEqual(catalogReads, [[], [11, 12, 20]]);
 });
+test('diagnosis context loads configuration and master metadata without loading the full selected bundle universe',async () => {
+  const context = await actions.getParserContext('workspace-a',false);
+  assert.equal(context.revision,3); assert.equal(context.config.accounts[0].id,settings.config.accounts[0].id);
+  assert.deepEqual(catalogReads,[[]]);
+});
 
 
 test('local isolation disables external sync before any cache mutation', async () => {

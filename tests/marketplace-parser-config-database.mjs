@@ -20,6 +20,8 @@ CREATE SCHEMA auth;
 CREATE TABLE auth.users (id uuid PRIMARY KEY);
 CREATE TABLE public.workspaces (id uuid PRIMARY KEY);
 CREATE TABLE public.scalev_store_channels (id integer PRIMARY KEY);
+CREATE TABLE public.scalev_webhook_businesses (id integer PRIMARY KEY);
+CREATE TABLE public.scalev_catalog_bundles (workspace_id uuid,business_id integer,custom_id text);
 CREATE TABLE public.scalev_catalog_bundle_store_links (workspace_id uuid,business_id integer,store_name text,scalev_bundle_id integer,is_available boolean);
 INSERT INTO public.workspaces VALUES ('00000000-0000-0000-0000-000000000001');
 ${read('../supabase/migrations/20261107195500_marketplace_parser_config.sql')}
@@ -75,6 +77,45 @@ BEGIN
   EXCEPTION WHEN check_violation THEN NULL; END;
 END $$;
 SELECT 'PASS: v1/v2 history preserved, v3 save audited, sync metadata protected, empty Store sync recorded';
+INSERT INTO public.scalev_catalog_bundles VALUES ('00000000-0000-0000-0000-000000000001',4,'EXISTING');
+${read('../supabase/migrations/20261110120000_parser_cached_diagnosis.sql')}
+DO $$
+DECLARE key_a text := repeat('a',64); key_b text := repeat('b',64); first_delay float8; second_delay float8; old_next timestamptz;
+BEGIN
+  IF (SELECT price_options IS NOT NULL OR scalev_owner_uid IS NOT NULL FROM public.scalev_catalog_bundles) THEN
+    RAISE EXCEPTION 'Legacy metadata must remain unknown, not fabricated';
+  END IF;
+  BEGIN
+    UPDATE public.scalev_catalog_bundles SET price_options='{}';
+    RAISE EXCEPTION 'Non-array options accepted';
+  EXCEPTION WHEN check_violation THEN NULL; END;
+  IF has_table_privilege('authenticated','public.scalev_api_request_budget','SELECT')
+    OR has_table_privilege('anon','public.scalev_api_request_budget','INSERT')
+    OR has_function_privilege('authenticated','public.reserve_scalev_api_request(text,timestamptz,boolean)','EXECUTE')
+    OR has_function_privilege('anon','public.reserve_scalev_api_request(text,timestamptz,boolean)','EXECUTE')
+    OR NOT has_function_privilege('service_role','public.reserve_scalev_api_request(text,timestamptz,boolean)','EXECUTE') THEN
+    RAISE EXCEPTION 'Request budget is not service-only';
+  END IF;
+  BEGIN
+    PERFORM public.reserve_scalev_api_request('raw-key-must-not-be-saved');
+    RAISE EXCEPTION 'Invalid hash accepted';
+  EXCEPTION WHEN raise_exception THEN
+    IF SQLERRM <> 'Invalid credential hash' THEN RAISE; END IF;
+  END;
+  first_delay := public.reserve_scalev_api_request(key_a);
+  second_delay := public.reserve_scalev_api_request(key_a);
+  IF first_delay > 5 OR second_delay < 200 OR second_delay > 251 THEN RAISE EXCEPTION 'Requests are not spaced by credential: %, %',first_delay,second_delay; END IF;
+  IF public.reserve_scalev_api_request(key_b) > 5 THEN RAISE EXCEPTION 'Independent key incorrectly delayed'; END IF;
+  IF public.reserve_scalev_api_request(key_a,NULL,true) <> 0 THEN RAISE EXCEPTION 'Cooldown check consumed/awaited a slot'; END IF;
+  PERFORM public.reserve_scalev_api_request(key_a,clock_timestamp()+interval '60 seconds');
+  SELECT next_at INTO old_next FROM public.scalev_api_request_budget WHERE key_hash=key_a;
+  IF public.reserve_scalev_api_request(key_a) < 59000
+    OR public.reserve_scalev_api_request(key_a,NULL,true) < 59000 THEN RAISE EXCEPTION 'Shared cooldown ignored'; END IF;
+  IF (SELECT next_at FROM public.scalev_api_request_budget WHERE key_hash=key_a) IS DISTINCT FROM old_next THEN RAISE EXCEPTION 'Long cooldown accumulated another reservation'; END IF;
+  PERFORM public.reserve_scalev_api_request(key_a,clock_timestamp()+interval '1 second');
+  IF public.reserve_scalev_api_request(key_a,NULL,true) < 59000 THEN RAISE EXCEPTION 'Cooldown was shortened by another caller'; END IF;
+END $$;
+SELECT 'PASS: legacy metadata retained, service-only shared request budget, staggered credentials and monotonic cooldown';
 `));
 } finally {
   docker('dropdb', ['--if-exists', database]);

@@ -1,6 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { fetchOrderDetail } from '../lib/scalev-api';
+import { createRequire } from 'node:module';
+const require = createRequire(import.meta.url);
+require.cache[require.resolve('../lib/scalev-request-budget')] = { exports: { scalevFetch: (_key: string,url: string,init: RequestInit) => fetch(url,init) } } as any;
+const { fetchOrderDetail } = require('../lib/scalev-api');
 
 test('ScaleV detail requests include a cancellation signal and propagate timeouts', async () => {
   const originalFetch = globalThis.fetch;

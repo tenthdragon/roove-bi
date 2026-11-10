@@ -41,6 +41,13 @@ export async function readParserCatalog(workspaceId: string, selectedStoreIds: n
   }).filter(w => w.businesses.length > 0);
   const chosen = catalog.stores.filter(s => selectedStoreIds.includes(s.id));
   if (chosen.length !== new Set(selectedStoreIds).size) throw new Error('Salah satu Store tidak aktif atau bukan milik workspace ini. Perbarui pengaturan Store.');
+  // Syncs write cache rows in batches. Observe their generation on both sides
+  // of the read so a partial or mixed snapshot cannot enable export.
+  const readSyncs = async () => ({
+    businesses: chosen.length ? await allPages<{ business_id: number; sync_status: string; updated_at: string }>((from,to) => db.from('scalev_catalog_sync_state').select('business_id,sync_status,updated_at').eq('workspace_id',workspaceId).in('business_id',catalog.businesses.filter(b => chosen.some(s => s.business === b.code)).map(b => b.id)).order('business_id').range(from,to)) : [],
+    stores: chosen.length ? await allPages<{ store_id: number; status: string; updated_at: string }>((from,to) => db.from('marketplace_parser_store_syncs').select('store_id,status,updated_at').eq('workspace_id',workspaceId).in('store_id',selectedStoreIds).order('store_id').range(from,to)) : [],
+  });
+  const before = await readSyncs();
   const bundles = new Map<string,CatalogBundle>();
   for (const business of catalog.businesses) {
     const selected = chosen.filter(s => s.business === business.code);
@@ -61,6 +68,15 @@ export async function readParserCatalog(workspaceId: string, selectedStoreIds: n
       const storeLinks = links.filter(link => link.store_name === store.name);
       const timestamps = storeLinks.map(link => String(link.last_checked_at)).sort();
       catalog.storeSyncs.push({ storeId: store.id,checkedAt: state?.synced_at || timestamps[0] || null,bundleCount: new Set(storeLinks.map(link => link.scalev_bundle_id)).size,status: state ? (state.status === 'ready' ? 'ready' : 'failed') : storeLinks.length ? 'ready' : 'unknown' });
+    }
+  }
+  const after = await readSyncs();
+  const incomplete = new Set(after.businesses.filter(s => ['running','failed'].includes(s.sync_status)).map(s => codes.get(s.business_id)));
+  const changed = JSON.stringify(before) !== JSON.stringify(after);
+  for (const store of chosen) {
+    if (changed || incomplete.has(store.business)) {
+      const state = catalog.storeSyncs.find(s => s.storeId === store.id);
+      if (state) state.status = 'failed';
     }
   }
   catalog.bundles = [...bundles.values()].sort((a,b) => a.business.localeCompare(b.business) || a.id - b.id);

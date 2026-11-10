@@ -9,6 +9,7 @@ export type BundleFinding = {
   installedStoreIds: number[];
   options: BundleOption[];
   canShare: boolean;
+  optionsSynced?: boolean;
 };
 export type SkuDiagnosis = {
   sku: string;
@@ -18,6 +19,7 @@ export type SkuDiagnosis = {
 };
 export type ParserDiagnosis = {
   checkedAt: string;
+  catalogSyncedAt?: string | null;
   business: string;
   account: string;
   stores: { id: number; name: string }[];

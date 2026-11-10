@@ -1,19 +1,24 @@
 import { createServiceSupabase } from '../service-supabase';
 import { recordWarehouseActivityLog } from '../warehouse-activity-log-actions';
 import { extractVisibleCatalogMetadata } from '../scalev-visible-entity-helpers';
+import { ParserScalevClient } from './scalev-client';
+import { cachedBundleMetadata } from './catalog-metadata';
+import { scalevFetch, scalevRetryDelay, ScalevThrottleError } from '../scalev-request-budget';
 
 const wait = (ms: number) => new Promise(resolve => setTimeout(resolve,ms));
-export async function readScalevPages(apiKey: string, path: string, fetcher: typeof fetch = fetch): Promise<any[]> {
+export async function readScalevPages(apiKey: string, path: string, fetcher?: typeof fetch): Promise<any[]> {
   if (!/^stores(?:\/\d+\/bundles)?$/.test(path)) throw new Error('Endpoint katalog tidak valid.');
   const output: any[] = [], seen = new Set<number>(); let lastId = 0;
   for (let page = 0; page < 1000; page++) {
     let response: Response | undefined;
     for (let attempt = 0; attempt < 5; attempt++) {
-      response = await fetcher(`https://api.scalev.id/v2/${path}?page_size=25${lastId ? `&last_id=${lastId}` : ''}`,{ headers: { Authorization: `Bearer ${apiKey}` },redirect: 'error',cache: 'no-store',signal: AbortSignal.timeout(30000) });
+      response = await (fetcher || ((url,init) => scalevFetch(apiKey,String(url),init)))(`https://api.scalev.id/v2/${path}?page_size=25${lastId ? `&last_id=${lastId}` : ''}`,{ headers: { Authorization: `Bearer ${apiKey}` },redirect: 'error',cache: 'no-store',signal: AbortSignal.timeout(30000) });
       if (response.ok) break;
       if (attempt === 4 || (response.status !== 429 && response.status < 500)) throw new Error(`Scalev belum dapat dibaca (HTTP ${response.status}). Coba sinkronkan lagi.`);
-      const retry = Number(response.headers.get('retry-after'));
-      await response.text(); await wait(Number.isFinite(retry) && retry > 0 ? Math.min(retry * 1000,60000) : 1500 * (attempt + 1));
+      const delay = scalevRetryDelay(response,attempt);
+      await response.text();
+      if (delay > 20000) throw new ScalevThrottleError(Date.now() + delay);
+      await wait(delay);
     }
     const json = await response!.json();
     if (json.code !== 200 || !Array.isArray(json.data?.results) || typeof json.data?.has_next !== 'boolean') throw new Error('Respons katalog Scalev tidak lengkap. Data lama tidak diganti.');
@@ -59,7 +64,11 @@ export async function syncParserStore(workspaceId: string, storeId: number, leas
     if (matching.length !== 1) throw new Error('Nama Store di aplikasi tidak cocok dengan satu Store Scalev. Perbarui master Store terlebih dahulu.');
     const liveStore = matching[0];
     if (lease && liveStore.id !== lease.scalevStoreId) throw new Error('Identitas Store berubah setelah perbaikan. Perbarui master Store lalu sinkronkan kembali.');
-    const bundles = await readScalevPages(business.data.api_key,`stores/${liveStore.id}/bundles`);
+    const client = new ParserScalevClient(business.data.api_key);
+    const identity = await client.identity();
+    const savedIdentity = await db.from('scalev_webhook_businesses').update({ scalev_business_uid: identity.unique_id }).eq('workspace_id',workspaceId).eq('id',business.data.id);
+    if (savedIdentity.error) throw new Error('Identitas Business belum berhasil disimpan.');
+    const bundles = await client.catalogBundles(liveStore.id);
     const at = new Date().toISOString();
     await assertParserStoreClaim(workspaceId,storeId,started);
     for (let offset = 0; offset < bundles.length; offset += 200) {
@@ -69,8 +78,8 @@ export async function syncParserStore(workspaceId: string, storeId: number, leas
       if (old.error) throw new Error('Metadata bundle lama belum dapat dibaca.');
       const payload = batch.map(bundle => {
         const previous = old.data?.find(row => row.scalev_bundle_id === bundle.id);
-        const metadata = previous || extractVisibleCatalogMetadata({ viewerBusinessId: business.data.id,viewerBusinessCode: business.data.business_code,source: bundle });
-        return { workspace_id: workspaceId,business_id: business.data.id,business_code: business.data.business_code,scalev_bundle_id: bundle.id,name: String(bundle.name || bundle.public_name || bundle.display || bundle.id),public_name: bundle.public_name || null,display: bundle.display || null,custom_id: bundle.custom_id || null,weight_bump: bundle.weight_bump ?? null,is_bundle_sharing: Boolean(bundle.is_bundle_sharing),price_options_count: Array.isArray(bundle.bundle_price_options) ? bundle.bundle_price_options.length : 0,last_synced_at: at,visibility_kind: metadata.visibility_kind,owner_business_id: metadata.owner_business_id,owner_business_code: metadata.owner_business_code,processor_business_id: metadata.processor_business_id,processor_business_code: metadata.processor_business_code };
+        const metadata = previous || extractVisibleCatalogMetadata({ viewerBusinessId: business.data.id,viewerBusinessCode: business.data.business_code,source: {} });
+        return { workspace_id: workspaceId,business_id: business.data.id,business_code: business.data.business_code,scalev_bundle_id: bundle.id,name: String(bundle.name || bundle.public_name || bundle.display || bundle.id),public_name: bundle.public_name || null,display: bundle.display || null,weight_bump: bundle.weight_bump ?? null,is_bundle_sharing: Boolean(bundle.is_bundle_sharing),custom_id: bundle.custom_id?.trim() || null,price_options_count: bundle.bundle_price_options?.length || 0,...cachedBundleMetadata(bundle,bundle.bundle_price_options || null),last_synced_at: at,visibility_kind: metadata.visibility_kind,owner_business_id: metadata.owner_business_id,owner_business_code: metadata.owner_business_code,processor_business_id: metadata.processor_business_id,processor_business_code: metadata.processor_business_code };
       });
       const saved = await db.from('scalev_catalog_bundles').upsert(payload,{ onConflict: 'business_id,scalev_bundle_id' });
       if (saved.error) throw new Error('Bundle belum berhasil disimpan. Sinkronkan ulang sebelum download.');

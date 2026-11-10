@@ -13,7 +13,7 @@ const button = (root: ReactTestInstance,name: string) => root.findAllByType('but
 function fixture() {
   const data: ParserDiagnosis = { checkedAt: '2026-11-10T08:00:00Z',business: 'RTI',account: 'Shopee Roove',stores: [{ id: 10,name: 'Marketplace' }],suggestedStoreId: 10,issues: [],token: 'test',items: [{ sku: 'ROV20-295',status: 'found',message: 'Perlu sharing',bundles: [{ id: 2,name: 'Roove 20',sku: 'ROV20-295',owner: 'RLB',ownerBusinessId: 8,availableInBusiness: false,installedStoreIds: [],canShare: true,options: [{ id: 1,name: '250',price: '250000' },{ id: 2,name: '295',price: '295000' }] }] }] };
   const calls: RepairRequest[] = [];
-  const props = { workspace: 'w',account: 'roove',revision: 3,skus: ['ROV20-295'],enabled: true,canManage: true,busy: false,dirty: false,diagnose: async () => structuredClone(data),repair: async (request: RepairRequest): Promise<RepairResult> => { calls.push(request); return { items: [],synced: true,message: 'Batch divalidasi ulang' }; },openSettings() {} };
+  const props = { workspace: 'w',account: 'roove',revision: 3,skus: ['ROV20-295'],canSync: true,canManage: true,busy: false,dirty: false,diagnose: async () => structuredClone(data),repair: async (request: RepairRequest): Promise<RepairResult> => { calls.push(request); return { items: [],synced: true,message: 'Batch divalidasi ulang' }; },openSettings() {} };
   return { data,calls,props };
 }
 test('inline diagnosis displays owner and target, asks for multiple BPO choices and never infers from SKU price',async () => {
@@ -35,10 +35,10 @@ test('installed bundle offers catalog refresh, and readers cannot share or attac
   let view: ReturnType<typeof create>; await act(async () => { view = create(<Diagnosis {...f.props}/>); });
   try {
     assert.equal(button(view!.root,'Bagikan & tambahkan ke Store').props.disabled,true);
-    await act(async () => button(view!.root,'Perbarui katalog').props.onClick());
+    await act(async () => button(view!.root,'Sinkronkan Store dari Scalev').props.onClick());
     assert.equal(f.calls[0].mode,'refresh'); assert.deepEqual(f.calls[0].items,[]);
     f.data.items[0].bundles[0].installedStoreIds = [10];
-    await act(async () => button(view!.root,'Periksa ulang Scalev').props.onClick());
+    await act(async () => button(view!.root,'Muat ulang data aplikasi').props.onClick());
     assert.match(content(view!.root),/Sudah terpasang/); assert.equal(button(view!.root,'Bagikan & tambahkan ke Store'),undefined);
   } finally { view!.unmount(); }
 });
@@ -53,6 +53,18 @@ test('bulk action honors selected bundles and explicitly labels cross-Business s
     assert.equal(f.calls[0].items.length,1); assert.equal(f.calls[0].items[0].sku,'ROV20-295');
   } finally { view!.unmount(); }
 });
+test('unknown cached BPOs ask for explicit sync; database reload never triggers a repair',async () => {
+  const f = fixture(); f.data.items[0].bundles[0].options = []; f.data.items[0].bundles[0].optionsSynced = false;
+  let view: ReturnType<typeof create>; await act(async () => { view = create(<Diagnosis {...f.props}/>); });
+  try {
+    assert.match(content(view!.root),/Pilihan harga belum tersinkron/);
+    assert.equal(button(view!.root,'Bagikan & tambahkan ke Store'),undefined);
+    await act(async () => button(view!.root,'Muat ulang data aplikasi').props.onClick());
+    assert.deepEqual(f.calls,[]);
+    await act(async () => button(view!.root,'Sinkronkan Store dari Scalev').props.onClick());
+    assert.equal(f.calls[0].mode,'refresh');
+  } finally { view!.unmount(); }
+});
 test('diagnosis failures allow retry; a late response cannot overwrite a different account',async () => {
   const f = fixture(); let resolve: (value: ParserDiagnosis) => void = () => {};
   f.props.diagnose = async () => new Promise(r => { resolve = r; });
@@ -62,28 +74,28 @@ test('diagnosis failures allow retry; a late response cannot overwrite a differe
   assert.match(content(view!.root),/Shopee Pluve/); assert.doesNotMatch(content(view!.root),/Shopee Roove/); view!.unmount();
   let attempts = 0;
   await act(async () => { view = create(<Diagnosis {...f.props} diagnose={async () => { if (++attempts === 1) throw new Error('Scalev offline'); return f.data; }}/>); });
-  try { assert.match(content(view!.root),/Scalev offline/); await act(async () => button(view!.root,'Periksa ulang Scalev').props.onClick()); assert.match(content(view!.root),/Pemilik: RLB/); }
+  try { assert.match(content(view!.root),/Scalev offline/); await act(async () => button(view!.root,'Muat ulang data aplikasi').props.onClick()); assert.match(content(view!.root),/Pemilik: RLB/); }
   finally { view!.unmount(); }
 });
-test('local mode and unsaved configuration prevent external diagnosis',async () => {
+test('local mode allows database diagnosis but blocks sync; unsaved rules block diagnosis',async () => {
   const f = fixture(); let calls = 0; f.props.diagnose = async () => { calls++; return f.data; };
   let view: ReturnType<typeof create>;
-  await act(async () => { view = create(<Diagnosis {...f.props} enabled={false}/>); });
-  assert.equal(calls,0); view!.unmount();
+  await act(async () => { view = create(<Diagnosis {...f.props} canSync={false}/>); });
+  assert.equal(calls,1); assert.equal(button(view!.root,'Sinkronkan Store dari Scalev').props.disabled,true); view!.unmount();
   await act(async () => { view = create(<Diagnosis {...f.props} dirty/>); });
-  assert.equal(calls,0); assert.match(content(view!.root),/Simpan atau batalkan/); view!.unmount();
+  assert.equal(calls,1); assert.match(content(view!.root),/Simpan atau batalkan/); view!.unmount();
 });
-test('an incomplete production diagnosis explains rate limiting, offers retry, and exposes no mutation controls',async () => {
+test('an incomplete database diagnosis explains a failed sync, offers retry, and exposes no mutation controls',async () => {
   const f = fixture(); let calls = 0;
-  const failed: ParserDiagnosis = { ...f.data,stores: [],suggestedStoreId: null,token: '',issues: ['Scalev sedang membatasi jumlah permintaan (HTTP 429). Tunggu sebentar, lalu pilih Periksa ulang Scalev.'],items: [{ sku: 'ROV20-295',status: 'unavailable',bundles: [],message: 'Pemeriksaan belum selesai.' }] };
+  const failed: ParserDiagnosis = { ...f.data,stores: [],suggestedStoreId: null,token: '',issues: ['Sinkronisasi katalog belum selesai. Muat ulang data aplikasi setelah sinkronisasi.'],items: [{ sku: 'ROV20-295',status: 'unavailable',bundles: [],message: 'Pemeriksaan belum selesai.' }] };
   let view: ReturnType<typeof create>;
   await act(async () => { view = create(<Diagnosis {...f.props} diagnose={async () => ++calls === 1 ? failed : f.data}/>); });
   try {
-    assert.match(content(view!.root),/HTTP 429/);
+    assert.match(content(view!.root),/Sinkronisasi katalog belum selesai/g);
     assert.equal(button(view!.root,'Bagikan & tambahkan ke Store'),undefined);
-    assert.equal(button(view!.root,'Perbarui katalog').props.disabled,true);
-    await act(async () => button(view!.root,'Periksa ulang Scalev').props.onClick());
-    assert.match(content(view!.root),/Pemilik: RLB/); assert.doesNotMatch(content(view!.root),/HTTP 429/);
+    assert.equal(button(view!.root,'Sinkronkan Store dari Scalev').props.disabled,true);
+    await act(async () => button(view!.root,'Muat ulang data aplikasi').props.onClick());
+    assert.match(content(view!.root),/Pemilik: RLB/); assert.doesNotMatch(content(view!.root),/Sinkronisasi katalog belum selesai/g);
     assert.equal(f.calls.length,0);
   } finally { view!.unmount(); }
 });

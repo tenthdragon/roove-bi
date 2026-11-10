@@ -1,5 +1,7 @@
 'use server';
 
+import { scalevFetch } from './scalev-request-budget';
+
 import { createServiceSupabase } from '@/lib/supabase-server';
 import {
   requireDashboardPermissionAccess,
@@ -405,7 +407,7 @@ async function fetchScalevBundleDetail(
   apiKey: string,
   bundleId: number,
 ): Promise<ScalevBundleDetailApi> {
-  const response = await fetch(`${SCALEV_BASE_URL}/bundles/${bundleId}`, {
+  const response = await scalevFetch(apiKey,`${SCALEV_BASE_URL}/bundles/${bundleId}`, {
     headers: {
       Authorization: `Bearer ${apiKey}`,
     },

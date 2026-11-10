@@ -7,6 +7,7 @@ require.cache[require.resolve('../lib/warehouse-activity-log-actions')] = { expo
 const { allPages, readParserCatalog } = require('../lib/marketplace-parser/catalog') as typeof import('../lib/marketplace-parser/catalog');
 const { readScalevPages } = require('../lib/marketplace-parser/sync') as typeof import('../lib/marketplace-parser/sync');
 let rows: Record<string, any[]> = {}, queries: { table: string; filters: [string,string,unknown][]; columns: string }[] = [];
+let onRead: ((table: string) => void) | undefined;
 function from(table: string) {
   const filters: [string,string,unknown][] = []; let columns = '', start = 0, end = Infinity;
   const q: any = {
@@ -14,15 +15,17 @@ function from(table: string) {
     in(key: string, value: unknown[]) { filters.push(['in', key, value]); return q; }, not(key: string, op: string, value: unknown) { assert.equal(op, 'is'); filters.push(['not', key, value]); return q; },
     order() { return q; }, range(a: number, b: number) { start = a; end = b; return q; },
     then(resolve: (value: any) => void) {
+      onRead?.(table);
       queries.push({ table, filters, columns });
       assert.ok(filters.some(([op,key,value]) => op === 'eq' && key === 'workspace_id' && value === 'workspace-a'), `${table} must be workspace scoped`);
       assert.ok(!/api_key|\*/.test(columns), 'The browser catalog never contains credentials');
-      resolve({ data: (rows[table] || []).filter(row => filters.every(([op,key,value]) => op === 'eq' ? row[key] === value : op === 'in' ? (value as any[]).includes(row[key]) : row[key] !== value)).slice(start, end + 1), error: null });
+      resolve({ data: structuredClone((rows[table] || []).filter(row => filters.every(([op,key,value]) => op === 'eq' ? row[key] === value : op === 'in' ? (value as any[]).includes(row[key]) : row[key] !== value)).slice(start, end + 1)), error: null });
     },
   }; return q;
 }
 beforeEach(() => {
   queries = [];
+  onRead = undefined;
   const row = (data: any) => ({ workspace_id: 'workspace-a', is_active: true, ...data });
   rows = {
     scalev_webhook_businesses: [row({ id: 4,business_code: 'RTI',business_name: 'Business RTI' }),row({ id: 2,business_code: 'JHN',business_name: 'Business JHN' })],
@@ -67,6 +70,16 @@ test('catalog pagination reads past the database page limit and propagates incom
   const data = Array.from({ length: 1001 }, (_,id) => ({ id }));
   assert.equal((await allPages(async (from,to) => ({ data: data.slice(from,to + 1),error: null }))).length, 1001);
   await assert.rejects(allPages(async () => ({ data: null,error: { message: 'failed' } })), /belum dapat dimuat/);
+});
+test('Business sync failure and an intervening Store sync cannot unlock a partially updated catalog',async () => {
+  rows.scalev_catalog_sync_state = [{ workspace_id: 'workspace-a',business_id: 4,sync_status: 'failed',updated_at: 'before' }];
+  assert.equal((await readParserCatalog('workspace-a',[10])).storeSyncs[0].status,'failed');
+  rows.scalev_catalog_sync_state[0].sync_status = 'success';
+  rows.marketplace_parser_store_syncs = [{ workspace_id: 'workspace-a',store_id: 10,status: 'ready',synced_at: '2026-11-09',updated_at: 'before' }];
+  onRead = table => { if (table === 'scalev_catalog_bundles') rows.marketplace_parser_store_syncs[0].updated_at = 'after'; };
+  assert.equal((await readParserCatalog('workspace-a',[10])).storeSyncs[0].status,'failed');
+  onRead = undefined;
+  assert.equal((await readParserCatalog('workspace-a',[10])).storeSyncs[0].status,'ready');
 });
 const page = (ids: number[], hasNext: boolean, lastId?: number) => new Response(JSON.stringify({ code: 200,data: { results: ids.map(id => ({ id })),has_next: hasNext,last_id: lastId } }));
 test('Scalev pagination uses the cursor, rejects repeats/incomplete responses, and restricts endpoints', async () => {

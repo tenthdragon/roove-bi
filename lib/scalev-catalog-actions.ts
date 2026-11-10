@@ -1,5 +1,9 @@
 'use server';
 
+import { ParserScalevClient, type ScalevBusiness } from './marketplace-parser/scalev-client';
+import { cachedBundleMetadata } from './marketplace-parser/catalog-metadata';
+import { scalevFetch, scalevRetryDelay, ScalevThrottleError } from './scalev-request-budget';
+
 import { createServiceSupabase } from '@/lib/supabase-server';
 import {
   requireDashboardPermissionAccess,
@@ -20,7 +24,6 @@ const UPSERT_CHUNK_SIZE = 200;
 const SCALEV_REQUEST_SPACING_MS = 250;
 const SCALEV_ENDPOINT_SPACING_MS = 750;
 const SCALEV_MAX_RETRIES = 4;
-const SCALEV_RETRY_BASE_MS = 1_500;
 const CATALOG_SYNC_BUSINESS_CONCURRENCY = 2;
 const VISIBLE_CUTOVER_BUNDLE_BUSINESS_CONCURRENCY = 2;
 const VISIBLE_CUTOVER_BUNDLE_BATCH_SIZE = 160;
@@ -217,11 +220,16 @@ type ScalevVariantApi = {
 };
 
 type ScalevBundlePriceOptionApi = {
+  id: number;
+  name: string;
+  price: string;
+  is_active?: boolean;
   unique_id?: string | null;
   slug?: string | null;
 };
 
 type ScalevBundleApi = {
+  business?: ScalevBusiness;
   id: number;
   name?: string | null;
   public_name?: string | null;
@@ -418,29 +426,6 @@ function sleep(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-function parseRetryAfterMs(headerValue: string | null): number | null {
-  if (!headerValue) return null;
-
-  const seconds = Number(headerValue);
-  if (Number.isFinite(seconds) && seconds >= 0) {
-    return seconds * 1000;
-  }
-
-  const targetMs = Date.parse(headerValue);
-  if (!Number.isFinite(targetMs)) return null;
-
-  return Math.max(0, targetMs - Date.now());
-}
-
-function getScalevRetryDelayMs(response: Response, attempt: number): number {
-  const retryAfterMs = parseRetryAfterMs(response.headers.get('retry-after'));
-  if (retryAfterMs != null && retryAfterMs > 0) {
-    return retryAfterMs;
-  }
-
-  return SCALEV_RETRY_BASE_MS * Math.max(1, attempt + 1);
-}
-
 async function getCatalogSchemaState(workspaceId: string): Promise<{ ready: boolean; message: string | null }> {
   const svc = createServiceSupabase();
   const { error: productError } = await svc
@@ -490,7 +475,7 @@ async function fetchScalevPaginatedResults<T>(
     let response: Response | null = null;
 
     for (let attempt = 0; attempt <= SCALEV_MAX_RETRIES; attempt += 1) {
-      response = await fetch(url, {
+      response = await scalevFetch(apiKey,url, {
         headers: {
           Authorization: `Bearer ${apiKey}`,
         },
@@ -504,7 +489,10 @@ async function fetchScalevPaginatedResults<T>(
         throw new Error(`Scalev API error ${response.status} for ${path}`);
       }
 
-      await sleep(getScalevRetryDelayMs(response, attempt));
+      const delay = scalevRetryDelay(response,attempt);
+      await response.text();
+      if (delay > 20000) throw new ScalevThrottleError(Date.now() + delay);
+      await sleep(delay);
     }
 
     if (!response || !response.ok) {
@@ -868,6 +856,7 @@ function buildCatalogPayload(
       business_id: business.id,
       business_code: business.business_code,
       scalev_bundle_id: Number(bundle.id),
+      ...cachedBundleMetadata(bundle,bundle.bundle_price_options || null),
       name: bundleName,
       public_name: bundlePublicName,
       display: bundleDisplay,
@@ -1178,7 +1167,11 @@ async function performScalevCatalogSync(
     const syncAt = new Date().toISOString();
     const products = await fetchScalevPaginatedResults<ScalevProductApi>(business.api_key, 'products');
     await sleep(SCALEV_ENDPOINT_SPACING_MS);
-    const bundles = await fetchScalevPaginatedResults<ScalevBundleApi>(business.api_key, 'bundles/simplified');
+    const client = new ParserScalevClient(business.api_key);
+    const identity = await client.identity();
+    const identitySaved = await createServiceSupabase().from('scalev_webhook_businesses').update({ scalev_business_uid: identity.unique_id }).eq('workspace_id',workspaceId).eq('id',business.id);
+    if (identitySaved.error) throw new Error('Identitas Business belum berhasil disimpan.');
+    const bundles = await client.catalogBundles();
 
     const payload = buildCatalogPayload(business, products, bundles, syncAt);
 
