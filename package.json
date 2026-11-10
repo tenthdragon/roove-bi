@@ -24,6 +24,7 @@
     "test:warehouse-mapping-targets": "tsx --test tests/warehouse-mapping-targets.test.ts",
     "test:source-class": "tsx --test tests/scalev-source-class.test.ts",
     "test:tax-withholding": "node --import tsx --test tests/tax-withholding-domain.test.ts",
+    "test:tax-withholding-db": "node tests/tax-withholding-access-database.mjs",
     "typecheck:app": "tsc --project tsconfig.json --noEmit",
     "check:app": "npm run typecheck:app && npm run lint && npm run build",
     "backfill:scalev-source-class": "tsx scripts/backfill-scalev-source-class.ts",
