@@ -57,21 +57,21 @@ wajib persis seperti ini.
 ```xml
 <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <BpuBulk xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
-  <TIN>0940424419429000</TIN>                       <!-- NPWP pemotong, [0-9]{15,16} -->
+  <TIN>1234567890123456</TIN>                       <!-- NPWP pemotong, [0-9]{15,16} -->
   <ListOfBpu>
     <Bpu>
       <TaxPeriodMonth>10</TaxPeriodMonth>           <!-- integer 1..12 -->
       <TaxPeriodYear>2026</TaxPeriodYear>
-      <CounterpartTin>0210893970035000</CounterpartTin>          <!-- NPWP/NIK 16 digit, nillable -->
-      <IDPlaceOfBusinessActivityOfIncomeRecipient>0210893970035000000000</IDPlaceOfBusinessActivityOfIncomeRecipient> <!-- TKU = NPWP + 000000 -->
+      <CounterpartTin>0987654321098765</CounterpartTin>          <!-- NPWP/NIK 16 digit, nillable -->
+      <IDPlaceOfBusinessActivityOfIncomeRecipient>0987654321098765000000</IDPlaceOfBusinessActivityOfIncomeRecipient> <!-- TKU = NPWP + 000000 -->
       <TaxCertificate>N/A</TaxCertificate>          <!-- enum: N/A TaxExAr22 TaxExAr23 TaxExIntDep TaxExIntPhtb DTP PP23 ETC -->
       <TaxObjectCode>24-104-24</TaxObjectCode>
       <TaxBase>2702.7027027027025</TaxBase>         <!-- decimal > 0, tidak dibulatkan -->
       <Rate>2</Rate>                                 <!-- decimal >= 0, dalam persen -->
       <Document>CommercialInvoice</Document>         <!-- enum, lihat §6.3 -->
-      <DocumentNumber>IVR/20261027/XXVI/X/3237706276</DocumentNumber>
+      <DocumentNumber>INV/2026/10/0001</DocumentNumber>
       <DocumentDate>2026-10-27</DocumentDate>        <!-- YYYY-MM-DD, nillable -->
-      <IDPlaceOfBusinessActivity>0940424419429000000000</IDPlaceOfBusinessActivity> <!-- TKU pemotong -->
+      <IDPlaceOfBusinessActivity>1234567890123456000000</IDPlaceOfBusinessActivity> <!-- TKU pemotong -->
       <GovTreasurerOpt>N/A</GovTreasurerOpt>         <!-- enum: N/A Imprest Direct -->
       <SP2DNumber xsi:nil="true"/>                   <!-- kosong → xsi:nil -->
       <WithholdingDate>2026-10-27</WithholdingDate>
