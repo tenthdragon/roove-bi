@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { setTimeout as sleep } from 'node:timers/promises';
 import { createClient } from '@supabase/supabase-js';
 
 export class ScalevThrottleError extends Error {
@@ -21,24 +22,33 @@ const reserve: Budget = async (hash,blockedUntil,checkOnly = false) => {
   if (result.error || typeof result.data !== 'number' || !Number.isFinite(result.data)) throw new Error('Antrean koneksi Scalev belum tersedia. Data aplikasi tetap dapat diperiksa.');
   return result.data;
 };
-export function createScalevFetch(budget: Budget = reserve, fetcher: typeof fetch = (...args) => fetch(...args), wait = (ms: number) => new Promise<void>(resolve => setTimeout(resolve,ms))) {
-  return async (key: string, url: string, init?: RequestInit): Promise<Response> => {
+export type ScalevRequestInit = RequestInit & { timeoutMs?: number };
+export function createScalevFetch(budget: Budget = reserve, fetcher: typeof fetch = (...args) => fetch(...args), wait = async (ms: number,signal?: AbortSignal | null) => { await sleep(ms,undefined,{ signal: signal || undefined }); }) {
+  return async (key: string, url: string, init: ScalevRequestInit = {}): Promise<Response> => {
     if (!key) throw new Error('Koneksi Business Scalev belum tersedia.');
     const destination = new URL(url);
     if (!['api.scalev.id','api.scalev.com'].includes(destination.hostname) || destination.protocol !== 'https:') throw new Error('Tujuan koneksi Scalev tidak valid.');
     const hash = createHash('sha256').update(key).digest('hex');
+    const { timeoutMs,signal,...request } = init;
+    signal?.throwIfAborted();
     // Recheck a newly announced cooldown after a queued slot wakes up.
     let delay = await budget(hash);
     for (let check = 0; ; check++) {
       if (delay > 20000 || check > 3) throw new ScalevThrottleError(Date.now() + delay);
-      if (delay > 0) await wait(Math.ceil(delay));
+      signal?.throwIfAborted();
+      if (delay > 0) await wait(Math.ceil(delay),signal);
       delay = await budget(hash,undefined,true);
       if (delay <= 0) break;
       // A cooldown invalidates our old slot. Reserve a new staggered slot so
       // queued requests do not all wake and hit Scalev at the reset boundary.
       delay = await budget(hash);
     }
-    const response = await fetcher(url,{ ...init,redirect: 'error' });
+    signal?.throwIfAborted();
+    // Queue time is not network time. Keep independent caller cancellation
+    // active, and only start the request deadline after acquiring its slot.
+    const timeout = timeoutMs === undefined ? undefined : AbortSignal.timeout(timeoutMs);
+    const requestSignal = signal && timeout ? AbortSignal.any([signal,timeout]) : signal || timeout;
+    const response = await fetcher(url,{ ...request,signal: requestSignal,redirect: 'error' });
     if (response.status === 429 || response.headers.get('x-ratelimit-remaining') === '0') {
       delay = scalevRetryDelay(response);
       await budget(hash,new Date(Date.now() + Math.max(delay,1000)).toISOString());

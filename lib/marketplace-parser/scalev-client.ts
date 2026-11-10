@@ -17,10 +17,12 @@ export class ParserScalevClient {
     for (let attempt = 0; ; attempt++) {
       let response: Response;
       try {
-        response = await (this.fetcher || ((url,init) => scalevFetch(this.key,String(url),init)))(`https://api.scalev.id/v3/${path}`, {
+        const url = `https://api.scalev.id/v3/${path}`;
+        const init: RequestInit = {
           method: body ? 'POST' : 'GET', headers: { Authorization: `Bearer ${this.key}`, ...(body ? { 'Content-Type': 'application/json' } : {}) },
-          ...(body ? { body: JSON.stringify(body) } : {}), redirect: 'error', cache: 'no-store', signal: AbortSignal.timeout(30000),
-        });
+          ...(body ? { body: JSON.stringify(body) } : {}), redirect: 'error', cache: 'no-store',
+        };
+        response = this.fetcher ? await this.fetcher(url,{ ...init,signal: AbortSignal.timeout(30000) }) : await scalevFetch(this.key,url,{ ...init,timeoutMs: 30000 });
       } catch (error) { if (error instanceof ScalevThrottleError) throw new ScalevReadError(429,error.message); throw new Error(body ? 'Hasil aksi Scalev belum dapat dipastikan. Periksa ulang sebelum melanjutkan; jangan menganggap aksi gagal.' : 'Scalev belum dapat dihubungi. Coba periksa lagi.'); }
       // Never automatically replay a write after a timeout or ambiguous response.
       if (!body && attempt < 2 && (response.status === 429 || response.status >= 500)) {

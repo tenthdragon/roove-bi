@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { setTimeout as sleep } from 'node:timers/promises';
 import { createScalevFetch, scalevRetryDelay, ScalevThrottleError } from '../lib/scalev-request-budget';
 
 test('Retry-After seconds/date takes precedence; epoch reset is respected without capping the provider cooldown',() => {
@@ -56,4 +57,32 @@ test('exhausted successful response announces shared reset; invalid destination 
   await assert.rejects(client('secret','https://attacker.invalid/'),/Tujuan/); assert.equal(calls,1);
   const unavailable = createScalevFetch(async () => { throw new Error('Budget unavailable'); },async () => { calls++; return new Response(); });
   await assert.rejects(unavailable('secret','https://api.scalev.id/v3/bundles'),/Budget unavailable/); assert.equal(calls,1);
+});
+
+test('a queue longer than the network deadline does not expire the request before it starts',async () => {
+  let calls = 0;
+  const client = createScalevFetch(async (_hash,_until,check) => check ? 0 : 50,async (_url,init) => {
+    calls++; assert.ok(init?.signal); assert.equal(init.signal.aborted,false);
+    await sleep(5); assert.equal(init.signal.aborted,false);
+    assert.equal('timeoutMs' in init,false);
+    return new Response();
+  });
+  await client('secret','https://api.scalev.id/v2/order/1',{ timeoutMs: 30 });
+  assert.equal(calls,1);
+});
+
+test('independent caller cancellation stops both queue waiting and an active network request',async () => {
+  let calls = 0;
+  const waiting = new AbortController();
+  const queued = createScalevFetch(async () => 19000,async () => { calls++; return new Response(); });
+  const pending = queued('secret','https://api.scalev.id/v2/order/1',{ signal: waiting.signal,timeoutMs: 15000 });
+  waiting.abort();
+  await assert.rejects(pending,{ name: 'AbortError' }); assert.equal(calls,0);
+  const active = new AbortController(), reason = new Error('Caller cancelled');
+  const fetching = createScalevFetch(async () => 0,async (_url,init) => {
+    assert.ok(init?.signal); active.abort(reason);
+    assert.equal(init.signal.aborted,true); init.signal.throwIfAborted();
+    return new Response();
+  });
+  await assert.rejects(fetching('secret','https://api.scalev.id/v2/order/1',{ signal: active.signal,timeoutMs: 15000 }),error => error === reason);
 });

@@ -12,7 +12,9 @@ export async function readScalevPages(apiKey: string, path: string, fetcher?: ty
   for (let page = 0; page < 1000; page++) {
     let response: Response | undefined;
     for (let attempt = 0; attempt < 5; attempt++) {
-      response = await (fetcher || ((url,init) => scalevFetch(apiKey,String(url),init)))(`https://api.scalev.id/v2/${path}?page_size=25${lastId ? `&last_id=${lastId}` : ''}`,{ headers: { Authorization: `Bearer ${apiKey}` },redirect: 'error',cache: 'no-store',signal: AbortSignal.timeout(30000) });
+      const url = `https://api.scalev.id/v2/${path}?page_size=25${lastId ? `&last_id=${lastId}` : ''}`;
+      const init: RequestInit = { headers: { Authorization: `Bearer ${apiKey}` },redirect: 'error',cache: 'no-store' };
+      response = fetcher ? await fetcher(url,{ ...init,signal: AbortSignal.timeout(30000) }) : await scalevFetch(apiKey,url,{ ...init,timeoutMs: 30000 });
       if (response.ok) break;
       if (attempt === 4 || (response.status !== 429 && response.status < 500)) throw new Error(`Scalev belum dapat dibaca (HTTP ${response.status}). Coba sinkronkan lagi.`);
       const delay = scalevRetryDelay(response,attempt);

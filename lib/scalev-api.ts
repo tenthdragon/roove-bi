@@ -168,7 +168,7 @@ export async function fetchOrderDetail(
 ): Promise<any> {
   const res = await scalevFetch(apiKey,`${baseUrl}/order/${orderId}`, {
     headers: { 'Authorization': `Bearer ${apiKey}` },
-    signal: AbortSignal.timeout(15000),
+    timeoutMs: 15000,
   });
 
   if (!res.ok) {
