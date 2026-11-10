@@ -106,12 +106,13 @@ test('master sheet parser maps legacy columns, identities and facilities', () =>
     [null, 7, 'RUSAK', '12.345', null, null, 'NPWP', null, null, null, null, null, null, null, null, null, null],
     [null, 8, 'HALODOC', '99.900.000.0-099.9000', null, null, 'NPWP', null, null, null, null, null, null, null, null, null, null],
     [null, 9, 'BAGAS', null, '327312411297000', '327312411297000', 'NIK', null, null, null, null, null, null, null, null, null, null],
+    [null, 10, 'DELLA DENGAN PLACEHOLDER', '99.900.000.0-099.9000', '3273124112970001', '3273124112970001', 'NIK', null, null, null, null, null, null, null, null, null, null],
     [null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null],
   ];
 
   const parsed = parseCounterpartyMaster(rows);
   assert.equal(parsed.headerRowNumber, 2);
-  assert.equal(parsed.rows.length, 7);
+  assert.equal(parsed.rows.length, 8);
 
   const tokopedia = parsed.rows[0];
   assert.equal(tokopedia.identity_type, 'npwp');
@@ -143,6 +144,10 @@ test('master sheet parser maps legacy columns, identities and facilities', () =>
   assert.equal(noIdentity.identity_type, 'unknown');
   assert.equal(noIdentity.identity_number, 'TIDAK ADA IDENTITAS');
   assert.ok(noIdentity.warnings.some((w) => /placeholder/.test(w)));
+
+  const nikOverPlaceholder = parsed.rows[7];
+  assert.equal(nikOverPlaceholder.identity_type, 'nik');
+  assert.equal(nikOverPlaceholder.identity_number, '3273124112970001');
 
   const badNik = parsed.rows[6];
   assert.equal(badNik.identity_type, 'unknown');

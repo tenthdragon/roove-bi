@@ -178,13 +178,14 @@ export function parseCounterpartyMaster(rows: SheetRow[]): ParsedMaster {
       if (npwpDigits && !isPlaceholderNpwp) {
         warnings.push(`Vendor luar negeri juga memiliki NPWP ${npwpDigits}; disimpan di catatan.`);
       }
-    } else if (isPlaceholderNpwp || (!npwpDigits && !cellText(nikRaw))) {
+    } else if ((isPlaceholderNpwp || !npwpDigits) && !cellText(nikRaw)) {
       identityType = 'unknown';
       identityNumber = UNKNOWN_IDENTITY_PLACEHOLDER;
       warnings.push(isPlaceholderNpwp
         ? 'NPWP placeholder (999...) untuk vendor dalam negeri; lengkapi NPWP/NIK sebelum dipakai di bukti potong.'
         : 'Tidak ada NPWP maupun NIK; lengkapi identitas sebelum dipakai di bukti potong.');
-    } else if (statusText === 'NIK' || (!npwpDigits && cellText(nikRaw))) {
+    } else if (statusText === 'NIK' || ((isPlaceholderNpwp || !npwpDigits) && cellText(nikRaw))) {
+      // A supplied KTP/NIK wins over a placeholder NPWP; a legacy row may also keep the NIK in the NPWP column.
       const nikSource = cellText(nikRaw) ? nikRaw : npwpRaw;
       const nik = normalizeNik(nikSource);
       if (nik.error) {

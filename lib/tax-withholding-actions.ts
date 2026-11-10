@@ -34,6 +34,22 @@ const TAB_ID = 'tax-withholding';
 const TAB_LABEL = 'Bukti Potong (PPh)';
 const MANAGE_ROLES = ['owner', 'admin', 'direktur_finance', 'staf_finance'];
 const MAX_IMPORT_BYTES = 15 * 1024 * 1024;
+// PostgREST caps a single response (1,000 rows by default), so every
+// whole-workspace read pages until a short page comes back.
+const PAGE_SIZE = 1000;
+
+type PageResult<T> = { data: T[] | null; error: { message: string } | null };
+
+async function fetchAllRows<T>(page: (from: number, to: number) => PromiseLike<PageResult<T>>): Promise<T[]> {
+  const rows: T[] = [];
+  for (let from = 0; ; from += PAGE_SIZE) {
+    const result = await page(from, from + PAGE_SIZE - 1);
+    if (result.error) throw result.error;
+    const chunk = result.data ?? [];
+    rows.push(...chunk);
+    if (chunk.length < PAGE_SIZE) return rows;
+  }
+}
 
 export type TaxBusiness = { id: number; business_code: string; business_name: string; is_active: boolean };
 
@@ -112,16 +128,20 @@ export async function getTaxWithholdingBootstrap(): Promise<TaxWithholdingBootst
       .select('id, business_id, legal_name, npwp, tku_id, city, signer_name, signer_title, signer_npwp, is_active, updated_at')
       .eq('workspace_id', workspaceId)
       .order('legal_name'),
-    svc
+    fetchAllRows<Omit<TaxCounterparty, 'facilities'>>((from, to) => svc
       .from('tax_counterparties')
       .select('id, name, identity_type, identity_number, is_pkp, country_code, address, phone, notes, is_active, updated_at')
       .eq('workspace_id', workspaceId)
-      .order('name'),
-    svc
+      .order('name')
+      .order('id')
+      .range(from, to)),
+    fetchAllRows<TaxCounterpartyFacility>((from, to) => svc
       .from('tax_counterparty_facilities')
       .select('id, counterparty_id, facility_code, document_number, applies_to, rate_override, valid_from, valid_to, notes')
       .eq('workspace_id', workspaceId)
-      .order('valid_from', { ascending: false, nullsFirst: false }),
+      .order('valid_from', { ascending: false, nullsFirst: false })
+      .order('id')
+      .range(from, to)),
     svc
       .from('tax_object_codes')
       .select('code', { count: 'exact', head: true })
@@ -130,12 +150,10 @@ export async function getTaxWithholdingBootstrap(): Promise<TaxWithholdingBootst
 
   if (businesses.error) throw businesses.error;
   if (entities.error) throw entities.error;
-  if (counterparties.error) throw counterparties.error;
-  if (facilities.error) throw facilities.error;
   if (objectCodes.error) throw objectCodes.error;
 
   const facilitiesByCounterparty = new Map<number, TaxCounterpartyFacility[]>();
-  for (const facility of (facilities.data ?? []) as TaxCounterpartyFacility[]) {
+  for (const facility of facilities) {
     const list = facilitiesByCounterparty.get(facility.counterparty_id) ?? [];
     list.push({ ...facility, rate_override: facility.rate_override === null ? null : Number(facility.rate_override) });
     facilitiesByCounterparty.set(facility.counterparty_id, list);
@@ -145,7 +163,7 @@ export async function getTaxWithholdingBootstrap(): Promise<TaxWithholdingBootst
     canManage,
     businesses: (businesses.data ?? []) as TaxBusiness[],
     entities: (entities.data ?? []) as TaxWithholdingEntity[],
-    counterparties: ((counterparties.data ?? []) as Omit<TaxCounterparty, 'facilities'>[]).map((row) => ({
+    counterparties: counterparties.map((row) => ({
       ...row,
       facilities: facilitiesByCounterparty.get(row.id) ?? [],
     })),
@@ -333,12 +351,12 @@ async function readMasterSheet(formData: FormData): Promise<{ fileName: string; 
 
 async function loadExistingCounterparties(workspaceId: string): Promise<ExistingCounterparty[]> {
   const svc = createServiceSupabase();
-  const result = await svc
+  return fetchAllRows<ExistingCounterparty>((from, to) => svc
     .from('tax_counterparties')
     .select('id, name, identity_type, identity_number, is_pkp, country_code, address, notes')
-    .eq('workspace_id', workspaceId);
-  if (result.error) throw result.error;
-  return (result.data ?? []) as ExistingCounterparty[];
+    .eq('workspace_id', workspaceId)
+    .order('id')
+    .range(from, to));
 }
 
 function matchExisting(row: ParsedCounterparty, existing: ExistingCounterparty[]) {
@@ -483,15 +501,15 @@ export async function commitCounterpartyImport(formData: FormData): Promise<Coun
   let facilitiesInserted = 0;
   const targetIds = facilityTargets.map((target) => target.counterpartyId).filter((id): id is number => id !== null);
   if (targetIds.length > 0) {
-    const existingFacilities = await svc
+    type FacilityKeyRow = { counterparty_id: number; facility_code: string; document_number: string | null };
+    const existingFacilities = await fetchAllRows<FacilityKeyRow>((from, to) => svc
       .from('tax_counterparty_facilities')
       .select('counterparty_id, facility_code, document_number')
       .eq('workspace_id', workspaceId)
-      .in('counterparty_id', targetIds);
-    if (existingFacilities.error) throw existingFacilities.error;
+      .order('id')
+      .range(from, to));
     const seen = new Set(
-      (existingFacilities.data ?? []).map((item: { counterparty_id: number; facility_code: string; document_number: string | null }) =>
-        `${item.counterparty_id}|${item.facility_code}|${item.document_number ?? ''}`),
+      existingFacilities.map((item) => `${item.counterparty_id}|${item.facility_code}|${item.document_number ?? ''}`),
     );
     const facilityRows: Record<string, unknown>[] = [];
     for (const target of facilityTargets) {
