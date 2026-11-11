@@ -214,15 +214,13 @@ export function parseRekapan(rows: SheetRow[], options: DateOptions = {}): Parse
 
     const warnings: string[] = [];
     const periodText = cellText(get(row, 'period'));
-    let periodMonth = Number(periodText);
-    let periodYear = Number(invoiceDate.slice(0, 4));
-    if (!Number.isInteger(periodMonth) || periodMonth < 1 || periodMonth > 12) {
-      periodMonth = Number(invoiceDate.slice(5, 7));
-      if (periodText) warnings.push(`Masa "${periodText}" tidak dikenali; dipakai bulan tanggal invoice.`);
-    } else if (periodMonth !== Number(invoiceDate.slice(5, 7))) {
-      warnings.push(`Masa ${periodText} berbeda dari bulan tanggal invoice ${invoiceDate}; masa dari sheet dipakai.`);
-      if (periodMonth === 12 && Number(invoiceDate.slice(5, 7)) === 1) periodYear -= 1;
+    const resolvedPeriod = resolvePeriod(periodText, invoiceDate);
+    if (resolvedPeriod.error) {
+      issues.push({ level: 'error', rowNumber, name, message: resolvedPeriod.error });
+      continue;
     }
+    const { month: periodMonth, year: periodYear } = resolvedPeriod;
+    if (resolvedPeriod.warning) warnings.push(resolvedPeriod.warning);
 
     const rateRaw = get(row, 'rate');
     let workbookRatePercent: string | null = null;
@@ -336,6 +334,44 @@ export function matchRekapanCounterparty(row: Pick<ParsedRekapanRow, 'counterpar
   }
   if (byIdentity) return { counterparty: byIdentity, problem: null };
   return { counterparty: null, problem: 'Lawan transaksi tidak ditemukan di master; tambahkan dahulu.' };
+}
+
+const MONTH_NAMES = ['Januari', 'Februari', 'Maret', 'April', 'Mei', 'Juni', 'Juli', 'Agustus', 'September', 'Oktober', 'November', 'Desember'];
+
+export type ResolvedPeriod = { month: number; year: number; warning: string | null; error: string | null };
+
+/**
+ * Resolves the MASA column against the invoice date. The sheet carries only a
+ * month, so the year is the one that puts the period closest to the invoice:
+ * invoice 2025-12-20 with MASA 1 is Januari 2026, invoice 2026-01-05 with
+ * MASA 12 is Desember 2025. Cross-year choices are stated explicitly in a
+ * warning; a period more than two months away is refused for reconciliation.
+ */
+export function resolvePeriod(periodText: string, invoiceDate: string): ResolvedPeriod {
+  const invoiceYear = Number(invoiceDate.slice(0, 4));
+  const invoiceMonth = Number(invoiceDate.slice(5, 7));
+  const month = Number(periodText);
+  if (!periodText) return { month: invoiceMonth, year: invoiceYear, warning: null, error: null };
+  if (!Number.isInteger(month) || month < 1 || month > 12) {
+    return { month: invoiceMonth, year: invoiceYear, warning: `Masa "${periodText}" tidak dikenali; dipakai bulan tanggal invoice.`, error: null };
+  }
+  if (month === invoiceMonth) return { month, year: invoiceYear, warning: null, error: null };
+  let best = { year: invoiceYear, distance: Number.POSITIVE_INFINITY };
+  for (const year of [invoiceYear, invoiceYear + 1, invoiceYear - 1]) {
+    const distance = Math.abs((year * 12 + month) - (invoiceYear * 12 + invoiceMonth));
+    if (distance < best.distance) best = { year, distance };
+  }
+  const label = `${MONTH_NAMES[month - 1]} ${best.year}`;
+  if (best.distance > 2) {
+    return { month, year: best.year, warning: null, error: `Masa ${periodText} terlalu jauh dari tanggal invoice ${invoiceDate} (${label}); periksa kolom MASA atau tanggal invoice.` };
+  }
+  const crossYear = best.year !== invoiceYear;
+  return {
+    month,
+    year: best.year,
+    warning: `Masa ${periodText} berbeda dari bulan tanggal invoice ${invoiceDate}; diartikan sebagai ${label}${crossYear ? ' (lintas tahun)' : ''}.`,
+    error: null,
+  };
 }
 
 export type RekapanComparison = {

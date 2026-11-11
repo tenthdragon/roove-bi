@@ -5,6 +5,7 @@ import {
   computeSlip,
   deriveConsistentRatePercent,
   fromMicro,
+  percentToRupiah,
   percentToScaled,
   periodFromDate,
   resolveGrossMicro,
@@ -157,4 +158,37 @@ test('deriveConsistentRatePercent returns a rate the engine can recompute, or nu
   // 1 rupiah on a billion needs a rate below 0.001%, which the 3-decimal scale cannot express
   assert.equal(deriveConsistentRatePercent('1000000000', '1', []), null);
   assert.equal(deriveConsistentRatePercent('0', '137', []), null);
+});
+
+test('withholding rounds once from the exact product, never twice', () => {
+  // 100,024.99999 × 2% = 2,000.4999998 → 2,000 (double rounding would give 2,001)
+  assert.equal(fromMicro(percentToRupiah(toMicro('100024.99999'), percentToScaled('2')), 0), '2000');
+  const slip = computeSlip({
+    objectCode: grabCode, counterparty: nonPkp, facilities: [], transactionDate: '2026-10-16',
+    grossInputMode: 'dpp', grossInputAmount: '100024.99999',
+  });
+  assert.equal(slip.withholdingAmount, '2000');
+  // exact half rounds up
+  assert.equal(fromMicro(percentToRupiah(toMicro('100025'), percentToScaled('2')), 0), '2001');
+  // VAT uses the same single rounding
+  const pkpSlip = computeSlip({
+    objectCode: grabCode, counterparty: pkp, facilities: [], transactionDate: '2026-10-16',
+    grossInputMode: 'dpp', grossInputAmount: '100004.545454',
+  });
+  assert.equal(pkpSlip.vatAmount, '11000', '100004.545454 × 11% = 11000.49999994 rounds down');
+  assert.equal(deriveConsistentRatePercent('100024.99999', '2000', ['2']), '2');
+});
+
+test('additional cost is normalised to sen before entering the total', () => {
+  const slip = computeSlip({
+    objectCode: grabCode, counterparty: nonPkp, facilities: [], transactionDate: '2026-10-16',
+    grossInputMode: 'dpp', grossInputAmount: '1000', additionalCost: '12.345',
+  });
+  assert.equal(slip.additionalCost, '12.35');
+  assert.equal(slip.totalAmount, '1012.35');
+  const resaved = computeSlip({
+    objectCode: grabCode, counterparty: nonPkp, facilities: [], transactionDate: '2026-10-16',
+    grossInputMode: 'dpp', grossInputAmount: slip.grossAmount, additionalCost: slip.additionalCost,
+  });
+  assert.equal(resaved.totalAmount, slip.totalAmount, 'reopening and saving does not drift');
 });

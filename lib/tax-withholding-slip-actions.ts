@@ -308,6 +308,7 @@ export async function saveTaxSlip(input: TaxSlipInput): Promise<TaxSlip> {
   const entity = await svc.from('tax_withholding_entities').select('id, is_active').eq('workspace_id', workspaceId).eq('id', input.entityId).maybeSingle();
   if (entity.error) throw entity.error;
   if (!entity.data) throw new Error('Pemotong tidak ditemukan di workspace ini.');
+  if (!entity.data.is_active) throw new Error('Pemotong nonaktif; aktifkan dahulu di bagian Pemotong atau pilih pemotong lain.');
 
   const [{ counterparty, facilities }, objectCode] = await Promise.all([
     loadCounterpartyWithFacilities(workspaceId, input.counterpartyId),
@@ -527,9 +528,10 @@ const slipKey = (entityId: number, counterpartyId: number, objectCode: string, i
 
 async function loadImportContext(workspaceId: string, entityId: number): Promise<ImportContext> {
   const svc = createServiceSupabase();
-  const entity = await svc.from('tax_withholding_entities').select('id').eq('workspace_id', workspaceId).eq('id', entityId).maybeSingle();
+  const entity = await svc.from('tax_withholding_entities').select('id, is_active').eq('workspace_id', workspaceId).eq('id', entityId).maybeSingle();
   if (entity.error) throw entity.error;
   if (!entity.data) throw new Error('Pemotong tidak ditemukan di workspace ini.');
+  if (!entity.data.is_active) throw new Error('Pemotong nonaktif; impor REKAPAN memerlukan pemotong aktif.');
 
   const [counterparties, facilities, objectCodes, existing] = await Promise.all([
     fetchAllRows<CounterpartyRow>((from, to) => svc.from('tax_counterparties')

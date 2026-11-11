@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { buildCounterpartyIndex, compareRekapanRow, matchRekapanCounterparty, parseRekapan } from '../lib/tax-withholding-rekapan-import';
+import { buildCounterpartyIndex, compareRekapanRow, matchRekapanCounterparty, parseRekapan, resolvePeriod } from '../lib/tax-withholding-rekapan-import';
 
 // Synthetic fixture in the legacy REKAPAN layout (header on sheet row 5).
 const header = [
@@ -121,4 +121,38 @@ test('matchRekapanCounterparty refuses conflicting or ambiguous name matches', (
 
   assert.equal(match('VENDOR TANPA ID', '0012340000000000').counterparty?.id, 5, 'a master row without identity cannot conflict');
   assert.match(match('TIDAK ADA', null).problem ?? '', /tidak ditemukan/);
+});
+
+test('resolvePeriod picks the year that keeps MASA closest to the invoice and states cross-year choices', () => {
+  assert.deepEqual(resolvePeriod('', '2026-10-05'), { month: 10, year: 2026, warning: null, error: null });
+  assert.deepEqual(resolvePeriod('10', '2026-10-05'), { month: 10, year: 2026, warning: null, error: null });
+  const decToJan = resolvePeriod('1', '2025-12-20');
+  assert.equal(decToJan.year, 2026);
+  assert.equal(decToJan.month, 1);
+  assert.match(decToJan.warning ?? '', /Januari 2026 \(lintas tahun\)/);
+  const janToDec = resolvePeriod('12', '2026-01-05');
+  assert.equal(janToDec.year, 2025);
+  assert.match(janToDec.warning ?? '', /Desember 2025 \(lintas tahun\)/);
+  const sameYear = resolvePeriod('11', '2026-10-28');
+  assert.equal(sameYear.year, 2026);
+  assert.match(sameYear.warning ?? '', /November 2026/);
+  assert.doesNotMatch(sameYear.warning ?? '', /lintas tahun/);
+  const tooFar = resolvePeriod('6', '2026-01-05');
+  assert.match(tooFar.error ?? '', /terlalu jauh/);
+  const unknown = resolvePeriod('abc', '2026-01-05');
+  assert.equal(unknown.month, 1);
+  assert.match(unknown.warning ?? '', /tidak dikenali/);
+});
+
+test('REKAPAN parser refuses a MASA too far from the invoice date', () => {
+  const parsed = parseRekapan([
+    header,
+    [1, serial20260105, '06', 'INV-FAR', null, null, softwareObject, 'VENDOR CONTOH', null, 'PPH23', 100, 0.02, 2],
+    [2, serial20260105 - 16, '01', 'INV-CROSS', null, null, softwareObject, 'VENDOR CONTOH', null, 'PPH23', 100, 0.02, 2],
+  ]);
+  assert.equal(parsed.rows.length, 1);
+  assert.equal(parsed.rows[0].invoiceNumber, 'INV-CROSS');
+  assert.equal(parsed.rows[0].periodYear, 2026, 'invoice 2025-12-20 with MASA 01 is January 2026');
+  assert.ok(parsed.issues.some((issue) => issue.level === 'error' && /terlalu jauh/.test(issue.message)));
+  assert.ok(parsed.issues.some((issue) => issue.level === 'warning' && /lintas tahun/.test(issue.message)));
 });

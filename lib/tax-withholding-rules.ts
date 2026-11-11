@@ -151,6 +151,21 @@ export function applyPercent(amountMicro: bigint, percentScaled: bigint): bigint
   return divideRoundHalfUp(amountMicro * percentScaled, 100n * PERCENT_SCALE);
 }
 
+/**
+ * amount × percent rounded half-up to whole rupiah in a single step, from the
+ * exact scaled product. Rounding to micro first and then to rupiah can push a
+ * value like 2000.4999998 up to 2001; this never does.
+ */
+export function percentToRupiah(amountMicro: bigint, percentScaled: bigint): bigint {
+  return divideRoundHalfUp(amountMicro * percentScaled, 100n * PERCENT_SCALE * MICRO) * MICRO;
+}
+
+/** Rounds micro-units half-up to the given number of decimals (0..6). */
+export function roundToDecimals(micro: bigint, decimals: number): bigint {
+  const unit = 10n ** BigInt(6 - Math.min(Math.max(decimals, 0), 6));
+  return divideRoundHalfUp(micro, unit) * unit;
+}
+
 // ---------------------------------------------------------------------------
 // Rules
 // ---------------------------------------------------------------------------
@@ -228,11 +243,13 @@ export function computeSlip(input: SlipComputationInput): SlipComputation {
   const vatRatePercent = resolveVatRatePercent(input.counterparty, input.objectCode.code);
   const grossMicro = resolveGrossMicro(input.grossInputMode, input.grossInputAmount, vatRatePercent);
   const rate = resolveRate(input);
-  const withholdingMicro = roundToRupiah(applyPercent(grossMicro, percentToScaled(rate.ratePercent)));
-  const vatMicro = roundToRupiah(applyPercent(grossMicro, percentToScaled(vatRatePercent)));
+  const withholdingMicro = percentToRupiah(grossMicro, percentToScaled(rate.ratePercent));
+  const vatMicro = percentToRupiah(grossMicro, percentToScaled(vatRatePercent));
+  // Additional cost is money in whole sen: normalise to 2 decimals before it
+  // enters the total so the stored total and the stored cost always agree.
   const additionalMicro = input.additionalCost === null || input.additionalCost === undefined || String(input.additionalCost).trim() === ''
     ? 0n
-    : toMicro(input.additionalCost);
+    : roundToDecimals(toMicro(input.additionalCost), 2);
   if (additionalMicro < 0n) throw new Error('Biaya tambahan tidak boleh negatif.');
   const totalMicro = grossMicro + additionalMicro + vatMicro;
 
@@ -273,7 +290,7 @@ export function deriveConsistentRatePercent(
   const grossMicro = toMicro(gross);
   const amountMicro = roundToRupiah(toMicro(amount));
   if (grossMicro <= 0n || amountMicro < 0n) return null;
-  const reproduces = (scaled: bigint) => roundToRupiah(applyPercent(grossMicro, scaled)) === amountMicro;
+  const reproduces = (scaled: bigint) => percentToRupiah(grossMicro, scaled) === amountMicro;
   for (const candidate of candidates) {
     if (candidate === null || candidate === undefined || String(candidate).trim() === '') continue;
     try {

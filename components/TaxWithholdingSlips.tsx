@@ -396,6 +396,9 @@ function SlipForm({ slip, entityId, entities, counterparties, objectCodes, readO
   const selectedObject = objectCodes.find((row) => row.code === form.objectCode) ?? null;
 
   useEffect(() => {
+    // A read-only (exported/reported) slip shows what was stored, never a
+    // recomputation against today's master data.
+    if (readOnly) { setPreview(null); return; }
     if (!form.counterpartyId || !form.objectCode || !form.invoiceDate || !form.grossInputAmount) { setPreview(null); return; }
     const timer = window.setTimeout(() => {
       previewTaxSlip({
@@ -406,7 +409,7 @@ function SlipForm({ slip, entityId, entities, counterparties, objectCodes, readO
         .catch((err) => { setPreview(null); setPreviewError(errorText(err)); });
     }, 350);
     return () => window.clearTimeout(timer);
-  }, [form.entityId, form.counterpartyId, form.objectCode, form.invoiceDate, form.grossInputMode, form.grossInputAmount, form.additionalCost, form.rateOverridePercent, form.invoiceNumber]);
+  }, [readOnly, form.entityId, form.counterpartyId, form.objectCode, form.invoiceDate, form.grossInputMode, form.grossInputAmount, form.additionalCost, form.rateOverridePercent, form.invoiceNumber]);
 
   const submit = async () => {
     if (!form.counterpartyId) { setError('Pilih lawan transaksi dari daftar.'); return; }
@@ -455,7 +458,11 @@ function SlipForm({ slip, entityId, entities, counterparties, objectCodes, readO
             <input style={inputStyle} value={form.counterpartyQuery} disabled={disabled}
               onChange={(event) => { update('counterpartyQuery', event.target.value); update('counterpartyId', null); }}
               placeholder="Ketik nama atau NPWP/NIK…" aria-label="Cari lawan transaksi" />
-            {selectedCounterparty ? (
+            {readOnly && slip ? (
+              <div style={{ fontSize: 12, color: 'var(--text-secondary)' }}>
+                Identitas saat dilaporkan: {IDENTITY_LABELS[slip.counterparty_identity_type]} {formatIdentity(slip.counterparty_identity_type, slip.counterparty_identity_number)}
+              </div>
+            ) : selectedCounterparty ? (
               <div style={{ fontSize: 12, color: 'var(--text-secondary)' }}>
                 {IDENTITY_LABELS[selectedCounterparty.identity_type]} {formatIdentity(selectedCounterparty.identity_type, selectedCounterparty.identity_number)}
                 {selectedCounterparty.is_pkp ? ' · PKP' : ' · bukan PKP'} · {selectedCounterparty.country_code}
@@ -536,8 +543,18 @@ function SlipForm({ slip, entityId, entities, counterparties, objectCodes, readO
         </div>
 
         <div style={{ padding: 14, borderRadius: 10, background: 'var(--accent-subtle)', display: 'grid', gap: 8 }}>
-          <div style={{ fontWeight: 700, fontSize: 13 }}>Perhitungan</div>
-          {preview ? (
+          <div style={{ fontWeight: 700, fontSize: 13 }}>{readOnly && slip ? 'Angka tersimpan' : 'Perhitungan'}</div>
+          {readOnly && slip ? (
+            <div className="tw-grid-2" style={{ fontSize: 13 }}>
+              <div>DPP <strong>{formatMoney(slip.gross_amount, 2)}</strong></div>
+              <div>Tarif <strong>{slip.rate_percent}%</strong>{slip.facility_code !== 'N/A' ? ` (${slip.facility_code}${slip.facility_document_number ? ` ${slip.facility_document_number}` : ''})` : ''}{slip.rate_source === 'override' ? ' · manual' : ''}</div>
+              <div>PPh dipotong <strong>{formatMoney(slip.withholding_amount)}</strong></div>
+              <div>PPN {slip.vat_rate_percent}% <strong>{formatMoney(slip.vat_amount)}</strong></div>
+              <div className="tw-span-2">Total bayar <strong>{formatMoney(slip.total_amount, 2)}</strong></div>
+              {slip.rate_override_reason ? <div className="tw-span-2" style={{ color: 'var(--text-secondary)', fontSize: 12 }}>Alasan tarif manual: {slip.rate_override_reason}</div> : null}
+              {slip.workbook_withholding_amount !== null && slip.workbook_withholding_amount !== slip.withholding_amount ? <div className="tw-span-2" style={{ color: 'var(--yellow)', fontSize: 12 }}>PPh di workbook REKAPAN: {formatMoney(slip.workbook_withholding_amount)}</div> : null}
+            </div>
+          ) : preview ? (
             <>
               <div className="tw-grid-2" style={{ fontSize: 13 }}>
                 <div>DPP <strong>{formatMoney(preview.grossAmount, 2)}</strong></div>
