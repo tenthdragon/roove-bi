@@ -50,6 +50,9 @@ jobs:
       - name: Check marketplace parser and reviewed CSV export
         run: npm run test:marketplace-parser
 
+      - name: Check tax withholding domain rules and master import parser
+        run: npm run test:tax-withholding
+
       - name: Typecheck app
         run: npm run typecheck:app
 
@@ -87,6 +90,8 @@ jobs:
         run: node tests/manual-marketplace-spend-access-database.mjs --ci
       - name: Check parser configuration version upgrade and history
         run: node tests/marketplace-parser-config-database.mjs --ci
+      - name: Check tax master read access is limited to finance roles
+        run: node tests/tax-withholding-access-database.mjs --ci
       - name: Remove disposable database container
         if: always()
         run: docker rm -f roove-access-requests-test
