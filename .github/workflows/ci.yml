@@ -50,6 +50,9 @@ jobs:
       - name: Check marketplace parser and reviewed CSV export
         run: npm run test:marketplace-parser
 
+      - name: Check the read-only production SQL guard
+        run: npm run test:production-sql-readonly
+
       - name: Check tax withholding domain rules and master import parser
         run: npm run test:tax-withholding
 
