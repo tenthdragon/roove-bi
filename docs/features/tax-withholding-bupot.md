@@ -417,6 +417,21 @@ Dua workbook per PT (RTI dan PT lain) diimpor terpisah; `entity` dipilih di UI.
   PPh 26 (`27-xxx`) dari referensi e-Bupot lama; KAP/KJS dilengkapi dari pasal dan
   segmen tengah kode bila tidak ada di referensi lama.
 
+## 10b. Keputusan implementasi Fase 2
+
+- Uang dihitung sebagai BigInt mikro-rupiah (6 desimal) agar DPP hasil `total/1,11`
+  tersimpan persis; PPh dan PPN dibulatkan half-up ke rupiah seperti `ROUND` Excel.
+- Bupot menyimpan input (`gross_input_mode`, `gross_input_amount`) dan hasil engine
+  (`rate_source`, `facility_code`, jumlah) sehingga bisa dihitung ulang dan diaudit;
+  identitas lawan transaksi di-snapshot per bupot.
+- Status: `draft` jika identitas vendor belum lengkap, `ready` jika lengkap, `reported`
+  bila nomor bupot Coretax sudah ada (impor REKAPAN). `exported`/`paid` dipakai fase 3+.
+- Impor REKAPAN mencocokkan vendor berdasarkan nama lalu NPWP/NIK, menghitung ulang
+  PPh, dan menampilkan selisih terhadap angka workbook. Pengguna memilih menyimpan angka
+  engine (default) atau angka workbook (ditandai sebagai tarif manual). Baris yang
+  vendornya belum ada di master diblokir, bukan dibuat diam-diam.
+- Idempoten lewat indeks unik `(workspace, pemotong, vendor, kode objek, invoice, tanggal, DPP)`.
+
 ## 11. Pertanyaan terbuka (perlu jawaban sebelum fase terkait)
 
 1. **ID Billing dan NTPN**: di workbook 2026 kolom ini kosong di semua baris.
@@ -436,7 +451,7 @@ Dua workbook per PT (RTI dan PT lain) diimpor terpisah; `entity` dipilih di UI.
 | Fase | Isi | Keluaran yang bisa diverifikasi |
 | --- | --- | --- |
 | 1 ✅ | Migration `247_tax_withholding.sql` (4 tabel master + seed 210 kode objek), tab & permission `tab:tax-withholding`, halaman `app/dashboard/tax-withholding`, CRUD pemotong dan lawan transaksi, impor master (`lib/tax-withholding-import.ts`), unit test `npm run test:tax-withholding` | Master 500 vendor terimpor, NPWP tervalidasi |
-| 2 | Rule engine + unit test, form & daftar bupot, impor REKAPAN, laporan selisih | PPh hasil engine = PPh workbook untuk 830 baris 2026 |
+| 2 ✅ | Migration `251_tax_withholding_slips.sql`, rule engine `lib/tax-withholding-rules.ts` (BigInt mikro-rupiah, unit test), parser `lib/tax-withholding-rekapan-import.ts`, server action `lib/tax-withholding-slip-actions.ts`, UI `components/TaxWithholdingSlips.tsx` (daftar per pemotong/masa, form dengan perhitungan langsung, impor REKAPAN dengan laporan selisih engine vs workbook) | PPh hasil engine = PPh workbook untuk 830 baris 2026 (diverifikasi saat impor di produksi) |
 | 3 | Validasi pra-export, generator XML, batch, unduh ulang, void | XML identik elemen demi elemen dengan hasil Excel untuk masa 10/2026 |
 | 4 | Pencatatan nomor bupot, rekap bulanan per pasal (KAP/KJS) | Rekap 2026 cocok dengan `SUBTOTAL` di REKAPAN |
 | 5 | ID Billing/NTPN, PPh 26, pengingat fasilitas kedaluwarsa | sesuai jawaban §11 |
