@@ -118,21 +118,52 @@
 .config .actions { margin-top: 14px; }
 .accountContext, .loading { padding: 0 20px 16px; color: var(--dim); }
 .routeSummary { margin-bottom: 14px !important; color: var(--text-secondary); }
-.diagnosis { display: grid; gap: 14px; margin-block: 18px; padding: 18px; background: var(--card); border: 1px solid var(--border); border-radius: 8px; overflow-wrap: anywhere; }
+.diagnosis { display: grid; gap: 16px; margin-block: 18px; padding: 20px; background: var(--card); border: 1px solid var(--border); border-radius: 12px; overflow-wrap: anywhere; }
 .diagnosis .sectionHeading { padding: 0; }
 .diagnosis p strong { display: inline; }
 .diagnosis a { display: inline-flex; gap: 5px; align-items: center; color: var(--accent); text-decoration: underline; text-underline-offset: 3px; }
 .diagnosis a:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
-.diagnosisDestination { display: flex; align-items: end; flex-wrap: wrap; gap: 12px; }
-.diagnosisDestination label { flex: 1 1 260px; max-width: 520px; }
+.diagnosisDestination { min-width: 0; }
+.diagnosisDestination label { max-width: 560px; }
+.diagnosisSku { color: var(--text-secondary); font-size: 12px; }
+.diagnosisFields { display: grid; gap: 16px; }
+.diagnosisFieldsSplit { grid-template-columns: minmax(0,1.2fr) minmax(0,1fr); }
+.diagnosisFieldsSplit .diagnosisItem { padding: 0; border: 0; }
 .diagnosisItems { display: grid; }
-.diagnosisItem { display: grid; gap: 12px; padding-block: 18px; border-top: 1px solid var(--border); min-width: 0; }
-.bundleFinding { display: flex; align-items: baseline; flex-wrap: wrap; gap: 8px 18px; }
+.diagnosisItem { display: grid; gap: 10px; padding-block: 14px; border-top: 1px solid var(--border); min-width: 0; }
+.diagnosisItem:only-child { padding-bottom: 0; }
+.bundleFinding { display: grid; gap: 4px; padding-block: 12px; border-top: 1px solid var(--border); }
 .bundleFinding span { color: var(--dim); }
-.diagnosisControls { display: flex; flex-wrap: wrap; align-items: end; gap: 12px 20px; }
-.diagnosisControls > label:not(.check) { flex: 1 1 250px; max-width: 450px; }
-.diagnosisControls .check { align-self: center; }
+.diagnosisProgress { display: grid; grid-template-columns: 1fr 16px 1fr 16px 1fr; align-items: center; gap: 12px; padding-block: 8px 18px; border-bottom: 1px solid var(--border); }
+.diagnosisStep { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.diagnosisStep > svg { flex-shrink: 0; }
+.diagnosisStep > div { display: grid; gap: 3px; }
+.diagnosisStep span, .diagnosisStep small { color: var(--dim); font-size: 12px; }
+.diagnosis .diagnosisStep strong { font-size: 13px; font-weight: 600; }
+.diagnosisReady { color: var(--green); }
+.diagnosisPending { color: var(--yellow); }
+.diagnosisArrow { color: var(--dim); }
+.diagnosisStore, .diagnosisOption { display: grid; gap: 6px; min-width: 0; }
+.diagnosisStore > span, .diagnosisOption > span { color: var(--text-secondary); font-size: 12px; }
+.diagnosisOption { max-width: 560px; }
+.diagnosisItemHeading, .diagnosisFooter { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px; }
+.diagnosisItemHeading h4, .diagnosisItemHeading label { min-width: 0; }
+.diagnosisItemHeading > span { font-size: 12px; }
+.diagnosisPrice { display: inline-flex; align-items: center; flex-wrap: wrap; gap: 6px; font-size: 12px; color: var(--dim); }
+.diagnosisPrice strong { color: var(--text); }
+.diagnosisActionHint { color: var(--dim); font-size: 12px; text-align: right; }
+.diagnosisMore { border-top: 1px solid var(--border); padding-top: 10px; font-size: 12px; }
+.diagnosisMore summary { width: fit-content; padding-block: 6px; color: var(--text-secondary); cursor: pointer; }
+.diagnosisMore > p, .diagnosisMore > .actions { margin-top: 12px; }
+.diagnosisMetadata { display: grid; gap: 8px; margin-block: 12px 16px; }
+.diagnosisMetadata > div { display: flex; align-items: baseline; justify-content: space-between; flex-wrap: wrap; gap: 4px 16px; }
+.diagnosisMetadata dt { color: var(--dim); }
+.diagnosisMetadata dd { margin: 0; }
+.diagnosisLoading { color: var(--dim); }
+.diagnosisLoading > div { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: 18px; margin-top: 14px; }
+.diagnosisLoading span { height: 42px; border-radius: 6px; background: var(--card-hover); }
+.diagnosis a.diagnosisCatalogLink { padding-block: 10px; font-weight: 600; }
 .diagnosis .good { white-space: normal; justify-self: start; }
-@media (max-width: 700px) { .details { max-width: calc(100vw - 56px); }.diagnosis { padding: 14px; }.diagnosisControls { flex-direction: column; align-items: stretch; }.diagnosisControls > label:not(.check) { flex-basis: auto; max-width: none; }.diagnosisControls .check { align-self: start; } }
+@media (max-width: 700px) { .details { max-width: calc(100vw - 56px); }.diagnosis { padding: 14px; }.diagnosisFieldsSplit { grid-template-columns: 1fr; }.diagnosisDestination label, .diagnosisOption { max-width: none; }.diagnosisProgress { gap: 6px; grid-template-columns: 1fr 12px 1fr 12px 1fr; align-items: start; }.diagnosisStep { flex-direction: column; align-items: start; gap: 6px; }.diagnosisArrow { width: 12px; align-self: center; }.diagnosisFooter { align-items: stretch; flex-direction: column; }.diagnosisActionHint { text-align: left; }.diagnosis select { font-size: 16px; }.diagnosisMore summary, .diagnosis button { min-height: 44px; } }
 .warning { color: var(--red); }
 @media (max-width: 700px) { .storeChoices, .productNames { grid-template-columns: 1fr; }.fields { grid-template-columns: 1fr; }.accountContext { padding-inline: 16px; } }
