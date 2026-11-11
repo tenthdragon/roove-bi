@@ -1,6 +1,7 @@
 'use server';
 
 import * as XLSX from 'xlsx';
+import { sheetToRows } from './tax-withholding-sheet';
 import { createServiceSupabase } from './supabase-server';
 import { requireDashboardTabAccess } from './dashboard-access';
 import {
@@ -503,11 +504,7 @@ async function readRekapanSheet(formData: FormData): Promise<{ fileName: string;
   for (const sheetName of candidates) {
     const sheet = workbook.Sheets[sheetName];
     if (!sheet) continue;
-    const rangeStart = sheet['!ref'] ? XLSX.utils.decode_range(sheet['!ref']).s.r : 0;
-    const rows: SheetRow[] = [
-      ...Array.from({ length: rangeStart }, () => [] as SheetRow),
-      ...XLSX.utils.sheet_to_json<SheetRow>(sheet, { header: 1, defval: null, raw: true, blankrows: true }),
-    ];
+    const rows = sheetToRows(sheet);
     const headerText = rows.slice(0, 20).map((row) => row.map((cell) => String(cell ?? '').toLowerCase().replace(/\s+/g, ' ')).join('|')).join('\n');
     if (headerText.includes('periode invoice') && headerText.includes('no invoice')) return { fileName: file.name, sheetName, rows, date1904 };
   }
