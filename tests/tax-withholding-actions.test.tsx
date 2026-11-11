@@ -135,6 +135,21 @@ require.cache[require.resolve('../lib/tax-withholding-actions')] = { exports: { 
 const Page = require('../app/dashboard/tax-withholding/page').default;
 const { create, act } = require('react-test-renderer');
 
+test('an unrelated oversized sheet does not block the sheet that carries the master header', async () => {
+  const book = XLSX.utils.book_new();
+  const raw = XLSX.utils.aoa_to_sheet([['Raw export']]);
+  raw[XLSX.utils.encode_cell({ r: 50_000, c: 0 })] = { t: 'n', v: 1 };
+  raw['!ref'] = 'A1:A50001';
+  XLSX.utils.book_append_sheet(book, raw, 'Raw export');
+  XLSX.utils.book_append_sheet(book, XLSX.utils.aoa_to_sheet([headers, ['VENDOR BARU', '0210893970035000', '', '', '', 'IDN', '', '', '']]), 'Import data');
+  const data = new FormData();
+  data.set('file', new File([XLSX.write(book, { type: 'buffer', bookType: 'xlsx' })], 'two-sheets.xlsx'));
+  data.set('workspaceId', A);
+  const preview = await actions.previewCounterpartyImport(data);
+  assert.equal(preview.sheetName, 'Import data');
+  assert.equal(preview.newCount, 1);
+});
+
 test('two tabs: page workspace is sent before preview and commit; switching the page clears its preview', async () => {
   const priorWindow = Object.getOwnPropertyDescriptor(globalThis, 'window');
   const confirmations: string[] = [];
