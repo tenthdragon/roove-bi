@@ -148,7 +148,7 @@ export function SlipsSection({ entities, counterparties, canManage, notify }: {
 }) {
   const activeEntities = useMemo(() => entities.filter((entity) => entity.is_active), [entities]);
   const now = useMemo(() => new Date(), []);
-  const [entityId, setEntityId] = useState<number>(activeEntities[0]?.id ?? 0);
+  const [entityId, setEntityId] = useState<number>(activeEntities[0]?.id ?? entities[0]?.id ?? 0);
   const [year, setYear] = useState(now.getFullYear());
   const [month, setMonth] = useState(now.getMonth() + 1);
   const [statusFilter, setStatusFilter] = useState<SlipStatus | 'all'>('all');
@@ -158,28 +158,38 @@ export function SlipsSection({ entities, counterparties, canManage, notify }: {
   const [loading, setLoading] = useState(false);
   const [editing, setEditing] = useState<TaxSlip | 'new' | null>(null);
   const [deleting, setDeleting] = useState<TaxSlip | null>(null);
+  const loadSequence = useRef(0);
+  const selectedEntity = entities.find((entity) => entity.id === entityId);
+  const canEdit = canManage && Boolean(selectedEntity?.is_active);
   // Reference codes are only needed once there is a withholding entity to file for.
   const objectCodes = useObjectCodes(notify, activeEntities.length > 0);
 
   useEffect(() => {
-    if (!activeEntities.some((entity) => entity.id === entityId)) setEntityId(activeEntities[0]?.id ?? 0);
-  }, [activeEntities, entityId]);
+    if (!entities.some((entity) => entity.id === entityId)) setEntityId(activeEntities[0]?.id ?? entities[0]?.id ?? 0);
+  }, [entities, activeEntities, entityId]);
 
   const load = useCallback(async () => {
-    if (!entityId) { setSlips([]); setTotals(null); return; }
+    const sequence = ++loadSequence.current;
+    setSlips([]);
+    setTotals(null);
+    if (!entityId) { setLoading(false); return; }
     setLoading(true);
     try {
       const result = await listTaxSlips({ entityId, year, month, status: statusFilter, search });
+      if (sequence !== loadSequence.current) return;
       setSlips(result.slips);
       setTotals(result.totals);
     } catch (error) {
-      notify({ type: 'error', text: errorText(error) });
+      if (sequence === loadSequence.current) notify({ type: 'error', text: errorText(error) });
     } finally {
-      setLoading(false);
+      if (sequence === loadSequence.current) setLoading(false);
     }
   }, [entityId, year, month, statusFilter, search, notify]);
 
-  useEffect(() => { void load(); }, [load]);
+  useEffect(() => {
+    void load();
+    return () => { loadSequence.current++; };
+  }, [load]);
 
   const remove = async () => {
     if (!deleting) return;
@@ -198,8 +208,8 @@ export function SlipsSection({ entities, counterparties, canManage, notify }: {
     return [current + 1, current, current - 1, current - 2];
   }, [now]);
 
-  if (activeEntities.length === 0) {
-    return <div className="tw-notice">Belum ada pemotong aktif. Tambahkan NPWP PT di bagian Pemotong sebelum membuat bukti potong.</div>;
+  if (entities.length === 0) {
+    return <div className="tw-notice">Belum ada pemotong. Tambahkan NPWP PT di bagian Pemotong sebelum membuat bukti potong.</div>;
   }
 
   return (
@@ -217,7 +227,7 @@ export function SlipsSection({ entities, counterparties, canManage, notify }: {
         <div className="tw-toolbar">
           <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
             <select aria-label="Pemotong" className="tw-filter" value={entityId} onChange={(event) => setEntityId(Number(event.target.value))}>
-              {activeEntities.map((entity) => <option key={entity.id} value={entity.id}>{entity.legal_name}</option>)}
+              {entities.map((entity) => <option key={entity.id} value={entity.id}>{entity.legal_name}{entity.is_active ? '' : ' (nonaktif)'}</option>)}
             </select>
             <select aria-label="Masa pajak" className="tw-filter" value={month} onChange={(event) => setMonth(Number(event.target.value))}>
               {MONTHS.map((label, index) => <option key={label} value={index + 1}>{label}</option>)}
@@ -232,10 +242,11 @@ export function SlipsSection({ entities, counterparties, canManage, notify }: {
               <option value="all">Semua status</option>
               {(Object.keys(STATUS_LABELS) as SlipStatus[]).map((status) => <option key={status} value={status}>{STATUS_LABELS[status]}</option>)}
             </select>
-            {canManage ? <button type="button" style={primaryButtonStyle} onClick={() => setEditing('new')}>+ Tambah</button> : null}
+            {canManage ? <button type="button" style={primaryButtonStyle} disabled={!canEdit} onClick={() => setEditing('new')}>+ Tambah</button> : null}
           </div>
         </div>
 
+        {selectedEntity && !selectedEntity.is_active ? <div className="tw-notice">Pemotong nonaktif. Riwayat bukti potong tetap dapat dilihat; aktifkan pemotong untuk membuat atau mengubah bukti potong.</div> : null}
         {loading && slips.length === 0 ? (
           <div style={{ padding: 24, color: 'var(--text-secondary)', fontSize: 13 }}>Memuat…</div>
         ) : slips.length === 0 ? (
@@ -288,7 +299,7 @@ export function SlipsSection({ entities, counterparties, canManage, notify }: {
                     </td>
                     {canManage ? (
                       <td style={{ ...cellStyle, whiteSpace: 'nowrap', textAlign: 'right' }}>
-                        {slip.status === 'draft' || slip.status === 'ready' ? (
+                        {canEdit && (slip.status === 'draft' || slip.status === 'ready') ? (
                           <>
                             <button type="button" className="tw-action-button" style={{ color: 'var(--accent)' }} onClick={() => setEditing(slip)}>Edit</button>
                             <button type="button" className="tw-action-button" style={{ color: 'var(--red)' }} onClick={() => setDeleting(slip)}>Hapus</button>
@@ -310,10 +321,10 @@ export function SlipsSection({ entities, counterparties, canManage, notify }: {
         <SlipForm
           slip={editing === 'new' ? null : editing}
           entityId={entityId}
-          entities={activeEntities}
+          entities={editing === 'new' ? activeEntities : entities}
           counterparties={counterparties}
           objectCodes={objectCodes}
-          readOnly={!canManage || (editing !== 'new' && editing.status !== 'draft' && editing.status !== 'ready')}
+          readOnly={!canEdit || (editing !== 'new' && editing.status !== 'draft' && editing.status !== 'ready')}
           onClose={() => setEditing(null)}
           onSaved={async (text) => { notify({ type: 'success', text }); setEditing(null); await load(); }}
         />
@@ -396,19 +407,22 @@ function SlipForm({ slip, entityId, entities, counterparties, objectCodes, readO
   const selectedObject = objectCodes.find((row) => row.code === form.objectCode) ?? null;
 
   useEffect(() => {
+    let cancelled = false;
+    setPreview(null);
+    setPreviewError(null);
     // A read-only (exported/reported) slip shows what was stored, never a
     // recomputation against today's master data.
-    if (readOnly) { setPreview(null); return; }
-    if (!form.counterpartyId || !form.objectCode || !form.invoiceDate || !form.grossInputAmount) { setPreview(null); return; }
+    if (readOnly) return;
+    if (!form.counterpartyId || !form.objectCode || !form.invoiceDate || !form.grossInputAmount) return;
     const timer = window.setTimeout(() => {
       previewTaxSlip({
         entityId: form.entityId, counterpartyId: form.counterpartyId!, invoiceDate: form.invoiceDate, invoiceNumber: form.invoiceNumber || '-',
         objectCode: form.objectCode, grossInputMode: form.grossInputMode, grossInputAmount: form.grossInputAmount,
         additionalCost: form.additionalCost || null, rateOverridePercent: form.rateOverridePercent || null,
-      }).then((result) => { setPreview(result); setPreviewError(null); })
-        .catch((err) => { setPreview(null); setPreviewError(errorText(err)); });
+      }).then((result) => { if (!cancelled) { setPreview(result); setPreviewError(null); } })
+        .catch((err) => { if (!cancelled) { setPreview(null); setPreviewError(errorText(err)); } });
     }, 350);
-    return () => window.clearTimeout(timer);
+    return () => { cancelled = true; window.clearTimeout(timer); };
   }, [readOnly, form.entityId, form.counterpartyId, form.objectCode, form.invoiceDate, form.grossInputMode, form.grossInputAmount, form.additionalCost, form.rateOverridePercent, form.invoiceNumber]);
 
   const submit = async () => {
