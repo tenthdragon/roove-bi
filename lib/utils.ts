@@ -59,6 +59,7 @@ export const PERMISSION_GROUPS = [
       { key: 'tab:cashflow',           label: '↳ Cash Flow (Bank)' },
       { key: 'tab:financial-settings', label: '↳ Financial Settings' },
       { key: 'tab:fixed-costs',         label: '↳ Fixed & Recurring Costs' },
+      { key: 'tab:tax-withholding',     label: '↳ Bukti Potong (PPh)' },
     ],
   },
   {
@@ -318,6 +319,7 @@ export const ALL_TABS: TabDef[] = [
     { id: 'cashflow',            label: 'Cash Flow',           icon: 'Banknote' },
     { id: 'financial-settings', label: 'Financial Settings',  icon: 'CreditCard' },
     { id: 'fixed-costs',         label: 'Fixed & Recurring Costs', icon: 'ReceiptText' },
+    { id: 'tax-withholding',     label: 'Bukti Potong (PPh)', icon: 'FileCheck' },
   ]},
   { id: 'ppic',           label: 'PPIC',               icon: 'ClipboardList', group: 'Main Menu' },
   { id: 'warehouse',      label: 'Warehouse',          icon: 'Warehouse', group: 'Main Menu', children: [
