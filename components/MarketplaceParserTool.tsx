@@ -16,8 +16,8 @@ type Props = {
   diagnoseCase?: (workspace: string,input: DiagnosisRequest) => Promise<ParserDiagnosis>;
   repairCase?: (workspace: string,input: RepairRequest) => Promise<{ result: RepairResult; catalog: Catalog }>;
   saveConfig: (workspace: string,revision: number,config: ParserConfig) => Promise<{ workspaceId: string; revision: number }>;
-  loadCatalog: (workspace: string,storeIds: number[]) => Promise<Catalog>;
-  syncStore: (workspace: string,storeId: number) => Promise<{ storeId: number; bundleCount: number }>;
+  loadCatalog: (workspace: string,storeIds: number[],businessCodes?: string[]) => Promise<Catalog>;
+  syncBusiness: (workspace: string,businessCode: string) => Promise<unknown>;
   reloadContext: (workspace: string) => Promise<ParserContext>;
   prepareDownload: (workspace: string,input: { revision: number; catalogVersion: string; file: ParsedFile; account: string; date: string; edits: Edits }) => Promise<{ business: string; csv: string }>;
 };
@@ -27,7 +27,7 @@ function saveText(text: string,name: string,type: string) {
   const url = URL.createObjectURL(new Blob([text],{ type })), anchor = document.createElement('a');
   anchor.href = url; anchor.download = name; document.body.appendChild(anchor); anchor.click(); anchor.remove(); setTimeout(() => URL.revokeObjectURL(url),1000);
 }
-export default function MarketplaceParserTool({ context,saveConfig,loadCatalog,syncStore,reloadContext,prepareDownload,diagnoseCase,repairCase }: Props) {
+export default function MarketplaceParserTool({ context,saveConfig,loadCatalog,syncBusiness,reloadContext,prepareDownload,diagnoseCase,repairCase }: Props) {
   const [config,setConfig] = useState(context.config), [draft,setDraft] = useState(context.config), [revision,setRevision] = useState(context.revision);
   const [catalog,setCatalog] = useState(context.catalog), [migrationNotes,setMigrationNotes] = useState(context.migrationNotes);
   const [configOpen,setConfigOpen] = useState(!context.config.accounts.length || !!context.migrationNotes.length);
@@ -44,6 +44,8 @@ export default function MarketplaceParserTool({ context,saveConfig,loadCatalog,s
   const settingsSection = useRef<HTMLElement>(null);
   const dirty = JSON.stringify(config) !== JSON.stringify(draft);
   const storeKey = [...draft.stores.map(s => s.storeId)].sort((a,b) => a - b).join(',');
+  const businessKey = JSON.stringify([...new Set(draft.accounts.map(a => a.business).filter(Boolean))].sort());
+  const loadedBusinessKey = JSON.stringify([...catalog.loadedBusinessCodes].sort());
   const loadedKey = [...catalog.loadedStoreIds].sort((a,b) => a - b).join(',');
   const busy = reading || saving || loadingCatalog || syncing || downloading || repairing;
   function changed() { setReviewed(false); setDownloaded(false); setNotice(''); }
@@ -68,15 +70,15 @@ export default function MarketplaceParserTool({ context,saveConfig,loadCatalog,s
     return () => { mounted.current = false; fileRequests.current++; catalogRequests.current++; };
   },[]);
   useEffect(() => {
-    if (storeKey === loadedKey) return;
+    if (storeKey === loadedKey && businessKey === loadedBusinessKey) return;
     const pending = catalogRequest, token = ++pending.current; setLoadingCatalog(true); setCatalogError(false); setReviewed(false);
-    loadCatalog(context.workspaceId,storeKey ? storeKey.split(',').map(Number) : []).then(result => {
+    loadCatalog(context.workspaceId,storeKey ? storeKey.split(',').map(Number) : [],JSON.parse(businessKey)).then(result => {
       if (mounted.current && token === catalogRequest.current) setCatalog(result);
     }).catch(e => { if (mounted.current && token === catalogRequest.current) { setCatalogError(true); setError(e instanceof Error ? e.message : 'Katalog belum dapat dimuat.'); } }).finally(() => { if (mounted.current && token === catalogRequest.current) setLoadingCatalog(false); });
     return () => { pending.current++; };
-    // Loading is driven by selected Store IDs, not by keystrokes in other rules.
+    // Reload when destination scope or receiving Businesses change.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  },[storeKey,loadCatalog,context.workspaceId]);
+  },[storeKey,businessKey,loadCatalog,context.workspaceId]);
   const result = useMemo(() => {
     if (!file) return { projection: null,error: '' };
     try { return { projection: projectMarketplace({ file,account,date,config,revision,catalog,edits }),error: '' }; }
@@ -96,14 +98,16 @@ export default function MarketplaceParserTool({ context,saveConfig,loadCatalog,s
   function changeDraft(next: ParserConfig) { setDraft(next); changed(); }
   async function refreshCatalog() {
     const token = ++catalogRequest.current; setLoadingCatalog(true); setError(''); changed();
-    try { const next = await loadCatalog(context.workspaceId,draft.stores.map(s => s.storeId)); if (mounted.current && token === catalogRequest.current) { setCatalog(next); setCatalogError(false); setNotice('Katalog dimuat ulang. Periksa preview terbaru sebelum download.'); } }
+    try { const next = await loadCatalog(context.workspaceId,draft.stores.map(s => s.storeId),JSON.parse(businessKey)); if (mounted.current && token === catalogRequest.current) { setCatalog(next); setCatalogError(false); setNotice('Katalog dimuat ulang. Periksa preview terbaru sebelum download.'); } }
     catch (e) { if (mounted.current && token === catalogRequest.current) { setCatalogError(true); setError(e instanceof Error ? e.message : 'Katalog belum dapat dimuat.'); } }
     finally { if (mounted.current && token === catalogRequest.current) setLoadingCatalog(false); }
   }
   async function synchronize() {
+    if (!context.canSync || !context.canManageCatalog) return;
     setSyncing(true); setError(''); changed();
     try {
-      for (const [index,scope] of draft.stores.entries()) { if (!mounted.current) return; setNotice(`Menyinkronkan Store ${index + 1} dari ${draft.stores.length}…`); await syncStore(context.workspaceId,scope.storeId); }
+      const businesses: string[] = JSON.parse(businessKey);
+      for (const [index,business] of businesses.entries()) { if (!mounted.current) return; setNotice(`Menyinkronkan Business ${business} (${index + 1}/${businesses.length})…`); await syncBusiness(context.workspaceId,business); }
       if (mounted.current) await refreshCatalog();
     } catch (e) {
       if (mounted.current) { setCatalogError(true); setError(e instanceof Error ? e.message : 'Sinkronisasi belum berhasil.'); setNotice(''); }
@@ -135,7 +139,7 @@ export default function MarketplaceParserTool({ context,saveConfig,loadCatalog,s
       if (saved.workspaceId !== context.workspaceId) throw new Error('Workspace berubah. Muat ulang halaman.');
       setRevision(saved.revision); setConfig(structuredClone(draft)); setMigrationNotes([]);
       if (!draft.accounts.some(a => a.id === account)) setAccount(draft.accounts[0]?.id || '');
-      const next = await loadCatalog(context.workspaceId,draft.stores.map(s => s.storeId));
+      const next = await loadCatalog(context.workspaceId,draft.stores.map(s => s.storeId),JSON.parse(businessKey));
       if (!mounted.current) return;
       setCatalog(next); setCatalogError(false); setNotice('Konfigurasi tim tersimpan. Tujuan dan validasi batch diperbarui otomatis.'); setConfigOpen(false);
     } catch (e) { if (mounted.current) setError(e instanceof Error ? e.message : 'Konfigurasi belum dapat disimpan.'); }
@@ -163,16 +167,16 @@ export default function MarketplaceParserTool({ context,saveConfig,loadCatalog,s
     {!!migrationNotes.length && <div className={styles.hint}><AlertCircle size={18}/><div>{migrationNotes.map(note => <p key={note}>{note}</p>)}</div></div>}
     {dirty && <div className={styles.hint} role="status">Ada perubahan aturan yang belum disimpan. Simpan untuk tim sebelum melanjutkan download.</div>}
     {configOpen && <section ref={settingsSection} tabIndex={-1} className={styles.section} aria-label="Konfigurasi parser"><div className={styles.sectionHeading}><div><h2>Aturan parsing</h2><p>Berlaku bersama untuk tim · versi {revision || 'belum disimpan'}. Perubahan akan memvalidasi ulang batch yang sedang dibuka.</p></div><button className={styles.secondary} disabled={busy || dirty} onClick={reloadSettings}><RefreshCw size={15}/>Muat ulang aturan</button></div>
-      <fieldset className={styles.configFieldset} disabled={busy}><MarketplaceParserConfig config={draft} setConfig={changeDraft} catalog={catalog} busy={busy} canSync={context.canSync} refresh={refreshCatalog} sync={synchronize}/></fieldset>
-      {loadingCatalog && <p className={styles.loading} role="status">Memuat bundle dari Store terpilih…</p>}
+      <fieldset className={styles.configFieldset} disabled={busy}><MarketplaceParserConfig config={draft} setConfig={changeDraft} catalog={catalog} busy={busy} canSync={context.canSync && !!context.canManageCatalog} refresh={refreshCatalog} sync={synchronize}/></fieldset>
+      {loadingCatalog && <p className={styles.loading} role="status">Memuat katalog Business…</p>}
       <div className={styles.actions}>{!context.canSave && <p role="status">Penyimpanan aturan belum tersedia. Hubungi pengelola aplikasi.</p>}<button className={styles.secondary} disabled={busy || !dirty} onClick={() => { setDraft(structuredClone(config)); changed(); }}>Batalkan perubahan</button><button className={styles.primary} disabled={busy || !context.canSave} onClick={applyConfig}>{saving ? 'Menyimpan…' : 'Simpan konfigurasi tim'}</button></div>
     </section>}
     <section className={styles.section} aria-label="Upload marketplace"><div className={styles.upload}>
       <label>Akun marketplace asal<select value={account} disabled={busy} onChange={e => { setAccount(e.target.value); changed(); }}><option value="">Pilih akun asal</option>{config.accounts.map(a => <option key={a.id} value={a.id}>{a.label} · {a.business || 'Business belum ditetapkan'}</option>)}</select></label>
       <label>Tanggal batch<input type="date" value={date} disabled={busy} onChange={e => { setDate(e.target.value); changed(); }}/></label>
       <label className={styles.fileLabel}><span><Upload size={16}/>{reading ? 'Membaca file…' : 'Pilih file marketplace'}</span><input type="file" accept=".xlsx" disabled={busy || !account} onChange={e => { void read(e.target.files?.[0]); e.target.value = ''; }}/><small>XLSX · maksimal 10 MB</small></label>
-    </div>{selectedAccount && <p className={styles.accountContext}>Business tujuan: <strong>{selectedAccount.business || 'belum ditetapkan'}</strong> · Store ditentukan otomatis dari relasi bundle dan aturan akun.</p>}
-      {file ? <div className={styles.fileInfo}><FileSpreadsheet size={17}/><strong>{file.filename}</strong><span>{file.orders.length} order · {file.orders.reduce((n,o) => n + o.lines.length,0)} item</span><small>Sheet: {file.sheets.join(', ')}</small>{!!file.ignoredSheets.length && <details><summary>Sheet tidak diproses ({file.ignoredSheets.length})</summary><span>{file.ignoredSheets.join(', ')}</span></details>}</div> : <div className={styles.empty}><FileSpreadsheet size={28}/><h2>{config.accounts.length ? 'Mulai dari file asli marketplace' : 'Atur akun dan Store terlebih dahulu'}</h2><p>{config.accounts.length ? 'Pilih akun asal lalu upload export marketplace. Setiap SKU harus cocok dengan bundle yang tersedia di Store tujuan.' : 'Tambahkan akun, tetapkan Business, lalu pilih Store yang digunakan pada aturan parsing.'}</p></div>}
+    </div>{selectedAccount && <p className={styles.accountContext}>Business tujuan: <strong>{selectedAccount.business || 'belum ditetapkan'}</strong> · Store mengikuti mapping Produk dan aturan kombinasi.</p>}
+      {file ? <div className={styles.fileInfo}><FileSpreadsheet size={17}/><strong>{file.filename}</strong><span>{file.orders.length} order · {file.orders.reduce((n,o) => n + o.lines.length,0)} item</span><small>Sheet: {file.sheets.join(', ')}</small>{!!file.ignoredSheets.length && <details><summary>Sheet tidak diproses ({file.ignoredSheets.length})</summary><span>{file.ignoredSheets.join(', ')}</span></details>}</div> : <div className={styles.empty}><FileSpreadsheet size={28}/><h2>{config.accounts.length ? 'Mulai dari file asli marketplace' : 'Atur akun dan Store terlebih dahulu'}</h2><p>{config.accounts.length ? 'Pilih akun asal lalu upload export marketplace. Setiap SKU harus cocok dengan bundle yang tersedia di Business tujuan.' : 'Tambahkan akun, tetapkan Business, lalu pilih Store yang digunakan pada aturan parsing.'}</p></div>}
     </section>
     {projection && <>
       <section className={styles.section} aria-label="Preview CSV Scalev"><div className={styles.sectionHeading}><div><h2>Hasil parsing</h2><p>Konfigurasi versi {revision || 'belum disimpan'} · SKU dan tujuan tidak diisi manual per order.</p></div><div className={styles.actions}><button className={styles.secondary} disabled={busy} onClick={refreshCatalog}><RefreshCw size={15}/>Muat ulang katalog</button><button className={styles.secondary} onClick={() => setShowCsv(v => !v)} aria-pressed={showCsv}>{showCsv ? 'Tampilan order' : 'Lihat kolom CSV'}</button></div></div>

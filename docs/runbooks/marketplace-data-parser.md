@@ -13,10 +13,10 @@ saves. There is no session-only routing override.
    once per Store. Names and IDs come from the application's master data.
    Warehouse CSV labels come from configured marketplace integration data;
    an absent or ambiguous label blocks export rather than adding a guessed suffix.
-3. Load or synchronize the bundle catalog for the selected Stores. Only their
-   available bundle links and referenced bundles are loaded. An unfinished or
-   failed Store sync prevents exporting orders to that Store. Successfully synced
-   empty Stores are distinguishable from Stores not yet checked.
+3. Load the cached bundle catalogs of the accounts' receiving Businesses. Include
+   every bundle available to that Business, owned or shared, regardless of Store
+   membership or price options. A full Business sync must have completed successfully.
+   Running, failed, unknown or changing generations block export for that Business.
 4. Define Products and classify bundle identifier codes using exact SKU or code
    prefixes. A code may represent more than one Product. This classification
    never rewrites the marketplace SKU. Account-specific classification takes
@@ -31,19 +31,20 @@ saves. There is no session-only routing override.
    Equally prioritized matching rules choosing different Stores block export.
 7. Maintain Marketplace courier/service mappings and save the team configuration.
 
-Combination rules are evaluated before individual Product routes. Without an
-applicable route, the parser can discover a destination only when all bundle
-codes share exactly one selected Store. It never chooses the first candidate.
-If an account has combination rules, every item must be classified before they
-can be evaluated. An incomplete classification must not bypass those rules.
+Combination rules are evaluated before individual Product routes. Without a
+combination, every Product must route to the same Store. Every item must be classified.
+Missing or conflicting routes block export. Never infer a Store from bundle membership,
+from the first candidate, or from a sole selected Store.
 
 ## Upload, validate, download
 
 Select an account and batch date, then upload the original marketplace XLSX.
 Business follows the account. The entire order receives one Store; each distinct
 marketplace SKU remains its own bundle item with its original quantity.
-Every SKU must match exactly one Scalev bundle identifier code in that destination
-Store. Matching is case-sensitive after surrounding whitespace is removed.
+Every SKU must match exactly one Scalev bundle identifier code in the receiving
+Business. Store must be active, within that Business and selected in configuration.
+Bundle installation in the Store is not required. Prices and quantities come from
+the marketplace file; no Scalev price match or choice is required. Matching is case-sensitive after surrounding whitespace is removed.
 Product-name guessing and SKU aliases are not supported.
 
 Missing codes, unavailable bundles, ambiguous identifiers, incomplete routes,
@@ -76,86 +77,66 @@ marketplace code must now exist in Scalev. Team save activates the reviewed draf
 An application rollback does not reverse a saved v3 config: restore the previous
 config through a new audited revision if an old app release must be used.
 
-Store synchronization uses the Business connection on the server, reads the full
-Scalev Store bundle list before cache writes, and updates only the selected Store's
-availability links. A failed sync is marked failed and can be retried. Credentials
-never enter the browser catalog. Existing successful bundle–Store links can be
-used before the first parser-specific sync. The app's normal local network guard
-remains active: local tests may use an explicitly copied catalog snapshot; do not
-enable production integrations in local development or copy local records back
-to production.
+The parser now uses full Business catalog synchronization. Store membership tables
+and historical Store sync functions remain for existing consumers, but parser reads
+and validation do not use them. Business sync and parser sharing share a compare-and-
+swap lease in `scalev_catalog_sync_state`; lost/expired generations cannot mark success.
+Before a post-sharing sync, release the sharing claim into a non-ready state, then
+acquire a new sync claim. Competing syncs fail safely and never unlock partial data.
+Local diagnosis can use a copied snapshot; live Scalev changes remain disabled locally.
+Never copy local fixtures or database dumps back to production.
+
+This algorithm update requires **no new migration**. Preserve saved v3 Product and
+combination mappings. Configurations previously relying on common-Store inference
+must explicitly map Products before downloading. Historic migrations below should
+only be applied when genuinely pending, never replayed.
 
 ## Validation
 
 ### Database diagnosis and explicit Scalev repair
 
-**Periksa masalah** and **Muat ulang data aplikasi** perform indexed, exact
-`custom_id` lookups in the application database. They read only requested SKUs,
-active workspace Businesses and configured Store links. They do not load API
-credentials, call Scalev, scan whole Business catalogs, or expire completed
-snapshots based on age. Orders reuse the same synchronized database catalog.
-Missing cache data means **not recorded in the app**, not confirmed absent in
-Scalev. Failed/running Business syncs cannot authorize a missing/unique conclusion;
-Store syncs and catalog generation changes prevent partial snapshots from
-unlocking download. Names and SKU price suffixes are not matching rules.
+**Periksa masalah** and **Muat ulang data aplikasi** use indexed, exact `custom_id`
+lookups, scoped to active Businesses in the current workspace. No credentials, API
+calls, Store links or BPOs are needed. Completed snapshots do not expire based on age.
+Missing data means not recorded in the app, not confirmed absent in Scalev.
+A confirmed receiving-Business match remains valid if an unrelated Business is syncing.
+Cross-Business searches require complete snapshots before authorizing sharing.
 
-Ownership uses verified `scalev_owner_uid`, matched to the connections'
-`scalev_business_uid`. Legacy `owner_business_id/code` fields were sometimes
-inferred from the receiving Business and are not trusted for diagnosis or sharing.
-Missing owner/BPO metadata remains unknown, without fabricated options or prices.
+Ownership uses verified `scalev_owner_uid` matched to `scalev_business_uid`. Never
+trust inferred legacy owner Business fields. A shared bundle already available in
+the target is valid even if owner metadata or price options are missing.
 
-- **Sinkronkan Store dari Scalev** refreshes known diagnosed bundle IDs (including
-  those not yet installed), then synchronizes the selected Store. A completely
-  unknown SKU points to **Katalog & Master Data → External Catalog · Scalev** for
-  explicit Business catalog sync, then database reload. It does not scan every
-  connected Business automatically.
-- Full Business and Store syncs use paginated `/v3/bundles` (ownership and full
-  metadata) plus `/v3/bundles/simplified` (active BPOs). Store sync supplies
-  `store_id` to both lists. IDs/codes must agree before cache replacement. No
-  per-bundle detail fan-out is used to fill a whole catalog.
-- Available to the receiving Business: install a chosen bundle price option.
-  Not yet shared: verify the owner identity live, then share with
-  `POST /v3/bundles/{id}/partners`, passing the receiver's `partner_unique_id`
-  with the owner's credential. A reseller cannot authorize sharing.
-- Install with `POST /v3/stores/{id}/bundle-price-options` and explicit `bpo_ids`
-  using the receiving Business credential. Multiple BPOs require a choice;
-  hidden storefront options remain valid. Marketplace transaction prices remain.
-- Repairs revalidate identities, bundle IDs/codes, options and Store membership
-  live. Direct bundle-by-ID reads replace full Business scans; exact database
-  identifiers plus the selected Store's live catalog guard against duplicates.
-  New/changed codes outside the synchronized data require a Business catalog sync.
+- **Sinkronkan Business dari Scalev** explicitly refreshes the receiving Business's
+  full catalog. Full sync still preserves owner/price metadata for other consumers;
+  parser eligibility never uses those price options.
+- If a unique bundle exists only in another connected Business, **Bagikan ke Business**
+  verifies owner and receiver identities, exact bundle ID/code and existing sharing,
+  then calls `POST /v3/bundles/{id}/partners` with the receiver's `partner_unique_id`
+  using the owner's credential. It never calls the Store/BPO attachment endpoint.
+- Sharing retries check availability/partners first. POSTs are not automatically
+  replayed. Partial results preserve completed sharing and unresolved visibility.
+- After sharing, a full receiving-Business sync reconciles identifiers and duplicates.
+  The entire batch is reprojected, including filtered orders, and confirmation clears.
+- Store is a read-only destination from Product/combination mapping. Missing mapping
+  opens global settings. No per-order Store override and no catalog-price picker.
 
-Diagnosis/sync require parser access and the enabled Channels module. Sharing
-and installation also require `whs:mapping` (or platform owner access). Local
-development permits database diagnosis and blocks live Scalev calls. Credentials
-stay server-side. The signed, actor/workspace-bound diagnosis expires after ten
-minutes and binds the config revision, account, SKU, bundle, options and Stores.
-Optional legacy identifiers are resolved live before an explicit action, never
-guessed. Per-Store leases cover repair plus sync. Request/outcome audits use
-`warehouse_activity_log`.
+Diagnosis requires parser access and the Channels module. Sharing and full Business
+sync additionally require catalog tab access plus `whs:mapping` (or platform owner).
+Local development blocks live sync/mutations. Credentials remain server-side. The
+v2 signed permit is actor/workspace-bound, expires after ten minutes and binds config
+revision, account, target Business and exact sharing candidates. Old attachment/price
+requests and old permits are rejected. Request/outcome audits use `warehouse_activity_log`.
 
-The compact panel shows Bundle → Business → Store status before repair controls.
-A unique configured Store or active BPO is selected automatically; otherwise the
-Store precedes the BPO choice. The single primary action applies to the selected
-missing bundles; a single-bundle case has no batch checkbox unless previously
-excluded. Explicit exclusions survive Store changes and reloads; multi-bundle
-cases retain checkboxes even with one remaining candidate. **Detail & aksi lain**
-contains ownership, sync timestamps, database reload, explicit Store sync and
-global routing settings. Unknown cached BPOs promote Store sync to the main
-action. Incomplete snapshots never show a successful installed status. The order
-total is displayed separately and is not replaced by the selected BPO price.
-
-Writes are not automatically replayed. Partial results identify completed
-sharing/attachment stages. Sync failure keeps download blocked. A successful sync
-replaces the catalog, reprojects the entire uploaded batch (including filtered
-orders), and clears download confirmation. Server-side download validation stays
-mandatory. Routing/combination/Warehouse issues use global parser settings;
-there are no per-order destination overrides.
+The compact panel shows Bundle → Business → mapped Store with a visible marketplace
+total. **Detail & aksi lain** holds ownership, timestamps, reload, sync and settings.
+Sharing uses one primary action; exclusions persist across reloads and multi-bundle
+cases retain selection controls even with one remaining candidate. Incomplete
+snapshots promote explicit sync. Missing/duplicate identifiers link to the catalog.
 
 ### Shared API request budget and rollout
 
-Apply **only** `20261110120000_parser_cached_diagnosis.sql` before activating this
-release and its workers. It adds nullable owner/BPO metadata, an exact identifier
+The previous release introduced `20261110120000_parser_cached_diagnosis.sql`.
+Check that it is already applied; this algorithm update adds no migration. It adds nullable owner/BPO metadata, an exact identifier
 index and a service-only API budget table/RPC. It does not rewrite old catalog
 rows, team configuration, or external Scalev data. An old app remains compatible
 with this additive migration. Missing RPC/schema fails closed for live requests.
@@ -169,19 +150,18 @@ Queued calls recheck cooldown and reserve a new spaced slot if needed. Waits ove
 No raw API key, customer payload, or upstream error body is stored in this table.
 Calls from outside these adapters/other apps are not coordinated by this budget.
 
-After release, explicitly sync the Businesses/Stores in use to populate owner
-UIDs and BPO choices for legacy data. Existing SKU and membership cache can be
-read immediately. Old rows without BPO metadata require sync before offering
-installation; incomplete owner identity cannot authorize sharing. Apply no local
-fixtures or database dumps to production. A code rollback leaves the additive
-migration in place and requires no data rollback.
+Existing successful full Business snapshots can be reused. If a Business has no
+completed full snapshot, explicitly sync that Business. Missing price metadata does
+not block download; missing verified owner identity only prevents sharing.
+No production data mutation is part of deployment. A code rollback requires no
+schema rollback but restores the older Store-membership validation behavior.
 
 ### Checks
 
 - `npm run test:marketplace-parser`: domain, interaction, server access/export,
   catalog scope, warehouse labels, Scalev pagination, exact database diagnosis with zero Scalev calls,
-  sharing/attachment retry, signed action scope, management access, partial
-  failures, BPO selection, bulk actions and whole-batch revalidation regressions.
+  Business-only sharing retry, signed action scope, management access, partial
+  failures, no Store/BPO requirement, bulk actions and whole-batch revalidation regressions.
 - `node tests/marketplace-parser-config-database.mjs`: isolated PostgreSQL checks
   for config history/CAS, v1/v2/v3 compatibility, sync-state constraints, RLS and the shared request-budget RPC.
 - `npm run typecheck:app`, `npm run lint`, `npm run build`.

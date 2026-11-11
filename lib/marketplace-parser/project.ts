@@ -13,8 +13,7 @@ export function classifySku(sku: string, account: string, config: ParserConfig) 
   const sets = new Set(top.map(c => JSON.stringify([...c.rule.productIds].sort())));
   return { productIds: sets.size === 1 ? [...top[0].rule.productIds] : [], rule: top.map(c => c.rule.id).join(', '), ambiguous: sets.size > 1 };
 }
-// Shared by projection and repair: installing a bundle must not bypass the
-// account's Product/combination routing, even before its catalog is complete.
+// Store selection is exclusively based on the saved Product/combination rules.
 export function configuredOrderRoute(skus: string[], account: string, config: ParserConfig) {
   const classified = skus.map(sku => classifySku(sku,account,config));
   const productIds = new Set(classified.flatMap(line => line.productIds));
@@ -30,7 +29,8 @@ export function configuredOrderRoute(skus: string[], account: string, config: Pa
     if (!allClassified || [...productIds].some(id => routes.filter(r => r.productId === id).length !== 1)) errors.push('Routing Produk belum lengkap. Lengkapi pengenalan Produk dan routing akun ini.');
     if (targetIds.length !== 1) errors.push('Produk dalam order memilih Store berbeda. Tambahkan aturan kombinasi untuk menentukan satu Store tujuan.');
   }
-  if (combinationRules.length && !allClassified) errors.push('Produk pada sebagian SKU belum dikenali. Lengkapi pengenalan Produk sebelum mengevaluasi aturan kombinasi.');
+  if (!allClassified) errors.push('Produk pada sebagian SKU belum dikenali. Lengkapi pengenalan Produk sebelum menentukan Store.');
+  if (!rules.length) errors.push('Routing Produk belum tersedia untuk order ini. Lengkapi mapping Produk atau aturan kombinasi.');
   if (classified.some(line => line.ambiguous)) errors.push('Pengenalan Produk ambigu. Perbaiki aturan Produk.');
   return { targetIds,routeIds: rules.map(r => r.id),errors,hasRules: rules.length > 0 };
 }
@@ -52,10 +52,10 @@ export function projectMarketplace(input: { file: ParsedFile; account: string; d
   const business = sourceAccount.business;
   const storeScopes = config.stores.filter(scope => catalog.stores.some(s => s.id === scope.storeId && s.business === business));
   const storeIds = new Set(storeScopes.map(scope => scope.storeId));
-  // Index only the selected Business/Stores. Matching never broadens into another Business.
+  // Match exact identifiers within the receiving Business, independent of Store membership.
   const skuIndex = new Map<string, Catalog['bundles']>();
   for (const bundle of catalog.bundles) {
-    if (bundle.business !== business || !bundle.sku || !bundle.storeIds.some(id => storeIds.has(id))) continue;
+    if (bundle.business !== business || !bundle.sku) continue;
     skuIndex.set(bundle.sku,[...(skuIndex.get(bundle.sku) || []),bundle]);
   }
   const orders: PreviewOrder[] = file.orders.map(source => {
@@ -76,7 +76,7 @@ export function projectMarketplace(input: { file: ParsedFile; account: string; d
       if (unit === null) lineErrors.push(line.totalCents !== null ? 'Harga per unit membutuhkan pecahan di bawah Rp0,01; lengkapi nilai yang menjaga total.' : 'Harga satuan belum tersedia.');
       if (unit !== null && (!Number.isSafeInteger(unit) || unit < 0)) lineErrors.push('Harga harus berupa angka yang valid dan tidak negatif.');
       if (!sku) lineErrors.push('Nomor Referensi SKU kosong. Lengkapi kode pada file marketplace; nama produk tidak digunakan untuk menebak bundle.');
-      else if (!skuIndex.has(sku)) lineErrors.push(`Kode ${sku} tidak ditemukan pada bundle di Store yang digunakan dalam ${business}. Selesaikan identifier code/ketersediaan bundle di Scalev lalu sinkronkan.`);
+      else if (!skuIndex.has(sku)) lineErrors.push(`Kode ${sku} tidak ditemukan pada bundle di Business ${business}. Selesaikan identifier code/ketersediaan bundle di Scalev lalu sinkronkan.`);
       if (classified.ambiguous) lineErrors.push(`Pengenalan Produk untuk SKU ${sku} ambigu. Perbaiki aturan Produk.`);
       const total = q !== null && unit !== null ? q * unit : null;
       if (total !== null && !Number.isSafeInteger(total)) lineErrors.push('Total item di luar batas angka eksak.');
@@ -86,14 +86,8 @@ export function projectMarketplace(input: { file: ParsedFile; account: string; d
     });
     const routing = configuredOrderRoute(lines.map(line => line.sku),account,config);
     errors.push(...routing.errors);
-    let targetIds = routing.targetIds;
+    const targetIds = routing.targetIds;
     const routeIds = routing.routeIds;
-    if (!routing.hasRules) {
-      // With no applicable route, a unique common Store can be derived from the
-      // bundle relations. Never select the first of several possible Stores.
-      targetIds = [...storeIds].filter(id => lines.every(line => (skuIndex.get(line.sku) || []).some(bundle => bundle.storeIds.includes(id))));
-      if (targetIds.length !== 1) errors.push(targetIds.length ? 'Bundle tersedia di beberapa Store. Atur Produk dan routing untuk akun ini.' : 'Tidak ada satu Store yang menyediakan seluruh SKU order. Perbaiki bundle atau aturan Store.');
-    }
     const storeId = targetIds.length === 1 ? targetIds[0] : null;
     const store = catalog.stores.find(s => s.id === storeId && s.business === business && storeIds.has(s.id));
     if (!store) errors.push('Store tujuan belum pasti atau berada di luar Business akun asal. Perbaiki aturan parsing.');
@@ -101,14 +95,13 @@ export function projectMarketplace(input: { file: ParsedFile; account: string; d
     const warehouse = catalog.warehouses.find(w => w.id === scope?.warehouseId && w.businesses.includes(business));
     if (!warehouse) errors.push('Warehouse untuk Store tujuan belum dipilih atau tidak terhubung dengan Business. Perbaiki pengaturan Store.');
     else if (!warehouse.exportName) errors.push('Nama ekspor Scalev untuk Warehouse belum terkonfirmasi atau ambigu. Lengkapi nama Warehouse pada pengaturan integrasi marketplace di aplikasi.');
-    const sync = catalog.storeSyncs.find(s => s.storeId === storeId);
-    if (storeId && (!catalog.loadedStoreIds.includes(storeId) || sync?.status !== 'ready')) errors.push('Katalog Store tujuan belum siap. Sinkronkan atau muat ulang katalog sebelum download.');
+    const sync = catalog.businessSyncs.find(s => s.business === business);
+    if (!catalog.loadedBusinessCodes.includes(business) || sync?.status !== 'ready') errors.push('Katalog Business tujuan belum siap. Sinkronkan Business atau muat ulang katalog sebelum download.');
     for (const line of lines) {
-      if (!store) continue;
-      const bundles = (skuIndex.get(line.sku) || []).filter(b => b.storeIds.includes(store.id));
+      const bundles = skuIndex.get(line.sku) || [];
       const uniqueBundles = [...new Map(bundles.map(b => [b.id,b])).values()];
-      if (uniqueBundles.length !== 1) line.errors.push(uniqueBundles.length ? `Kode ${line.sku} cocok ke ${uniqueBundles.length} bundle di ${store.name}. Benahi identifier code di Scalev.` : `Bundle dengan kode ${line.sku || '(kosong)'} tidak tersedia di ${business} → ${store.name}. Selesaikan di Scalev lalu sinkronkan.`);
-      else { line.bundleId = uniqueBundles[0].id; line.bundleName = uniqueBundles[0].name; }
+      if (uniqueBundles.length > 1) line.errors.push(`Kode ${line.sku} cocok ke ${uniqueBundles.length} bundle di Business ${business}. Benahi identifier code di Scalev.`);
+      else if (uniqueBundles.length === 1) { line.bundleId = uniqueBundles[0].id; line.bundleName = uniqueBundles[0].name; }
     }
     const edit = edits.orders[source.key];
     if (edit && Object.keys(edit).some(k => k !== 'reason') && !edit.reason?.trim()) errors.push('Isi alasan koreksi order.');

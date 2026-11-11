@@ -13,7 +13,7 @@ function fixture() {
     scalev_webhook_businesses: [row({ id: 4,business_code: 'RTI',is_active: true,scalev_business_uid: 'TARGET_UID' }),row({ id: 8,business_code: 'RLB',is_active: true,scalev_business_uid: 'OWNER_UID' })],
     scalev_catalog_bundles: [bundle],
     scalev_catalog_bundle_store_links: [row({ id: 1,business_id: 4,scalev_bundle_id: 2,scalev_store_id: 15443,store_name: 'Marketplace',is_available: true,last_checked_at: '2020-01-01T00:00:00Z' })],
-    scalev_catalog_sync_state: [row({ business_id: 4,sync_status: 'success',updated_at: '2020-01-01T00:00:00Z' })],
+    scalev_catalog_sync_state: [4,8].map(business_id => row({ business_id,sync_status: 'success',last_synced_at: '2020-01-01T00:00:00Z',updated_at: '2020-01-01T00:00:00Z' })),
     marketplace_parser_store_syncs: [row({ store_id: 10,status: 'ready',synced_at: '2020-01-01T00:00:00Z',updated_at: '2020-01-01T00:00:00Z' })],
   };
   const input = { workspaceId: 'w',actorId: 'u',revision: 3,account: 'roove',skus: ['ROV20-295'],config: configFixture(),stores: [{ id: 10,name: 'Marketplace',scalevId: null,uniqueId: null }] };
@@ -32,13 +32,15 @@ test('old but completed snapshots are reused indefinitely, with exact scoped que
       const result = await f.diagnose();
       assert.equal(result.diagnosis.items[0].status,'found');
       assert.equal(result.diagnosis.items[0].bundles[0].owner,'RLB');
-      assert.deepEqual(result.diagnosis.items[0].bundles[0].installedStoreIds,[10]);
-      assert.equal(result.permit.stores[0].scalevId,15443);
+      assert.equal(result.diagnosis.items[0].bundles[0].availableInBusiness,true);
+      assert.equal(result.diagnosis.suggestedStoreId,10);
+      assert.deepEqual(result.permit.bundles,[]);
     }
   } finally { globalThis.fetch = original; }
   for (const query of f.db.queries) {
     assert.ok(query.filters.some(([op,key,value]) => op === 'eq' && key === 'workspace_id' && value === 'w'));
-    assert.doesNotMatch(query.columns,/api_key|\*/);
+    assert.doesNotMatch(query.columns,/api_key|price_options|\*/);
+    assert.doesNotMatch(query.table,/store_links|store_syncs/);
     if (query.table === 'scalev_catalog_bundles') assert.ok(query.filters.some(([op,key,value]) => op === 'in' && key === 'custom_id' && JSON.stringify(value) === '["ROV20-295"]'));
   }
 });
@@ -48,31 +50,23 @@ test('legacy inferred owner and missing options remain unknown, never authorize 
   const { diagnosis,permit } = await f.diagnose();
   const bundle = diagnosis.items[0].bundles[0];
   assert.equal(bundle.owner,'Belum tersinkron'); assert.equal(bundle.canShare,false);
-  assert.equal(bundle.optionsSynced,false); assert.deepEqual(bundle.options,[]);
-  assert.deepEqual(permit.bundles[0].optionIds,[]);
-  assert.equal(permit.bundles[0].sourceBusinessId,8,'Known ID can still be explicitly refreshed');
-  assert.deepEqual(bundle.installedStoreIds,[],'Old links cannot prove installation after receiving Business availability is removed');
+  assert.deepEqual(permit.bundles,[]);
 });
 
-test('partial Business or Store sync cannot report a ready installation',async () => {
+test('only receiving Business sync governs availability; unrelated or Store sync failure is irrelevant',async () => {
   for (const status of ['running','failed']) {
     const f = fixture(); f.tables.scalev_catalog_sync_state[0].sync_status = status;
     const result = await f.diagnose();
     assert.equal(result.diagnosis.items[0].status,'unavailable'); assert.deepEqual(result.permit.bundles,[]);
   }
-  const f = fixture(); f.tables.marketplace_parser_store_syncs[0].status = 'syncing';
-  const result = await f.diagnose();
-  assert.deepEqual(result.diagnosis.items[0].bundles[0].installedStoreIds,[]);
-  assert.match(result.diagnosis.issues.join(' '),/belum selesai/);
+  const f = fixture(); f.tables.marketplace_parser_store_syncs[0].status = 'syncing'; f.tables.scalev_catalog_sync_state[1].sync_status = 'failed';
+  assert.equal((await f.diagnose()).diagnosis.items[0].bundles[0].availableInBusiness,true);
 });
-
-test('a Business or Store sync that starts and finishes during a read invalidates the entire snapshot',async () => {
-  for (const table of ['scalev_catalog_sync_state','marketplace_parser_store_syncs'] as const) {
-    const f = fixture(); const db = diagnosisDb(f.tables,(name,count) => {
-      if (name === table && count === 2) f.tables[table][0].updated_at = '2026-11-10T00:00:00Z';
-    });
-    await assert.rejects(readCachedDiagnosis(f.input,db as any),/Katalog sedang berubah/);
-  }
+test('a Business generation change invalidates the snapshot',async () => {
+  const f = fixture(); const db = diagnosisDb(f.tables,(name,count) => {
+    if (name === 'scalev_catalog_sync_state' && count === 2) f.tables.scalev_catalog_sync_state[0].updated_at = '2026-11-10T00:00:00Z';
+  });
+  assert.equal((await readCachedDiagnosis(f.input,db as any)).diagnosis.items[0].status,'unavailable');
 });
 
 test('absence in cached data asks for catalog sync and never claims live Scalev absence',async () => {
@@ -83,19 +77,16 @@ test('absence in cached data asks for catalog sync and never claims live Scalev 
   assert.deepEqual(result.permit.bundles,[]);
 });
 
-test('ambiguous cached Store identity is not offered as an installation target',async () => {
-  const f = fixture(); f.tables.scalev_catalog_bundle_store_links.push({ ...f.tables.scalev_catalog_bundle_store_links[0],id: 2,scalev_store_id: 999 });
-  const result = await f.diagnose();
-  assert.deepEqual(result.permit.stores,[]); assert.match(result.diagnosis.issues.join(' '),/tidak konsisten/);
-  assert.equal(result.diagnosis.suggestedStoreId,null);
-  f.tables.scalev_catalog_bundle_store_links[1].is_available = false;
-  const recovered = await f.diagnose();
-  assert.equal(recovered.permit.stores[0].scalevId,15443,'Inactive historical links do not override current identity');
+test('Store destination follows mapping only and price metadata never gates Business availability',async () => {
+  const f = fixture(); f.tables.scalev_catalog_bundle_store_links = [];
+  Object.assign(f.bundle.price_options[0],{ price: null });
+  const mapped = await f.diagnose();
+  assert.equal(mapped.diagnosis.suggestedStoreId,10);
+  assert.equal(mapped.diagnosis.items[0].bundles[0].availableInBusiness,true);
+  f.input.config.routes = []; f.input.config.combinations = [];
+  assert.equal((await f.diagnose()).diagnosis.suggestedStoreId,null);
 });
-
-test('malformed cached prices cannot be signed; hidden options are valid and inactive options excluded',async () => {
-  const f = fixture(); Object.assign(f.bundle.price_options[0],{ price: null });
-  await assert.rejects(f.diagnose(),/Pilihan harga/);
+test('catalog metadata still preserves hidden options and excludes inactive options for other catalog consumers',() => {
   const result = cachedBundleMetadata({ business: { id: 3,unique_id: 'UID',account_holder: 'Owner' } },[
     { id: 1,name: 'Hidden',price: '0',is_visible: false },{ id: 2,name: 'Inactive',price: '20',is_active: false },
   ]);

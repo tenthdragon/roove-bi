@@ -2,13 +2,12 @@ import { createHmac, timingSafeEqual } from 'node:crypto';
 export type DiagnosisPermit = {
   workspaceId: string; actorId: string; revision: number; account: string; expiresAt: number;
   targetBusinessId: number; targetUid: string | null; skus: string[];
-  stores: { id: number; scalevId: number | null; name: string }[];
-  bundles: { sku: string; id: number; sourceBusinessId: number; ownerUid: string | null; optionIds: number[]; canShare: boolean }[];
+  bundles: { sku: string; id: number; sourceBusinessId: number; ownerUid: string | null; canShare: boolean }[];
 };
 function signature(data: string) {
   const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
   if (!key) throw new Error('Penandatangan diagnosis belum tersedia.');
-  return createHmac('sha256', key).update(`marketplace-parser-repair-v1:${data}`).digest();
+  return createHmac('sha256', key).update(`marketplace-parser-business-repair-v2:${data}`).digest();
 }
 export function signDiagnosis(permit: DiagnosisPermit) {
   const data = Buffer.from(JSON.stringify(permit)).toString('base64url');

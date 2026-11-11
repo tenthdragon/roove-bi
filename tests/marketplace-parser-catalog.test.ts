@@ -36,16 +36,21 @@ beforeEach(() => {
     scalev_catalog_bundle_store_links: [row({ id: 1,business_id: 4,scalev_bundle_id: 101,store_name: 'Selected Store',is_available: true,last_checked_at: '2026-11-09' }),row({ id: 2,business_id: 4,scalev_bundle_id: 102,store_name: 'Unused Store',is_available: true,last_checked_at: '2026-11-09' }),row({ id: 3,business_id: 4,scalev_bundle_id: 103,store_name: 'Selected Store',is_available: false,last_checked_at: '2026-11-09' })],
     scalev_catalog_bundles: [row({ id: 1,business_id: 4,scalev_bundle_id: 101,custom_id: 'SKU-A',name: 'Bundle A',last_synced_at: '2026-11-09' }),row({ id: 2,business_id: 4,scalev_bundle_id: 102,custom_id: 'SKU-B',name: 'Bundle B',last_synced_at: '2026-11-09' })],
     marketplace_parser_store_syncs: [],
+    scalev_catalog_sync_state: [row({business_id: 4,sync_status: 'success',last_synced_at: '2026-11-09',updated_at: 'before'})],
   };
 });
-test('metadata load avoids every bundle query; selected Stores narrow both links and bundle IDs', async () => {
+test('metadata load avoids bundle queries; receiving Business includes bundles without Store links', async () => {
   await readParserCatalog('workspace-a', []);
   assert.ok(!queries.some(q => q.table.includes('catalog_bundle')));
   queries = [];
   const catalog = await readParserCatalog('workspace-a', [10]);
   assert.deepEqual(catalog.loadedStoreIds, [10]);
-  assert.deepEqual(catalog.bundles.map(b => [b.id,b.sku,b.storeIds]), [[101,'SKU-A',[10]]]);
-  assert.deepEqual(queries.find(q => q.table === 'scalev_catalog_bundles')?.filters.find(f => f[1] === 'scalev_bundle_id'), ['in','scalev_bundle_id',[101]]);
+  assert.deepEqual(catalog.bundles.map(b => [b.id,b.sku]), [[101,'SKU-A'],[102,'SKU-B']]);
+  assert.ok(!queries.some(q => /store_links|store_syncs/.test(q.table)));
+  assert.deepEqual(catalog.loadedBusinessCodes,['RTI']);
+  assert.equal((await readParserCatalog('workspace-a',[],undefined,['RTI'])).bundles.length,2);
+  assert.deepEqual((await readParserCatalog('workspace-a',[10],undefined,['JHN'])).bundles,[]);
+  await assert.rejects(readParserCatalog('workspace-a',[],undefined,['foreign']),/Business/);
   await assert.rejects(readParserCatalog('workspace-a', [99]), /bukan milik workspace/);
 });
 test('Warehouse export names come from configured integration data; missing/ambiguous labels stay unresolved', async () => {
@@ -58,11 +63,11 @@ test('Warehouse export names come from configured integration data; missing/ambi
 });
 test('empty completed catalog is distinct from unknown; a failed/in-progress sync blocks even with old links', async () => {
   let catalog = await readParserCatalog('workspace-a', [10,20]);
-  assert.deepEqual(catalog.storeSyncs.map(s => s.status), ['ready','unknown']);
+  assert.deepEqual(catalog.businessSyncs.map(s => s.status), ['ready','unknown']);
   const before = catalog.version;
-  rows.marketplace_parser_store_syncs = [{ workspace_id: 'workspace-a',store_id: 10,status: 'syncing',synced_at: null,bundle_count: 1 },{ workspace_id: 'workspace-a',store_id: 20,status: 'ready',synced_at: '2026-11-09',bundle_count: 0 }];
+  rows.scalev_catalog_sync_state = [{ workspace_id: 'workspace-a',business_id: 4,sync_status: 'running',last_synced_at: null,updated_at: 'after' },{ workspace_id: 'workspace-a',business_id: 2,sync_status: 'success',last_synced_at: '2026-11-09',updated_at: 'after' }];
   catalog = await readParserCatalog('workspace-a', [10,20]);
-  assert.deepEqual(catalog.storeSyncs.map(s => s.status), ['failed','ready']);
+  assert.deepEqual(catalog.businessSyncs.map(s => s.status), ['failed','ready']);
   assert.notEqual(catalog.version, before);
   assert.equal(catalog.version, (await readParserCatalog('workspace-a', [10,20])).version);
 });
@@ -71,15 +76,15 @@ test('catalog pagination reads past the database page limit and propagates incom
   assert.equal((await allPages(async (from,to) => ({ data: data.slice(from,to + 1),error: null }))).length, 1001);
   await assert.rejects(allPages(async () => ({ data: null,error: { message: 'failed' } })), /belum dapat dimuat/);
 });
-test('Business sync failure and an intervening Store sync cannot unlock a partially updated catalog',async () => {
+test('Business sync failure and an intervening Business sync cannot unlock a partially updated catalog',async () => {
   rows.scalev_catalog_sync_state = [{ workspace_id: 'workspace-a',business_id: 4,sync_status: 'failed',updated_at: 'before' }];
-  assert.equal((await readParserCatalog('workspace-a',[10])).storeSyncs[0].status,'failed');
-  rows.scalev_catalog_sync_state[0].sync_status = 'success';
+  assert.equal((await readParserCatalog('workspace-a',[10])).businessSyncs[0].status,'failed');
+  Object.assign(rows.scalev_catalog_sync_state[0],{sync_status: 'success',last_synced_at: '2026-11-09'});
   rows.marketplace_parser_store_syncs = [{ workspace_id: 'workspace-a',store_id: 10,status: 'ready',synced_at: '2026-11-09',updated_at: 'before' }];
-  onRead = table => { if (table === 'scalev_catalog_bundles') rows.marketplace_parser_store_syncs[0].updated_at = 'after'; };
-  assert.equal((await readParserCatalog('workspace-a',[10])).storeSyncs[0].status,'failed');
+  onRead = table => { if (table === 'scalev_catalog_bundles') rows.scalev_catalog_sync_state[0].updated_at = 'after'; };
+  assert.equal((await readParserCatalog('workspace-a',[10])).businessSyncs[0].status,'failed');
   onRead = undefined;
-  assert.equal((await readParserCatalog('workspace-a',[10])).storeSyncs[0].status,'ready');
+  assert.equal((await readParserCatalog('workspace-a',[10])).businessSyncs[0].status,'ready');
 });
 const page = (ids: number[], hasNext: boolean, lastId?: number) => new Response(JSON.stringify({ code: 200,data: { results: ids.map(id => ({ id })),has_next: hasNext,last_id: lastId } }));
 test('Scalev pagination uses the cursor, rejects repeats/incomplete responses, and restricts endpoints', async () => {

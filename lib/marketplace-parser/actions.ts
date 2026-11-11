@@ -5,7 +5,7 @@ import { createServiceSupabase } from '../service-supabase';
 import { isWorkspaceModuleEnabled } from '../workspaces';
 import { migrateParserConfig, validateCatalogConfig, validateParserConfig } from './config';
 import { readParserCatalog } from './catalog';
-import { syncParserStore } from './sync';
+import { syncScalevCatalogBusiness } from '../scalev-catalog-actions';
 import { exportBusinessCsv, projectMarketplace } from './project';
 import type { Edits, ParsedFile, ParserConfig, ParserContext } from './types';
 
@@ -22,20 +22,25 @@ export async function getParserContext(expectedWorkspace: string, includeBundles
   if (settings.error && !missingSchema) throw new Error('Konfigurasi belum dapat dimuat. Coba muat ulang.');
   const metadata = await readParserCatalog(ctx.workspaceId,[],db);
   const migrated = migrateParserConfig(settings.data?.config,metadata);
-  const catalog = includeBundles && migrated.config.stores.length ? await readParserCatalog(ctx.workspaceId,migrated.config.stores.map(s => s.storeId).filter(id => metadata.stores.some(s => s.id === id)),db) : metadata;
+  const businessCodes = [...new Set(migrated.config.accounts.map(a => a.business))].filter(code => metadata.businesses.some(b => b.code === code));
+  const catalog = includeBundles ? await readParserCatalog(ctx.workspaceId,migrated.config.stores.map(s => s.storeId).filter(id => metadata.stores.some(s => s.id === id)),db,businessCodes) : metadata;
   let canManageCatalog = false;
-  try { const manager = await requireDashboardPermissionAccess('whs:mapping','Pengelolaan katalog Scalev'); canManageCatalog = manager.workspaceId === ctx.workspaceId && manager.profile.id === ctx.profile.id; } catch { /* Diagnosis remains available to parser readers. */ }
+  try { await requireDashboardTabAccess('warehouse-settings','Katalog Scalev'); const manager = await requireDashboardPermissionAccess('whs:mapping','Pengelolaan katalog Scalev'); canManageCatalog = manager.workspaceId === ctx.workspaceId && manager.profile.id === ctx.profile.id; } catch { /* Diagnosis remains available to parser readers. */ }
   return { workspaceId: ctx.workspaceId,config: migrated.config,revision: settings.data?.revision || 0,catalog,canSave: !missingSchema,canSync: process.env.ROOVE_LOCAL_DEV !== '1',canManageCatalog,migrationNotes: migrated.notes };
 }
-export async function getParserCatalog(expectedWorkspace: string, storeIds: number[]) {
+export async function getParserCatalog(expectedWorkspace: string, storeIds: number[], businessCodes?: string[]) {
   const ctx = await access(expectedWorkspace);
-  return readParserCatalog(ctx.workspaceId,storeIds);
+  return readParserCatalog(ctx.workspaceId,storeIds,undefined,businessCodes);
 }
-export async function syncParserCatalogStore(expectedWorkspace: string, storeId: number) {
+export async function syncParserCatalogBusiness(expectedWorkspace: string, businessCode: string) {
   const ctx = await access(expectedWorkspace);
-  if (process.env.ROOVE_LOCAL_DEV === '1') throw new Error('Sinkronisasi langsung Scalev tidak aktif di lingkungan lokal. Gunakan snapshot katalog lokal yang telah disiapkan.');
-  if (!Number.isSafeInteger(storeId) || storeId <= 0) throw new Error('Store tidak valid.');
-  return syncParserStore(ctx.workspaceId,storeId);
+  if (process.env.ROOVE_LOCAL_DEV === '1') throw new Error('Sinkronisasi langsung Scalev tidak aktif di lingkungan lokal.');
+  const manager = await requireDashboardPermissionAccess('whs:mapping','Pengelolaan katalog Scalev');
+  if (manager.workspaceId !== ctx.workspaceId || manager.profile.id !== ctx.profile.id) throw new Error('Sesi atau workspace berubah.');
+  const metadata = await readParserCatalog(ctx.workspaceId,[]);
+  const business = metadata.businesses.find(b => b.code === businessCode);
+  if (!business) throw new Error('Business tidak aktif atau bukan milik workspace ini.');
+  return syncScalevCatalogBusiness(business.id);
 }
 export async function saveParserConfig(expectedWorkspace: string, expectedRevision: number, config: ParserConfig) {
   const ctx = await access(expectedWorkspace); validateParserConfig(config);

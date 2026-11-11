@@ -38,7 +38,7 @@ test('two SKU items remain two different Scalev bundles in one order, with exact
 test('contains rule routes any order with the configured Product, without a hardcoded Roove condition',() => {
   const c = configFixture(); c.combinations[0] = { id: 'custom',account: 'roove',productIds: ['globite'],match: 'contains',priority: 50,storeId: 12 };
   const p = projection(file('GLB-150','OGD-100'),c); assert.equal(p.orders[0].storeId,12); assert.ok(orderReady(p.orders[0]));
-  c.combinations[0].storeId = 11; blocked(projection(file('GLB-150','OGD-100'),c));
+  c.combinations[0].storeId = 11; assert.ok(orderReady(projection(file('GLB-150','OGD-100'),c).orders[0]));
 });
 test('exact combination does not match an order containing an extra Product',() => {
   const c = configFixture(); c.combinations = [{ id: 'pair',account: 'roove',productIds: ['globite','pluve'],match: 'exact',priority: 10,storeId: 11 }];
@@ -47,7 +47,7 @@ test('exact combination does not match an order containing an extra Product',() 
 });
 test('priority picks one combination; tied different destinations block the whole batch',() => {
   const c = configFixture(); c.combinations.push({ id: 'pair',account: 'roove',productIds: ['roove','pluve'],match: 'exact',priority: 200,storeId: 11 });
-  const catalog = catalogFixture(); catalog.bundles[0].storeIds.push(11);
+  const catalog = catalogFixture();
   assert.equal(projection(file('ROV20-295','PLV20-245'),c,catalog).orders[0].storeId,11);
   c.combinations[1].priority = 100; blocked(projection(file('ROV20-295','PLV20-245'),c,catalog));
 });
@@ -55,10 +55,10 @@ test('two distinct SKU variants in the same Product use a single Product route',
   const c = configFixture(); c.combinations = [];
   const p = projection(file('ROV20-295','ROV10-150'),c); assert.ok(orderReady(p.orders[0])); assert.deepEqual(p.orders[0].lines.map(l => l.bundleId),[101,105]);
 });
-test('a unique shared Store is reverse-resolved from bundle relations without per-order or per-SKU routing',() => {
-  const c = configFixture(); c.products = []; c.groups = []; c.routes = []; c.combinations = [];
-  const p = projection(file('ROV20-295','ROV10-150'),c); assert.ok(orderReady(p.orders[0])); assert.equal(p.orders[0].storeId,10);
-  blocked(projection(file('PLV20-245'),c));
+test('Store requires Product mapping even with one selected Store; bundle relations never infer a destination',() => {
+  const c = configFixture(); c.routes = []; c.combinations = []; c.stores = [{storeId: 10,warehouseId: 1}];
+  blocked(projection(file('ROV20-295'),c));
+  c.products = []; blocked(projection(file('ROV20-295'),c));
 });
 test('an unmapped Product cannot bypass a potentially applicable combination',() => {
   const c = configFixture(); c.products = c.products.filter(r => r.value !== 'PLV');
@@ -69,21 +69,24 @@ test('selected Store universe is enforced even if broader catalog data is provid
   c.routes = c.routes.filter(r => r.storeId !== 10); c.combinations = [];
   blocked(projection(file('ROV20-295'),c));
 });
-test('bundle found elsewhere in the Business is not sufficient for the destination Store',() => {
-  const catalog = catalogFixture(); catalog.bundles.find(b => b.id === 102)!.storeIds = [11];
-  const p = projection(file('ROV20-295','PLV20-245'),configFixture(),catalog); assert.equal(p.orders[0].storeId,10); blocked(p);
+test('Business availability is sufficient regardless of Store membership and catalog prices',() => {
+  const catalog = catalogFixture();
+  const p = projection(parseWorkbook(book({ orders: [shopee({'Harga Setelah Diskon': 281234.56}),shopee({'Nomor Referensi SKU': 'PLV20-245','Harga Setelah Diskon': 0})] })),configFixture(),catalog);
+  assert.equal(p.orders[0].storeId,10); assert.ok(orderReady(p.orders[0]));
+  assert.deepEqual(p.orders[0].rows.map(r => r.price),['281234.56','0']);
+  assert.equal(p.orders[0].totalCents,56246912);
+  assert.match(exportBusinessCsv(p,'RTI'),/281234.56/);
 });
-test('same code on different Store-specific bundles is valid; duplicate code inside the destination Store blocks',() => {
-  const catalog = catalogFixture(); catalog.bundles.push({ id: 999,business: 'RTI',sku: 'ROV20-295',name: 'Another Store bundle',storeIds: [11],syncedAt: null });
-  assert.ok(orderReady(projection(file('ROV20-295'),configFixture(),catalog).orders[0]));
-  catalog.bundles.at(-1)!.storeIds = [10]; blocked(projection(file('ROV20-295'),configFixture(),catalog));
+test('duplicate identifier anywhere in receiving Business blocks, regardless of Store membership',() => {
+  const catalog = catalogFixture(); catalog.bundles.push({ id: 999,business: 'RTI',sku: 'ROV20-295',name: 'Duplicate',syncedAt: null });
+  blocked(projection(file('ROV20-295'),configFixture(),catalog));
 });
 test('missing bundle, blank SKU, changed case and old alias never fall back to product names',() => {
   for (const sku of ['NEW-CODE','','rov20-295','SRTARM-250']) { const p = projection(file(sku)); blocked(p); assert.equal(p.orders[0].lines[0].sku,sku); }
 });
-test('a failed or unloaded Store catalog blocks download even when matching bundles are cached',() => {
-  const catalog = catalogFixture(); catalog.storeSyncs[0].status = 'failed'; blocked(projection(file('ROV20-295'),configFixture(),catalog));
-  catalog.storeSyncs[0].status = 'ready'; catalog.loadedStoreIds = [11,12,20]; blocked(projection(file('ROV20-295'),configFixture(),catalog));
+test('a failed or unloaded Business catalog blocks download even when matching bundles are cached',() => {
+  const catalog = catalogFixture(); catalog.businessSyncs[0].status = 'failed'; blocked(projection(file('ROV20-295'),configFixture(),catalog));
+  catalog.businessSyncs[0].status = 'ready'; catalog.loadedBusinessCodes = ['JHN']; blocked(projection(file('ROV20-295'),configFixture(),catalog));
 });
 test('manual overrides of Business, Store, Warehouse or SKU are rejected',() => {
   for (const field of ['business','store','warehouse']) assert.throws(() => projection(file('ROV20-295'),configFixture(),catalogFixture(),undefined,{ lines: {},orders: { 'shopee:order:ORDER-TEST-1': { [field]: 'OTHER',reason: 'test' } } } as Edits),/tidak boleh/);

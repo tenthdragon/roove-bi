@@ -6,10 +6,7 @@ export type BundleFinding = {
   owner: string;
   ownerBusinessId: number | null;
   availableInBusiness: boolean;
-  installedStoreIds: number[];
-  options: BundleOption[];
   canShare: boolean;
-  optionsSynced?: boolean;
 };
 export type SkuDiagnosis = {
   sku: string;
@@ -31,12 +28,11 @@ export type ParserDiagnosis = {
 export type DiagnosisRequest = { account: string; revision: number; skus: string[] };
 export type RepairRequest = {
   token: string;
-  storeId: number;
-  mode: 'refresh' | 'attach';
-  items: { sku: string; bundleId: number; optionId: number; share: boolean }[];
+  mode: 'refresh' | 'share';
+  items: { sku: string; bundleId: number }[];
 };
 export type RepairResult = {
-  items: { sku: string; stage: 'ready' | 'shared' | 'attached' | 'failed'; message: string }[];
+  items: { sku: string; stage: 'ready' | 'shared' | 'failed'; message: string }[];
   synced: boolean;
   message: string;
 };
