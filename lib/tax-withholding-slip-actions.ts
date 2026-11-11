@@ -19,12 +19,16 @@ import {
 export type { DocumentType, SlipStatus } from './tax-withholding-domain';
 import type { ImportIssue, SheetRow } from './tax-withholding-import';
 import {
+  buildCounterpartyIndex,
   compareRekapanRow,
+  matchRekapanCounterparty,
   parseRekapan,
+  type CounterpartyIndex,
   type ParsedRekapanRow,
 } from './tax-withholding-rekapan-import';
 import {
   computeSlip,
+  deriveConsistentRatePercent,
   fromMicro,
   periodFromDate,
   periodStartIso,
@@ -311,9 +315,24 @@ export async function saveTaxSlip(input: TaxSlipInput): Promise<TaxSlip> {
   ]);
   if (!counterparty.is_active) throw new Error('Lawan transaksi nonaktif; aktifkan dulu atau pilih vendor lain.');
 
+  let existingSlip: { id: number; status: string; period_month: number; period_year: number } | null = null;
+  if (input.id) {
+    const existing = await svc.from('tax_withholding_slips').select('id, status, period_month, period_year').eq('workspace_id', workspaceId).eq('id', input.id).maybeSingle();
+    if (existing.error) throw existing.error;
+    if (!existing.data) throw new Error('Bukti potong tidak ditemukan.');
+    if (!EDITABLE_STATUSES.includes(existing.data.status)) {
+      throw new Error(`Bukti potong berstatus ${existing.data.status} tidak bisa diubah. Batalkan dari batch dahulu.`);
+    }
+    existingSlip = existing.data;
+  }
+
   const documentDate = normalizeIsoDate(input.documentDate) || invoiceDate!;
   const withholdingDate = normalizeIsoDate(input.withholdingDate) || invoiceDate!;
-  const defaultPeriod = periodFromDate(invoiceDate!);
+  // An imported slip may sit in a tax period other than its invoice month
+  // (MASA column); an edit that does not state a period keeps the stored one.
+  const defaultPeriod = existingSlip
+    ? { month: existingSlip.period_month, year: existingSlip.period_year }
+    : periodFromDate(invoiceDate!);
   const periodMonth = input.periodMonth ?? defaultPeriod.month;
   const periodYear = input.periodYear ?? defaultPeriod.year;
   if (!Number.isInteger(periodMonth) || periodMonth < 1 || periodMonth > 12) throw new Error('Masa pajak tidak valid.');
@@ -374,12 +393,6 @@ export async function saveTaxSlip(input: TaxSlipInput): Promise<TaxSlip> {
   };
 
   if (input.id) {
-    const existing = await svc.from('tax_withholding_slips').select('id, status').eq('workspace_id', workspaceId).eq('id', input.id).maybeSingle();
-    if (existing.error) throw existing.error;
-    if (!existing.data) throw new Error('Bukti potong tidak ditemukan.');
-    if (!EDITABLE_STATUSES.includes(existing.data.status)) {
-      throw new Error(`Bukti potong berstatus ${existing.data.status} tidak bisa diubah. Batalkan dari batch dahulu.`);
-    }
     const result = await svc.from('tax_withholding_slips').update(payload).eq('workspace_id', workspaceId).eq('id', input.id).select(SLIP_COLUMNS).single();
     if (result.error) throw translateSlipError(result.error);
     return normalizeSlipRow(result.data);
@@ -502,8 +515,8 @@ async function readRekapanSheet(formData: FormData): Promise<{ fileName: string;
 
 type ImportContext = {
   entityId: number;
-  counterpartiesByName: Map<string, CounterpartyRow>;
-  counterpartiesByIdentity: Map<string, CounterpartyRow>;
+  counterparties: Map<number, CounterpartyRow>;
+  index: CounterpartyIndex;
   facilitiesByCounterparty: Map<number, RuleFacility[]>;
   objectCodes: Map<string, RuleObjectCode>;
   existingKeys: Set<string>;
@@ -529,13 +542,6 @@ async function loadImportContext(workspaceId: string, entityId: number): Promise
       .select('counterparty_id, object_code, invoice_number, invoice_date, gross_amount').eq('workspace_id', workspaceId).eq('entity_id', entityId).order('id').range(from, to)),
   ]);
 
-  const byName = new Map<string, CounterpartyRow>();
-  const byIdentity = new Map<string, CounterpartyRow>();
-  for (const row of counterparties) {
-    const key = row.name.trim().toLowerCase().replace(/\s+/g, ' ');
-    if (!byName.has(key)) byName.set(key, row);
-    if (UNIQUE_IDENTITY_TYPES.includes(row.identity_type)) byIdentity.set(`${row.identity_type}:${row.identity_number}`, row);
-  }
   const facilityMap = new Map<number, RuleFacility[]>();
   for (const facility of facilities) {
     const list = facilityMap.get(facility.counterparty_id) ?? [];
@@ -544,30 +550,25 @@ async function loadImportContext(workspaceId: string, entityId: number): Promise
   }
   return {
     entityId,
-    counterpartiesByName: byName,
-    counterpartiesByIdentity: byIdentity,
+    counterparties: new Map(counterparties.map((row) => [row.id, row])),
+    index: buildCounterpartyIndex(counterparties),
     facilitiesByCounterparty: facilityMap,
     objectCodes: new Map(objectCodes.filter((code) => code.is_active).map((code) => [code.code, code])),
     existingKeys: new Set(existing.map((row) => slipKey(entityId, row.counterparty_id, row.object_code, row.invoice_number, row.invoice_date, String(row.gross_amount)))),
   };
 }
 
-function matchCounterparty(row: ParsedRekapanRow, context: ImportContext): CounterpartyRow | null {
-  const byName = context.counterpartiesByName.get(row.counterpartyName.trim().toLowerCase().replace(/\s+/g, ' '));
-  if (byName) return byName;
-  if (row.counterpartyIdentityDigits && row.counterpartyIdentityDigits.length === 16) {
-    return context.counterpartiesByIdentity.get(`npwp:${row.counterpartyIdentityDigits}`)
-      ?? context.counterpartiesByIdentity.get(`nik:${row.counterpartyIdentityDigits}`)
-      ?? null;
-  }
-  return null;
+function matchCounterparty(row: ParsedRekapanRow, context: ImportContext): { counterparty: CounterpartyRow | null; problem: string | null } {
+  const match = matchRekapanCounterparty(row, context.index);
+  const counterparty = match.counterparty ? context.counterparties.get(match.counterparty.id) ?? null : null;
+  return { counterparty, problem: match.problem };
 }
 
-function evaluateRekapanRow(row: ParsedRekapanRow, context: ImportContext): RekapanPreviewRow {
+function evaluateRekapanRow(row: ParsedRekapanRow, context: ImportContext, amountSource: 'engine' | 'workbook' = 'engine'): RekapanPreviewRow {
   const problems: string[] = [];
-  const counterparty = matchCounterparty(row, context);
-  if (!counterparty) problems.push('Lawan transaksi tidak ditemukan di master; tambahkan dahulu.');
-  else if (!counterparty.is_active) problems.push('Lawan transaksi nonaktif.');
+  const { counterparty, problem: matchProblem } = matchCounterparty(row, context);
+  if (matchProblem) problems.push(matchProblem);
+  else if (counterparty && !counterparty.is_active) problems.push('Lawan transaksi nonaktif.');
   const objectCode = context.objectCodes.get(row.objectCode) ?? null;
   if (!objectCode) problems.push(`Kode objek ${row.objectCode} tidak ada di referensi.`);
   else if (objectCode.pph_article !== row.pphArticle) problems.push(`Pasal di sheet (${row.pphArticle}) berbeda dari referensi kode (${objectCode.pph_article}); referensi dipakai.`);
@@ -580,7 +581,11 @@ function evaluateRekapanRow(row: ParsedRekapanRow, context: ImportContext): Reka
       problems.push(error instanceof Error ? error.message : String(error));
     }
   }
-  const blocked = !counterparty || !objectCode || !counterparty.is_active || !comparison;
+  if (amountSource === 'workbook' && comparison && comparison.difference !== null && comparison.difference !== '0'
+    && deriveConsistentRatePercent(row.grossAmount, row.workbookWithholdingAmount ?? '0', [row.workbookRatePercent]) === null) {
+    problems.push(`PPh workbook ${row.workbookWithholdingAmount} tidak bisa dihasilkan dari DPP ${row.grossAmount} dengan tarif mana pun; pilih angka engine atau perbaiki sheet.`);
+  }
+  const blocked = !counterparty || !objectCode || !counterparty.is_active || !comparison || problems.some((text) => /tidak bisa dihasilkan|Nama cocok|ada \d+ kali/.test(text));
   const existing = !blocked && counterparty
     && context.existingKeys.has(slipKey(context.entityId, counterparty.id, row.objectCode, row.invoiceNumber, row.invoiceDate, row.grossAmount));
   return {
@@ -610,8 +615,9 @@ export async function previewRekapanImport(formData: FormData): Promise<RekapanI
   if (!Number.isInteger(entityId) || entityId <= 0) throw new Error('Pemotong wajib dipilih.');
   const { fileName, sheetName, rows, date1904 } = await readRekapanSheet(formData);
   const parsed = parseRekapan(rows, { date1904 });
+  const amountSource = String(formData.get('amountSource') ?? 'engine') === 'workbook' ? 'workbook' : 'engine';
   const context = await loadImportContext(workspaceId, entityId);
-  const evaluated = parsed.rows.map((row) => evaluateRekapanRow(row, context));
+  const evaluated = parsed.rows.map((row) => evaluateRekapanRow(row, context, amountSource));
 
   const unmatched = new Map<string, number>();
   const unknownCodes = new Set<string>();
@@ -657,24 +663,35 @@ export async function commitRekapanImport(formData: FormData): Promise<RekapanIm
 
   const payloads: Record<string, unknown>[] = [];
   for (const row of parsed.rows) {
-    const evaluated = evaluateRekapanRow(row, context);
+    const evaluated = evaluateRekapanRow(row, context, keepWorkbookAmount ? 'workbook' : 'engine');
     if (evaluated.status === 'blocked') {
       blocked += 1;
       for (const problem of evaluated.problems) issues.push({ level: 'error', rowNumber: row.rowNumber, name: row.counterpartyName, message: problem });
       continue;
     }
     if (evaluated.status === 'existing') { skippedExisting += 1; continue; }
-    const counterparty = matchCounterparty(row, context)!;
+    const counterparty = matchCounterparty(row, context).counterparty!;
     const objectCode = context.objectCodes.get(row.objectCode)!;
-    const computed = computeSlip({
-      objectCode, counterparty, facilities: context.facilitiesByCounterparty.get(counterparty.id) ?? [],
+    const facilities = context.facilitiesByCounterparty.get(counterparty.id) ?? [];
+    const engine = computeSlip({
+      objectCode, counterparty, facilities,
       transactionDate: row.invoiceDate, grossInputMode: 'dpp', grossInputAmount: row.grossAmount, additionalCost: row.additionalCost,
     });
     const workbookAmount = row.workbookWithholdingAmount;
-    const differs = workbookAmount !== null && toMicro(workbookAmount) !== toMicro(computed.withholdingAmount);
+    const differs = workbookAmount !== null && toMicro(workbookAmount) !== toMicro(engine.withholdingAmount);
     const useWorkbook = keepWorkbookAmount && differs && workbookAmount !== null;
+    // Retaining the workbook amount means storing a manual rate that the
+    // engine can recompute to exactly that amount (evaluateRekapanRow already
+    // blocked rows where no such rate exists), so the slip stays consistent.
+    const computed = useWorkbook
+      ? computeSlip({
+        objectCode, counterparty, facilities,
+        transactionDate: row.invoiceDate, grossInputMode: 'dpp', grossInputAmount: row.grossAmount, additionalCost: row.additionalCost,
+        rateOverridePercent: deriveConsistentRatePercent(row.grossAmount, workbookAmount, [row.workbookRatePercent]),
+      })
+      : engine;
     const noteParts = ['Diimpor dari REKAPAN'];
-    if (differs) noteParts.push(`PPh workbook ${workbookAmount} vs engine ${computed.withholdingAmount}${useWorkbook ? ' (angka workbook dipakai)' : ' (angka engine dipakai)'}`);
+    if (differs) noteParts.push(`PPh workbook ${workbookAmount} vs engine ${engine.withholdingAmount}${useWorkbook ? ` (angka workbook dipakai, tarif manual ${computed.ratePercent}%)` : ' (angka engine dipakai)'}`);
     if (row.taxInvoiceNumber) noteParts.push(`Faktur pajak ${row.taxInvoiceNumber}`);
     if (row.billingId) noteParts.push(`ID Billing ${row.billingId}`);
     if (row.ntpn) noteParts.push(`NTPN ${row.ntpn}`);
@@ -700,12 +717,12 @@ export async function commitRekapanImport(formData: FormData): Promise<RekapanIm
       gross_input_mode: 'dpp',
       gross_input_amount: row.grossAmount,
       gross_amount: computed.grossAmount,
-      rate_percent: useWorkbook && row.workbookRatePercent ? row.workbookRatePercent : computed.ratePercent,
-      rate_source: useWorkbook ? 'override' : computed.rateSource,
-      rate_override_reason: useWorkbook ? 'Angka workbook REKAPAN dipertahankan saat impor' : null,
+      rate_percent: computed.ratePercent,
+      rate_source: computed.rateSource,
+      rate_override_reason: useWorkbook ? `Angka workbook REKAPAN dipertahankan saat impor (engine ${engine.withholdingAmount} pada ${engine.ratePercent}%)` : null,
       facility_code: computed.facilityCode,
       facility_document_number: computed.facilityDocumentNumber,
-      withholding_amount: useWorkbook ? workbookAmount : computed.withholdingAmount,
+      withholding_amount: computed.withholdingAmount,
       vat_rate_percent: computed.vatRatePercent,
       vat_amount: computed.vatAmount,
       additional_cost: computed.additionalCost,

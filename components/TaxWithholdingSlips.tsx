@@ -420,6 +420,7 @@ function SlipForm({ slip, entityId, entities, counterparties, objectCodes, readO
         grossInputMode: form.grossInputMode, grossInputAmount: form.grossInputAmount, additionalCost: form.additionalCost || null,
         rateOverridePercent: form.rateOverridePercent || null, rateOverrideReason: form.rateOverrideReason || null,
         documentType: form.documentType, documentDate: form.documentDate || null, withholdingDate: form.withholdingDate || null,
+        periodMonth: slip?.period_month ?? null, periodYear: slip?.period_year ?? null,
         accountCode: form.accountCode, accountName: form.accountName, trelloUrl: form.trelloUrl, notes: form.notes,
       });
       await onSaved(slip ? 'Bukti potong diperbarui.' : 'Bukti potong ditambahkan.');
@@ -589,10 +590,8 @@ export function RekapanImportSection({ entities, workspaceId, canManage, notify,
     const formData = new FormData();
     formData.append('file', file);
     formData.append('entityId', String(entityId));
-    if (commit) {
-      formData.append('workspaceId', workspaceId);
-      formData.append('amountSource', amountSource);
-    }
+    formData.append('amountSource', amountSource);
+    if (commit) formData.append('workspaceId', workspaceId);
     return formData;
   };
 
@@ -670,8 +669,8 @@ export function RekapanImportSection({ entities, workspaceId, canManage, notify,
                 <input type="checkbox" checked={onlyDifferences} onChange={(event) => setOnlyDifferences(event.target.checked)} /> Tampilkan hanya yang berbeda atau terblokir
               </label>
               <span style={{ color: 'var(--dim)' }}>Jika PPh berbeda, simpan:</span>
-              <label style={{ display: 'flex', gap: 6, alignItems: 'center' }}><input type="radio" name="amountSource" checked={amountSource === 'engine'} onChange={() => setAmountSource('engine')} /> angka engine</label>
-              <label style={{ display: 'flex', gap: 6, alignItems: 'center' }}><input type="radio" name="amountSource" checked={amountSource === 'workbook'} onChange={() => setAmountSource('workbook')} /> angka workbook (tarif ditandai manual)</label>
+              <label style={{ display: 'flex', gap: 6, alignItems: 'center' }}><input type="radio" name="amountSource" checked={amountSource === 'engine'} onChange={() => { setAmountSource('engine'); setPreview(null); }} /> angka engine</label>
+              <label style={{ display: 'flex', gap: 6, alignItems: 'center' }}><input type="radio" name="amountSource" checked={amountSource === 'workbook'} onChange={() => { setAmountSource('workbook'); setPreview(null); }} /> angka workbook (tarif manual yang konsisten; pratinjau ulang)</label>
             </div>
             <div className="table-scroll">
               <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 980, fontSize: 12 }}>

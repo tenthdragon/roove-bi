@@ -259,6 +259,46 @@ export function computeSlip(input: SlipComputationInput): SlipComputation {
   };
 }
 
+/**
+ * Finds a rate (3 decimals) that reproduces `amount` from `gross` under the
+ * engine's own rounding. `candidates` (e.g. the workbook TARIF) are tried
+ * first, then a derived rate. Returns null when no consistent rate exists, so
+ * callers must not store an amount the engine cannot recompute.
+ */
+export function deriveConsistentRatePercent(
+  gross: number | string,
+  amount: number | string,
+  candidates: Array<number | string | null | undefined> = [],
+): string | null {
+  const grossMicro = toMicro(gross);
+  const amountMicro = roundToRupiah(toMicro(amount));
+  if (grossMicro <= 0n || amountMicro < 0n) return null;
+  const reproduces = (scaled: bigint) => roundToRupiah(applyPercent(grossMicro, scaled)) === amountMicro;
+  for (const candidate of candidates) {
+    if (candidate === null || candidate === undefined || String(candidate).trim() === '') continue;
+    try {
+      const scaled = percentToScaled(candidate);
+      if (scaled >= 0n && reproduces(scaled)) return scaledToPercent(scaled);
+    } catch {
+      // ignore unparsable candidates
+    }
+  }
+  // derived = amount / gross × 100 at 3 decimals; prefer the simplest rate
+  // (whole percent, then 1 and 2 decimals) before the exact 3-decimal value
+  // and its neighbours, so 137 on 6,846.85 yields 2% rather than 2.001%.
+  const derived = divideRoundHalfUp(amountMicro * 100n * PERCENT_SCALE, grossMicro);
+  const tried = new Set<bigint>();
+  const attempts: bigint[] = [];
+  for (const unit of [1000n, 100n, 10n]) attempts.push(divideRoundHalfUp(derived, unit) * unit);
+  for (const delta of [0n, 1n, -1n, 2n, -2n]) attempts.push(derived + delta);
+  for (const scaled of attempts) {
+    if (scaled < 0n || tried.has(scaled)) continue;
+    tried.add(scaled);
+    if (reproduces(scaled)) return scaledToPercent(scaled);
+  }
+  return null;
+}
+
 /** Period (masa pajak) defaults to the month of the invoice date. */
 export function periodFromDate(isoDate: string): { month: number; year: number } {
   const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(isoDate);

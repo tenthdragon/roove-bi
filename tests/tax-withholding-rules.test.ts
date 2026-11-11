@@ -3,6 +3,7 @@ import test from 'node:test';
 import {
   applyPercent,
   computeSlip,
+  deriveConsistentRatePercent,
   fromMicro,
   percentToScaled,
   periodFromDate,
@@ -140,4 +141,19 @@ test('computeSlip reproduces workbook rows', () => {
 test('period helpers', () => {
   assert.deepEqual(periodFromDate('2026-10-22'), { year: 2026, month: 10 });
   assert.throws(() => periodFromDate('22/10/2026'), /tidak valid/);
+});
+
+test('deriveConsistentRatePercent returns a rate the engine can recompute, or null', () => {
+  assert.equal(deriveConsistentRatePercent('6846.846847', '137', ['2']), '2');
+  assert.equal(deriveConsistentRatePercent('6846.846847', '137', []), '2');
+  assert.equal(deriveConsistentRatePercent('1801.8018', '36', [null]), '2');
+  assert.equal(deriveConsistentRatePercent('38010204', '760204', ['2']), '2');
+  // workbook rate that does not reproduce the amount is ignored in favour of a derived one
+  assert.equal(deriveConsistentRatePercent('1000000', '40000', ['2']), '4');
+  assert.equal(deriveConsistentRatePercent('1000000', '25000', ['0.025']), '2.5', 'a fraction-style workbook rate is replaced by the percent that reproduces the amount');
+  // 7,692,308 × 2.5% = 192,307.7 → 192,308; a workbook amount of 192,307 is not reproducible by any 3-decimal rate
+  assert.equal(deriveConsistentRatePercent('7692308', '192307', ['0.025']), null);
+  // no 3-decimal rate reproduces 1 rupiah on a 7-figure base exactly except 0.000x; expect null when impossible
+  assert.equal(deriveConsistentRatePercent('100', '137', []), null);
+  assert.equal(deriveConsistentRatePercent('0', '137', []), null);
 });

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { compareRekapanRow, parseRekapan } from '../lib/tax-withholding-rekapan-import';
+import { buildCounterpartyIndex, compareRekapanRow, matchRekapanCounterparty, parseRekapan } from '../lib/tax-withholding-rekapan-import';
 
 // Synthetic fixture in the legacy REKAPAN layout (header on sheet row 5).
 const header = [
@@ -89,4 +89,36 @@ test('compareRekapanRow recomputes the workbook amount with the rule engine', ()
   const rent = compareRekapanRow(parsed.rows[1], { code: '28-403-02', pph_article: 'pph4_2', rate_percent: 10 }, { identity_type: 'nik', is_pkp: false }, []);
   assert.equal(rent.engineWithholding, '444444');
   assert.equal(rent.difference, '0');
+});
+
+test('matchRekapanCounterparty refuses conflicting or ambiguous name matches', () => {
+  const index = buildCounterpartyIndex([
+    { id: 1, name: 'PT CONTOH MARKETPLACE', identity_type: 'npwp', identity_number: '0012345678901000', is_active: true },
+    { id: 2, name: 'PT LAIN', identity_type: 'npwp', identity_number: '0099999999999000', is_active: true },
+    { id: 3, name: 'Budi Contoh', identity_type: 'nik', identity_number: '3273010101010001', is_active: true },
+    { id: 4, name: 'BUDI CONTOH', identity_type: 'nik', identity_number: '3273020202020002', is_active: true },
+    { id: 5, name: 'VENDOR TANPA ID', identity_type: 'unknown', identity_number: 'TIDAK ADA IDENTITAS', is_active: true },
+  ]);
+  const match = (counterpartyName: string, counterpartyIdentityDigits: string | null) =>
+    matchRekapanCounterparty({ counterpartyName, counterpartyIdentityDigits }, index);
+
+  assert.equal(match('pt contoh  marketplace', null).counterparty?.id, 1, 'name match without identity');
+  assert.equal(match('PT CONTOH MARKETPLACE', '0012345678901000').counterparty?.id, 1, 'name and identity agree');
+  assert.equal(match('NAMA BARU DI SHEET', '0099999999999000').counterparty?.id, 2, 'identity match when the name is unknown');
+
+  const conflict = match('PT CONTOH MARKETPLACE', '0099999999999000');
+  assert.equal(conflict.counterparty, null);
+  assert.match(conflict.problem ?? '', /milik "PT LAIN"/);
+
+  const unknownConflict = match('PT CONTOH MARKETPLACE', '0055555555555000');
+  assert.equal(unknownConflict.counterparty, null);
+  assert.match(unknownConflict.problem ?? '', /NPWP\/NIK berbeda/);
+
+  const ambiguous = match('budi contoh', null);
+  assert.equal(ambiguous.counterparty, null);
+  assert.match(ambiguous.problem ?? '', /2 kali/);
+  assert.equal(match('budi contoh', '3273020202020002').counterparty?.id, 4, 'ambiguous name resolved by identity');
+
+  assert.equal(match('VENDOR TANPA ID', '0012340000000000').counterparty?.id, 5, 'a master row without identity cannot conflict');
+  assert.match(match('TIDAK ADA', null).problem ?? '', /tidak ditemukan/);
 });

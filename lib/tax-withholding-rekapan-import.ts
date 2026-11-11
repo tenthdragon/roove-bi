@@ -3,11 +3,13 @@
 // amount with the rule engine. Pure: callers pass the sheet as rows.
 
 import {
+  UNIQUE_IDENTITY_TYPES,
   cleanOptional,
   digitsOnly,
   normalizeIsoDate,
   normalizeNpwp,
   type DateOptions,
+  type IdentityType,
   type TaxArticle,
 } from './tax-withholding-domain';
 import type { ImportIssue, SheetCell, SheetRow } from './tax-withholding-import';
@@ -272,6 +274,68 @@ export function parseRekapan(rows: SheetRow[], options: DateOptions = {}): Parse
   }
 
   return { headerRowNumber: headerIndex + 1, rows: parsed, issues, skipped };
+}
+
+export type CounterpartyLike = {
+  id: number;
+  name: string;
+  identity_type: IdentityType;
+  identity_number: string;
+  is_active: boolean;
+};
+
+export type CounterpartyIndex = {
+  byName: Map<string, CounterpartyLike[]>;
+  byIdentity: Map<string, CounterpartyLike>;
+};
+
+export function normalizeVendorName(name: string): string {
+  return name.trim().toLowerCase().replace(/\s+/g, ' ');
+}
+
+export function buildCounterpartyIndex(rows: CounterpartyLike[]): CounterpartyIndex {
+  const byName = new Map<string, CounterpartyLike[]>();
+  const byIdentity = new Map<string, CounterpartyLike>();
+  for (const row of rows) {
+    const key = normalizeVendorName(row.name);
+    byName.set(key, [...(byName.get(key) ?? []), row]);
+    if (UNIQUE_IDENTITY_TYPES.includes(row.identity_type)) byIdentity.set(`${row.identity_type}:${row.identity_number}`, row);
+  }
+  return { byName, byIdentity };
+}
+
+export type CounterpartyMatch = { counterparty: CounterpartyLike | null; problem: string | null };
+
+/**
+ * Matches a workbook row to the master. A name match is only accepted when it
+ * does not contradict the workbook's NPWP/NIK; ambiguous names (several
+ * master rows) and identity conflicts are refused rather than guessed.
+ */
+export function matchRekapanCounterparty(row: Pick<ParsedRekapanRow, 'counterpartyName' | 'counterpartyIdentityDigits'>, index: CounterpartyIndex): CounterpartyMatch {
+  const digits = row.counterpartyIdentityDigits && row.counterpartyIdentityDigits.length === 16 ? row.counterpartyIdentityDigits : null;
+  const byIdentity = digits
+    ? index.byIdentity.get(`npwp:${digits}`) ?? index.byIdentity.get(`nik:${digits}`) ?? null
+    : null;
+  const nameMatches = index.byName.get(normalizeVendorName(row.counterpartyName)) ?? [];
+
+  if (nameMatches.length === 1) {
+    const candidate = nameMatches[0];
+    const candidateHasIdentity = UNIQUE_IDENTITY_TYPES.includes(candidate.identity_type);
+    if (digits && candidateHasIdentity && candidate.identity_number !== digits) {
+      if (byIdentity) {
+        return { counterparty: null, problem: `Nama cocok dengan "${candidate.name}" (${candidate.identity_number}) tetapi NPWP/NIK di sheet (${digits}) milik "${byIdentity.name}"; perbaiki nama atau identitas di sheet.` };
+      }
+      return { counterparty: null, problem: `Nama cocok dengan master tetapi NPWP/NIK berbeda (master ${candidate.identity_number}, sheet ${digits}); periksa identitas vendor.` };
+    }
+    return { counterparty: candidate, problem: null };
+  }
+  if (nameMatches.length > 1) {
+    const byDigits = digits ? nameMatches.find((candidate) => candidate.identity_number === digits) ?? null : null;
+    if (byDigits) return { counterparty: byDigits, problem: null };
+    return { counterparty: null, problem: `Nama "${row.counterpartyName}" ada ${nameMatches.length} kali di master; tambahkan NPWP/NIK di sheet untuk membedakannya.` };
+  }
+  if (byIdentity) return { counterparty: byIdentity, problem: null };
+  return { counterparty: null, problem: 'Lawan transaksi tidak ditemukan di master; tambahkan dahulu.' };
 }
 
 export type RekapanComparison = {
