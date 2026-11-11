@@ -370,6 +370,7 @@ export function normalizeIsoDate(value: unknown, options: DateOptions = {}): str
     const epoch = options.date1904 ? EXCEL_EPOCH_1904 : EXCEL_EPOCH_1900;
     if (!Number.isFinite(value)) return undefined;
     const date = new Date(epoch + Math.round(value) * 86_400_000);
+    if (!Number.isFinite(date.getTime())) return undefined;
     const year = date.getUTCFullYear();
     if (year < 1950 || year > 2119) return undefined;
     return date.toISOString().slice(0, 10);
@@ -398,16 +399,14 @@ function checkDate(year: number, month: number, day: number): string | undefined
 }
 
 /**
- * The import preview and commit must target the same workspace. The active
- * workspace cookie is shared across tabs, so the commit carries the workspace
- * that was previewed and the server rejects a mismatch instead of writing the
- * workbook into whichever workspace happens to be active now.
+ * Both preview and commit carry the page's workspace. The active workspace
+ * cookie is shared across tabs, so neither request may silently change target.
  */
 export function checkImportWorkspace(expected: unknown, actual: string): string | null {
   const text = String(expected ?? '').trim();
   if (!text) return 'Pratinjau impor belum dilakukan untuk workspace ini. Jalankan Pratinjau dahulu.';
   if (text !== actual) {
-    return 'Workspace aktif berubah sejak pratinjau. Buka kembali workspace yang dipratinjau atau ulangi Pratinjau di workspace ini.';
+    return 'Workspace aktif berubah. Muat ulang halaman di workspace tujuan, lalu ulangi Pratinjau.';
   }
   return null;
 }

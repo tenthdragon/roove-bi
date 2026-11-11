@@ -298,7 +298,7 @@ export type CounterpartyImportPreview = {
   facilityCount: number;
   skipped: number;
   issues: ImportIssue[];
-  sample: Array<Pick<ParsedCounterparty, 'rowNumber' | 'name' | 'identity_type' | 'identity_number' | 'is_pkp' | 'country_code'> & { status: 'new' | 'existing' }>;
+  sample: Array<Pick<ParsedCounterparty, 'rowNumber' | 'name' | 'identity_type' | 'identity_number' | 'is_pkp' | 'country_code'> & { status: 'new' | 'existing' | 'blocked' }>;
 };
 
 export type CounterpartyImportResult = {
@@ -374,29 +374,40 @@ function matchExisting(row: ParsedCounterparty, existing: ExistingCounterparty[]
   return { match: null, via: null };
 }
 
+function identityConflict(row: ParsedCounterparty, match: ExistingCounterparty | null): ImportIssue | null {
+  // Unknown legacy identities can still be matched by name. Two known,
+  // different identities must be reconciled before any enrichment or facility write.
+  if (!match || match.identity_type === 'unknown' || row.identity_type === 'unknown'
+    || (match.identity_type === row.identity_type && match.identity_number === row.identity_number)) return null;
+  return {
+    level: 'error', rowNumber: row.rowNumber, name: row.name,
+    message: 'Nama sudah ada dengan identitas berbeda; baris dilewati tanpa perubahan data atau fasilitas. Cocokkan identitas lawan transaksi sebelum mengimpor ulang.',
+  };
+}
+
 export async function previewCounterpartyImport(formData: FormData): Promise<CounterpartyImportPreview> {
   const { workspaceId } = await requireTaxManageAccess();
+  const workspaceMismatch = checkImportWorkspace(formData.get('workspaceId'), workspaceId);
+  if (workspaceMismatch) throw new Error(workspaceMismatch);
   const { fileName, sheetName, rows, date1904 } = await readMasterSheet(formData);
   const parsed = parseCounterpartyMaster(rows, { date1904 });
   const existing = await loadExistingCounterparties(workspaceId);
 
   let newCount = 0;
   let existingCount = 0;
+  let skipped = parsed.skipped;
+  let facilityCount = 0;
   const sample: CounterpartyImportPreview['sample'] = [];
   for (const row of parsed.rows) {
-    const { match, via } = matchExisting(row, existing);
-    if (match) {
+    const { match } = matchExisting(row, existing);
+    const conflict = identityConflict(row, match);
+    if (conflict) {
+      parsed.issues.push(conflict);
+      skipped += 1;
+    } else if (match) {
       existingCount += 1;
-      if (via === 'name' && UNIQUE_IDENTITY_TYPES.includes(match.identity_type) && UNIQUE_IDENTITY_TYPES.includes(row.identity_type)
-        && (match.identity_type !== row.identity_type || match.identity_number !== row.identity_number)) {
-        parsed.issues.push({
-          level: 'warning',
-          rowNumber: row.rowNumber,
-          name: row.name,
-          message: 'Nama sudah ada dengan identitas berbeda; identitas lama dipertahankan, hanya fasilitas yang ditambahkan.',
-        });
-      }
     } else newCount += 1;
+    if (!conflict) facilityCount += row.facilities.length;
     if (sample.length < 25) {
       sample.push({
         rowNumber: row.rowNumber,
@@ -405,7 +416,7 @@ export async function previewCounterpartyImport(formData: FormData): Promise<Cou
         identity_number: row.identity_number,
         is_pkp: row.is_pkp,
         country_code: row.country_code,
-        status: match ? 'existing' : 'new',
+        status: conflict ? 'blocked' : match ? 'existing' : 'new',
       });
     }
   }
@@ -418,8 +429,8 @@ export async function previewCounterpartyImport(formData: FormData): Promise<Cou
     totalRows: parsed.rows.length,
     newCount,
     existingCount,
-    facilityCount: parsed.rows.reduce((sum, row) => sum + row.facilities.length, 0),
-    skipped: parsed.skipped,
+    facilityCount,
+    skipped,
     issues: sortIssues(parsed.issues),
     sample,
   };
@@ -436,6 +447,7 @@ export async function commitCounterpartyImport(formData: FormData): Promise<Coun
   const svc = createServiceSupabase();
   const existing = await loadExistingCounterparties(workspaceId);
   const issues = [...parsed.issues];
+  let skipped = parsed.skipped;
   const importNote = 'Diimpor dari MASTER LAWAN TRANSAKSI';
 
   const toInsert: Array<{ row: ParsedCounterparty; payload: Record<string, unknown> }> = [];
@@ -444,6 +456,12 @@ export async function commitCounterpartyImport(formData: FormData): Promise<Coun
 
   for (const row of parsed.rows) {
     const { match } = matchExisting(row, existing);
+    const conflict = identityConflict(row, match);
+    if (conflict) {
+      issues.push(conflict);
+      skipped += 1;
+      continue;
+    }
     if (match) {
       const payload: Record<string, unknown> = {};
       if (row.is_pkp && !match.is_pkp) payload.is_pkp = true;
@@ -507,25 +525,13 @@ export async function commitCounterpartyImport(formData: FormData): Promise<Coun
   }
 
   let facilitiesInserted = 0;
-  const targetIds = facilityTargets.map((target) => target.counterpartyId).filter((id): id is number => id !== null);
-  if (targetIds.length > 0) {
-    type FacilityKeyRow = { counterparty_id: number; facility_code: string; document_number: string | null };
-    const existingFacilities = await fetchAllRows<FacilityKeyRow>((from, to) => svc
-      .from('tax_counterparty_facilities')
-      .select('counterparty_id, facility_code, document_number')
-      .eq('workspace_id', workspaceId)
-      .order('id')
-      .range(from, to));
-    const seen = new Set(
-      existingFacilities.map((item) => `${item.counterparty_id}|${item.facility_code}|${item.document_number ?? ''}`),
-    );
+  if (facilityTargets.length > 0) {
+    // Let the database compare the complete identity, including valid_from.
+    // A prior period must not suppress a renewal before the conflict-safe upsert.
     const facilityRows: Record<string, unknown>[] = [];
     for (const target of facilityTargets) {
       if (target.counterpartyId === null) continue;
       for (const facility of target.row.facilities) {
-        const key = `${target.counterpartyId}|${facility.facility_code}|${facility.document_number ?? ''}`;
-        if (seen.has(key)) continue;
-        seen.add(key);
         facilityRows.push({ ...facility, counterparty_id: target.counterpartyId, workspace_id: workspaceId, created_by: profile.id });
       }
     }
@@ -545,7 +551,7 @@ export async function commitCounterpartyImport(formData: FormData): Promise<Coun
     }
   }
 
-  return { inserted, updated, facilitiesInserted, skipped: parsed.skipped, issues: sortIssues(issues) };
+  return { inserted, updated, facilitiesInserted, skipped, issues: sortIssues(issues) };
 }
 
 function sortIssues(issues: ImportIssue[]): ImportIssue[] {

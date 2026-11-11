@@ -161,6 +161,11 @@ export function parseCounterpartyMaster(rows: SheetRow[], options: DateOptions =
     const statusText = firstText(row, columns.status).toUpperCase();
     const tin = firstText(row, columns.tin);
     const countryText = firstText(row, columns.country).toUpperCase();
+    if (countryText && !/^[A-Z]{3}$/.test(countryText)) {
+      issues.push({ level: 'error', rowNumber, name, message: `Kode negara "${firstText(row, columns.country)}" tidak valid. Gunakan kode tiga huruf (contoh: IDN, USA, SGP), lalu impor ulang baris ini.` });
+      skipped += 1;
+      continue;
+    }
     const country = /^[A-Z]{3}$/.test(countryText) ? countryText : DEFAULT_COUNTRY;
     const npwpDigits = cellText(npwpRaw).replace(/\D/g, '');
     const isPlaceholderNpwp = PLACEHOLDER_FOREIGN_NPWP.test(npwpDigits);

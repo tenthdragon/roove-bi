@@ -306,7 +306,7 @@ export default function TaxWithholdingPage() {
             </>
           ) : null}
           {subTab === 'entities' ? <EntitiesSection data={data} onChanged={load} notify={setMessage} /> : null}
-          {subTab === 'import' ? <ImportSection canManage={data.canManage} onChanged={load} notify={setMessage} /> : null}
+          {subTab === 'import' ? <ImportSection key={activeWorkspace.id} workspaceId={activeWorkspace.id} workspaceName={activeWorkspace.name} canManage={data.canManage} onChanged={load} notify={setMessage} /> : null}
         </>
       ) : null}
 
@@ -819,8 +819,8 @@ function EntitiesSection({ data, onChanged, notify }: {
 // Impor master
 // ---------------------------------------------------------------------------
 
-function ImportSection({ canManage, onChanged, notify }: {
-  canManage: boolean; onChanged: () => Promise<void>; notify: (message: PageMessage) => void;
+function ImportSection({ workspaceId, workspaceName, canManage, onChanged, notify }: {
+  workspaceId: string; workspaceName: string; canManage: boolean; onChanged: () => Promise<void>; notify: (message: PageMessage) => void;
 }) {
   const [file, setFile] = useState<File | null>(null);
   const [preview, setPreview] = useState<CounterpartyImportPreview | null>(null);
@@ -829,11 +829,11 @@ function ImportSection({ canManage, onChanged, notify }: {
   const [error, setError] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
-  const buildFormData = (workspaceId?: string) => {
+  const buildFormData = () => {
     if (!file) throw new Error('Pilih file workbook dahulu.');
     const formData = new FormData();
     formData.append('file', file);
-    if (workspaceId) formData.append('workspaceId', workspaceId);
+    formData.append('workspaceId', workspaceId);
     return formData;
   };
 
@@ -853,11 +853,16 @@ function ImportSection({ canManage, onChanged, notify }: {
 
   const runCommit = async () => {
     if (!preview) return;
-    if (!window.confirm(`Impor ${preview.newCount} lawan transaksi baru dan perbarui ${preview.existingCount} yang sudah ada?`)) return;
+    if (preview.workspaceId !== workspaceId) {
+      setPreview(null);
+      setError('Workspace berubah. Ulangi Pratinjau sebelum mengimpor.');
+      return;
+    }
+    if (!window.confirm(`Impor ke workspace ${workspaceName}: ${preview.newCount} lawan transaksi baru dan perbarui ${preview.existingCount} yang sudah ada?`)) return;
     setBusy('commit');
     setError(null);
     try {
-      const outcome = await commitCounterpartyImport(buildFormData(preview.workspaceId));
+      const outcome = await commitCounterpartyImport(buildFormData());
       setResult(outcome);
       setPreview(null);
       setFile(null);
@@ -901,7 +906,7 @@ function ImportSection({ canManage, onChanged, notify }: {
           </button>
         </div>
         <div style={{ color: 'var(--dim)', fontSize: 12 }}>
-          Aturan: NPWP 15 digit ditambah awalan 0 menjadi 16 digit. Vendor dengan identitas yang sudah ada tidak digandakan; hanya PKP, negara, alamat kosong dan fasilitas baru yang ditambahkan. Baris yang gagal validasi dilaporkan, tidak ditebak.
+          Tujuan impor: {workspaceName}. NPWP 15 digit ditambah awalan 0 menjadi 16 digit. Vendor dengan identitas yang sudah ada hanya dilengkapi. Nama sama dengan identitas berbeda dilewati tanpa perubahan data atau fasilitas; selesaikan konflik identitas sebelum impor ulang.
         </div>
 
         {error ? <div className="tw-notice" style={{ borderColor: 'var(--red)', color: 'var(--red)' }}>{error}</div> : null}
@@ -934,7 +939,7 @@ function ImportSection({ canManage, onChanged, notify }: {
                       <td style={cellStyle}><span className="tw-mono">{formatIdentity(row.identity_type, row.identity_number)}</span> <span style={{ color: 'var(--dim)', fontSize: 11 }}>{IDENTITY_LABELS[row.identity_type]}</span></td>
                       <td style={cellStyle}>{row.is_pkp ? 'PKP' : '—'}</td>
                       <td style={cellStyle}>{row.country_code}</td>
-                      <td style={cellStyle}><StatusPill tone={row.status === 'new' ? 'green' : 'muted'}>{row.status === 'new' ? 'Baru' : 'Sudah ada'}</StatusPill></td>
+                      <td style={cellStyle}><StatusPill tone={row.status === 'blocked' ? 'red' : row.status === 'new' ? 'green' : 'muted'}>{row.status === 'blocked' ? 'Konflik identitas' : row.status === 'new' ? 'Baru' : 'Sudah ada'}</StatusPill></td>
                     </tr>
                   ))}
                 </tbody>

@@ -200,3 +200,34 @@ test('master sheet parser reports a missing header', () => {
   assert.equal(parsed.rows.length, 0);
   assert.equal(parsed.issues[0].level, 'error');
 });
+
+test('numeric date overflow reports the malformed facility and keeps neighboring vendors', () => {
+  for (const value of [1234567890, -1234567890, Number.MAX_VALUE, Infinity, NaN]) assert.equal(normalizeIsoDate(value), undefined);
+  const parsed = parseCounterpartyMaster([
+    ['NAMA LAWAN TRANSAKSI', 'NPWP', 'JENIS FASILITAS', 'NO. SKD / SKB', 'TGL BERLAKU'],
+    ['BEFORE', '0021628888053000', 'SKB', 'A', '2026-01-01'],
+    ['OVERFLOW', '0210893970035000', 'SKB', 'B', 1234567890],
+    ['AFTER', '0940424419429000', 'SKB', 'C', '2027-01-01'],
+  ]);
+  assert.deepEqual(parsed.rows.map(row => row.facilities.length), [1, 0, 1]);
+  assert.equal(parsed.issues.length, 1);
+  assert.equal(parsed.issues[0].rowNumber, 3);
+  assert.equal(parsed.issues[0].level, 'error');
+  assert.match(parsed.rows[1].notes ?? '', /1234567890/);
+});
+
+test('blank country defaults to IDN, ISO-3 is preserved and malformed nonblank country is rejected', () => {
+  const header = ['NAMA LAWAN TRANSAKSI', 'NPWP', 'TIN', 'KODE NEGARA'];
+  for (const country of ['', 'IDN', 'USA', 'sgp']) {
+    const result = parseCounterpartyMaster([header, ['VENDOR', '0021628888053000', 'FOREIGN-TIN', country]]);
+    assert.equal(result.rows[0].country_code, country.toUpperCase() || 'IDN');
+    assert.equal(result.rows[0].identity_type, country && country !== 'IDN' ? 'foreign_tin' : 'npwp');
+  }
+  for (const country of ['US', 'SINGAPORE', '12', 'I-D-N']) {
+    const result = parseCounterpartyMaster([header, ['BAD COUNTRY', '0021628888053000', 'FOREIGN-TIN', country], ['VALID NEIGHBOR', '0210893970035000', '', 'IDN']]);
+    assert.deepEqual(result.rows.map(row => row.name), ['VALID NEIGHBOR']);
+    assert.equal(result.skipped, 1);
+    assert.equal(result.issues[0].level, 'error');
+    assert.ok(result.issues[0].message.includes(country));
+  }
+});

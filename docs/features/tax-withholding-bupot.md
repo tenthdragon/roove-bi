@@ -399,12 +399,20 @@ Dua workbook per PT (RTI dan PT lain) diimpor terpisah; `entity` dipilih di UI.
   `(counterparty_id, facility_code, document_number, valid_from)` dengan NULLS NOT
   DISTINCT, sehingga impor bersamaan tidak menggandakan sertifikat tetapi
   perpanjangan dengan periode baru tetap tersimpan sebagai riwayat.
-- Impor pratinjau dan impor final terikat ke workspace yang sama: pratinjau
-  mengembalikan `workspaceId`, impor final mengirimnya kembali dan server menolak
-  bila workspace aktif sudah berganti (cookie workspace dibagi antar tab).
+  Cleanup hanya merangkum payload yang setara; konflik pasal, tarif, tanggal akhir
+  atau catatan membatalkan migrasi secara atomik untuk rekonsiliasi manual.
+- Pratinjau dan impor final sama-sama mengirim `workspaceId` halaman; server
+  menolak bila workspace aktif sudah berganti sebelum salah satu permintaan
+  (cookie workspace dibagi antar tab). Konfirmasi menyebut workspace tujuan.
+- Nama sama dengan dua identitas dikenal yang berbeda ditolak per baris, baik
+  pada pratinjau maupun impor final: tidak mengubah PKP/alamat/catatan maupun
+  fasilitas. Konflik tetap muncul di hasil impor untuk diperbaiki dan diulang.
+- Kode negara kosong memakai IDN; nilai nonkosong selain tiga huruf menolak
+  baris dengan pesan berisi nilai asli, tanpa menebak negara atau jenis identitas.
 - Tanggal berlaku fasilitas yang tidak valid tidak diimpor (vendor tetap masuk,
   nilai asli disimpan di catatan). Workbook sistem tanggal 1904 dibaca dengan
-  epoch yang benar.
+  epoch yang benar. Overflow tanggal numerik juga dilaporkan per baris tanpa
+  membatalkan pembacaan vendor lain.
 - Kode objek diseed global dari sheet REF template (198 kode) ditambah 12 kode
   PPh 26 (`27-xxx`) dari referensi e-Bupot lama; KAP/KJS dilengkapi dari pasal dan
   segmen tengah kode bila tidak ada di referensi lama.

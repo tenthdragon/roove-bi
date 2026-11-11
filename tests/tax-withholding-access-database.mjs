@@ -2,6 +2,7 @@ import { execFile, execFileSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { randomBytes } from 'node:crypto';
 import { promisify } from 'node:util';
+import assert from 'node:assert/strict';
 
 // Migrations 247, 248 and 249 run in a disposable database with the minimal
 // workspace foundation they depend on. Direct reads then run as `authenticated`
@@ -86,10 +87,34 @@ ${masterMigration}
 ${masterMigration}
 ${readAccessMigration}
 ${readAccessMigration}
-${facilityIdentityMigration}
-${facilityIdentityMigration}
-${read('./tax-withholding-access-db.sql')}
 `));
+
+  // Rehearse the upgrade against populated data, before the unique constraint
+  // exists. The failed migration must preserve every row and even roll back
+  // its preliminary blank-document normalization.
+  psql(`INSERT INTO public.tax_counterparties(id, workspace_id, name, identity_type, identity_number)
+    VALUES (900, '00000000-0000-4000-8000-000000000101', 'UPGRADE FIXTURE', 'unknown', 'UNKNOWN');`);
+  for (const difference of ["applies_to=ARRAY['pph26']", 'rate_override=1.5', "valid_to=DATE '2026-12-31'", "notes='Different note'"]) {
+    psql(`INSERT INTO public.tax_counterparty_facilities(id, workspace_id, counterparty_id, facility_code, document_number, applies_to, valid_from)
+      VALUES (900, '00000000-0000-4000-8000-000000000101', 900, 'PP23', '', ARRAY['pph23'], DATE '2026-01-01'),
+             (901, '00000000-0000-4000-8000-000000000101', 900, 'PP23', NULL, ARRAY['pph23'], DATE '2026-01-01');
+      UPDATE public.tax_counterparty_facilities SET ${difference} WHERE id=901;`);
+    const before = psql('SELECT jsonb_agg(to_jsonb(f) ORDER BY id) FROM public.tax_counterparty_facilities f;');
+    assert.throws(() => psql(facilityIdentityMigration), /Conflicting tax facility rows/);
+    assert.equal(psql('SELECT jsonb_agg(to_jsonb(f) ORDER BY id) FROM public.tax_counterparty_facilities f;'), before);
+    assert.equal(psql("SELECT count(*) FROM pg_constraint WHERE conname='tax_counterparty_facilities_identity_key';").trim(), '0');
+    psql('DELETE FROM public.tax_counterparty_facilities WHERE counterparty_id=900;');
+  }
+  psql(`INSERT INTO public.tax_counterparty_facilities(id, workspace_id, counterparty_id, facility_code, document_number, applies_to, valid_from, notes)
+    VALUES (900, '00000000-0000-4000-8000-000000000101', 900, 'PP23', '', ARRAY['pph23'], DATE '2026-01-01', 'Same'),
+           (901, '00000000-0000-4000-8000-000000000101', 900, 'PP23', NULL, ARRAY['pph23'], DATE '2026-01-01', 'Same'),
+           (902, '00000000-0000-4000-8000-000000000101', 900, 'PP23', NULL, ARRAY['pph23'], DATE '2027-01-01', 'Renewal');`);
+  psql(facilityIdentityMigration);
+  assert.equal(psql('SELECT string_agg(id::text,\',\' ORDER BY id) FROM public.tax_counterparty_facilities;').trim(), '900,902');
+  psql(facilityIdentityMigration);
+  psql('DELETE FROM public.tax_counterparties WHERE id=900;');
+  process.stdout.write('PASS: populated upgrade preserves conflicts and collapses only equivalent payloads\n');
+  process.stdout.write(psql(read('./tax-withholding-access-db.sql')));
 
   await Promise.all([psqlAsync(concurrentFacilityInsert), psqlAsync(concurrentFacilityInsert)]);
   process.stdout.write(psql(`
