@@ -66,13 +66,15 @@ async function loadEntity(workspaceId: string, entityId: number): Promise<Entity
   return result.data as EntityRow;
 }
 
-const SLIP_COLUMNS = 'id, status, period_month, period_year, counterparty_name, counterparty_identity_type, counterparty_identity_number, object_code, pph_article, facility_code, gross_amount, rate_percent, withholding_amount, document_type, invoice_number, invoice_date, description, document_date, withholding_date, export_batch_id';
+const SLIP_COLUMNS = 'id, status, period_month, period_year, counterparty_name, counterparty_identity_type, counterparty_identity_number, object_code, pph_article, facility_code, gross_amount, rate_percent, withholding_amount, document_type, invoice_number, invoice_date, description, document_date, withholding_date, export_batch_id, updated_at';
 
 type SlipRow = ExportSlip & {
   pph_article: TaxArticle;
   invoice_date: string;
   description: string | null;
   export_batch_id: number | null;
+  /** Row version: moves on every edit, compared under the lock when a batch is created. */
+  updated_at: string;
 };
 
 function normalizeSlipRow(row: Record<string, unknown>): SlipRow {
@@ -138,6 +140,8 @@ export type TaxExportPreview = {
   entity: { id: number; legal_name: string; npwp: string; tku_id: string };
   entityErrors: string[];
   nextFileName: string;
+  /** Largest number of slips one batch accepts; the UI sends the first N eligible ids and leaves the rest for the next batch. */
+  maxBatchSlips: number;
   rows: TaxExportPreviewRow[];
   eligibleIds: number[];
   totals: { eligibleCount: number; blockedCount: number; grossAmount: string; withholdingAmount: string };
@@ -232,6 +236,7 @@ export async function previewTaxExport(input: TaxExportPeriodInput): Promise<Tax
     entity: { id: entity.id, legal_name: entity.legal_name, npwp: entity.npwp, tku_id: entity.tku_id },
     entityErrors: validateEntityForXml(entity),
     nextFileName: `${exportFileNamePrefix(entity, period)}${String(nextSequence).padStart(2, '0')}.xml`,
+    maxBatchSlips: MAX_BATCH_SLIPS,
     rows,
     eligibleIds,
     totals: {
@@ -259,7 +264,8 @@ export async function createTaxExportBatch(input: TaxExportPeriodInput & { slipI
   checkPeriod(input);
   const ids = [...new Set((input.slipIds ?? []).map(Number))];
   if (ids.length === 0) throw new Error('Pilih minimal satu bukti potong siap untuk di-export.');
-  if (ids.length > MAX_BATCH_SLIPS || ids.some((id) => !Number.isInteger(id) || id <= 0)) throw new Error('Daftar bukti potong tidak valid.');
+  if (ids.some((id) => !Number.isInteger(id) || id <= 0)) throw new Error('Daftar bukti potong tidak valid.');
+  if (ids.length > MAX_BATCH_SLIPS) throw new Error(`Maksimal ${MAX_BATCH_SLIPS} bukti potong per batch; sisanya masuk batch berikutnya.`);
 
   const [entity, slips, codes] = await Promise.all([
     loadEntity(workspaceId, input.entityId),
@@ -276,6 +282,8 @@ export async function createTaxExportBatch(input: TaxExportPeriodInput & { slipI
     throw new Error(`${blocked.length} bukti potong tidak valid untuk XML (mis. ${first.slip.invoice_number}: ${first.errors[0]}). Muat ulang pratinjau.`);
   }
 
+  // The XML is built from the rows read above; the database compares each
+  // row's version under its lock so a concurrent edit aborts the batch.
   const xml = buildBpuBulkXml(entity, slips);
   const sha256 = createHash('sha256').update(xml, 'utf8').digest('hex');
   const svc = createServiceSupabase();
@@ -284,7 +292,8 @@ export async function createTaxExportBatch(input: TaxExportPeriodInput & { slipI
     p_entity_id: input.entityId,
     p_period_year: input.year,
     p_period_month: input.month,
-    p_slip_ids: ids,
+    p_slip_ids: slips.map((slip) => slip.id),
+    p_slip_versions: slips.map((slip) => slip.updated_at),
     p_file_name_prefix: exportFileNamePrefix(entity, period),
     p_schema_version: BPU_BULK_SCHEMA_VERSION,
     p_xml_content: xml,
@@ -298,7 +307,7 @@ export async function createTaxExportBatch(input: TaxExportPeriodInput & { slipI
 }
 
 function translateBatchError(message: string): string {
-  if (/sudah berubah|bukan status siap/i.test(message)) return 'Sebagian bukti potong sudah berubah sejak pratinjau (status bukan siap atau sudah masuk batch lain). Muat ulang pratinjau lalu coba lagi.';
+  if (/sudah berubah|bukan status siap|diubah setelah pratinjau/i.test(message)) return 'Sebagian bukti potong berubah sejak pratinjau (diedit, bukan lagi status siap, atau sudah masuk batch lain). Muat ulang pratinjau lalu coba lagi.';
   if (/nonaktif/i.test(message)) return 'Pemotong tidak ditemukan atau nonaktif.';
   return message;
 }

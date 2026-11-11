@@ -411,12 +411,16 @@ function ExportModal({ entity, year, month, onClose, onChanged, notify }: {
 
   useEffect(() => { void refresh(); }, [refresh]);
 
+  // One batch takes at most maxBatchSlips; the rest stay ready for the next batch.
+  const batchIds = preview ? preview.eligibleIds.slice(0, preview.maxBatchSlips) : [];
+  const deferredCount = preview ? preview.eligibleIds.length - batchIds.length : 0;
+
   const create = async () => {
-    if (!preview || preview.eligibleIds.length === 0) return;
+    if (!preview || batchIds.length === 0) return;
     setBusy('create');
     setError(null);
     try {
-      const result = await createTaxExportBatch({ entityId: entity.id, year, month, slipIds: preview.eligibleIds });
+      const result = await createTaxExportBatch({ entityId: entity.id, year, month, slipIds: batchIds });
       downloadXml(result.fileName, result.xml);
       notify({ type: 'success', text: `Batch ${result.fileName} dibuat: ${result.slipCount} bukti potong berstatus di-export.` });
       await Promise.all([refresh(), onChanged()]);
@@ -440,7 +444,7 @@ function ExportModal({ entity, year, month, onClose, onChanged, notify }: {
   };
 
   const rows = preview ? preview.rows.filter((row) => !onlyBlocked || row.errors.length > 0) : [];
-  const canCreate = Boolean(preview && preview.entityErrors.length === 0 && preview.eligibleIds.length > 0) && busy === null;
+  const canCreate = batchIds.length > 0 && Boolean(preview && preview.entityErrors.length === 0) && busy === null;
 
   return (
     <ModalShell title="Export XML BPPU" subtitle={`${entity.legal_name} · ${MONTHS[month - 1]} ${year}`} onClose={onClose} maxWidth={980}>
@@ -451,7 +455,7 @@ function ExportModal({ entity, year, month, onClose, onChanged, notify }: {
           <>
             {preview.entityErrors.length > 0 ? <div className="tw-notice" style={{ color: 'var(--red)' }}>Pemotong belum siap: {preview.entityErrors.join(' ')}</div> : null}
             <div className="tw-summary-grid">
-              <SummaryCard label="Siap masuk XML" value={preview.totals.eligibleCount} hint={`${preview.totals.blockedCount} terblokir · ${preview.statusCounts.exported} sudah di-export · ${preview.statusCounts.reported + preview.statusCounts.paid} dilaporkan`} />
+              <SummaryCard label="Siap masuk XML" value={batchIds.length} hint={`${deferredCount > 0 ? `${deferredCount} lagi ke batch berikutnya · ` : ''}${preview.totals.blockedCount} terblokir · ${preview.statusCounts.exported} sudah di-export · ${preview.statusCounts.reported + preview.statusCounts.paid} dilaporkan`} />
               <SummaryCard label="Total DPP batch" value={formatMoney(preview.totals.grossAmount)} />
               <SummaryCard label="Total PPh batch" value={formatMoney(preview.totals.withholdingAmount)} />
               <SummaryCard label="Nama file berikutnya" value={preview.nextFileName} hint={`TIN ${preview.entity.npwp}`} />
@@ -459,6 +463,7 @@ function ExportModal({ entity, year, month, onClose, onChanged, notify }: {
             <div style={{ fontSize: 12, color: 'var(--text-secondary)' }}>
               Semua bukti potong berstatus siap yang lolos validasi masuk ke satu file. Baris terblokir tetap di luar batch; perbaiki lalu buat batch berikutnya. Vendor non-residen (TIN asing) tidak dilaporkan lewat BPPU.
             </div>
+            {deferredCount > 0 ? <div className="tw-notice">Satu file memuat maksimal {preview.maxBatchSlips} bukti potong. Batch ini mengambil {batchIds.length} bukti potong pertama; {deferredCount} sisanya tetap berstatus siap untuk batch berikutnya.</div> : null}
             <label style={{ display: 'flex', gap: 8, alignItems: 'center', fontSize: 12, color: 'var(--text-secondary)' }}>
               <input type="checkbox" checked={onlyBlocked} onChange={(event) => setOnlyBlocked(event.target.checked)} />
               Tampilkan hanya yang terblokir
@@ -539,7 +544,7 @@ function ExportModal({ entity, year, month, onClose, onChanged, notify }: {
         <button type="button" style={secondaryButtonStyle} onClick={onClose}>Tutup</button>
         <button type="button" style={secondaryButtonStyle} disabled={loading || busy !== null} onClick={() => void refresh()}>Muat ulang</button>
         <button type="button" style={primaryButtonStyle} disabled={!canCreate} onClick={() => void create()}>
-          {busy === 'create' ? 'Membuat batch…' : `Buat batch & unduh XML${preview ? ` (${preview.totals.eligibleCount})` : ''}`}
+          {busy === 'create' ? 'Membuat batch…' : `Buat batch & unduh XML${preview ? ` (${batchIds.length})` : ''}`}
         </button>
       </div>
     </ModalShell>

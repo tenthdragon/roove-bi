@@ -72,15 +72,20 @@ DO $$ BEGIN
 END $$;
 
 -- Atomically creates a batch for the given ready slips and marks them exported.
--- The caller builds the XML from the same slip rows beforehand; the function
--- re-checks that every slip is still `ready`, unassigned, and in the requested
--- entity/masa, so a slip changed between preview and export aborts the batch.
+-- The caller builds the XML from slip rows it read beforehand and passes each
+-- row's updated_at as its version; under the lock the function re-checks that
+-- every slip is still `ready`, unassigned, in the requested entity/masa, and
+-- unchanged since it was read (updated_at moves on every edit via trigger), so
+-- an edit between preview and export aborts the batch instead of shipping XML
+-- that no longer matches the claimed rows.
+DROP FUNCTION IF EXISTS public.tax_create_export_batch(UUID, BIGINT, INT, INT, BIGINT[], TEXT, TEXT, TEXT, TEXT, UUID);
 CREATE OR REPLACE FUNCTION public.tax_create_export_batch(
   p_workspace_id UUID,
   p_entity_id BIGINT,
   p_period_year INT,
   p_period_month INT,
   p_slip_ids BIGINT[],
+  p_slip_versions TIMESTAMPTZ[],
   p_file_name_prefix TEXT,
   p_schema_version TEXT,
   p_xml_content TEXT,
@@ -94,6 +99,7 @@ AS $$
 DECLARE
   v_ids BIGINT[] := (SELECT array_agg(DISTINCT id) FROM unnest(p_slip_ids) AS id);
   v_count INT;
+  v_current INT;
   v_gross NUMERIC(20, 6);
   v_withholding NUMERIC(18, 0);
   v_sequence SMALLINT;
@@ -102,6 +108,9 @@ DECLARE
 BEGIN
   IF v_ids IS NULL OR cardinality(v_ids) = 0 THEN
     RAISE EXCEPTION 'Tidak ada bukti potong untuk di-export.' USING ERRCODE = '22023';
+  END IF;
+  IF p_slip_versions IS NULL OR cardinality(p_slip_versions) <> cardinality(p_slip_ids) THEN
+    RAISE EXCEPTION 'Versi bukti potong harus dikirim untuk setiap id.' USING ERRCODE = '22023';
   END IF;
   IF p_period_month NOT BETWEEN 1 AND 12 OR p_period_year NOT BETWEEN 2000 AND 2100 THEN
     RAISE EXCEPTION 'Masa pajak tidak valid.' USING ERRCODE = '22023';
@@ -116,10 +125,12 @@ BEGIN
     RAISE EXCEPTION 'Pemotong tidak ditemukan atau nonaktif.' USING ERRCODE = 'P0002';
   END IF;
 
-  SELECT count(*), coalesce(sum(s.gross_amount), 0), coalesce(sum(s.withholding_amount), 0)
-    INTO v_count, v_gross, v_withholding
+  -- Lock the rows first, then compare them with the versions the caller saw.
+  SELECT count(*), coalesce(sum(s.gross_amount), 0), coalesce(sum(s.withholding_amount), 0),
+         count(*) FILTER (WHERE s.updated_at = v.version)
+    INTO v_count, v_gross, v_withholding, v_current
   FROM (
-    SELECT gross_amount, withholding_amount
+    SELECT id, gross_amount, withholding_amount, updated_at
     FROM public.tax_withholding_slips
     WHERE id = ANY (v_ids)
       AND workspace_id = p_workspace_id
@@ -129,9 +140,14 @@ BEGIN
       AND status = 'ready'
       AND export_batch_id IS NULL
     FOR UPDATE
-  ) s;
+  ) s
+  JOIN (SELECT DISTINCT ON (id) id, version FROM unnest(p_slip_ids, p_slip_versions) AS u(id, version)) v ON v.id = s.id;
   IF v_count <> cardinality(v_ids) THEN
     RAISE EXCEPTION 'Sebagian bukti potong sudah berubah atau bukan status siap (% dari % cocok); muat ulang pratinjau.', v_count, cardinality(v_ids)
+      USING ERRCODE = 'P0003';
+  END IF;
+  IF v_current <> v_count THEN
+    RAISE EXCEPTION 'Sebagian bukti potong diubah setelah pratinjau (% dari % masih sama); muat ulang pratinjau.', v_current, v_count
       USING ERRCODE = 'P0003';
   END IF;
 
@@ -156,7 +172,7 @@ BEGIN
   RETURN QUERY SELECT v_batch_id, v_sequence, v_file_name;
 END $$;
 
-REVOKE ALL ON FUNCTION public.tax_create_export_batch(UUID, BIGINT, INT, INT, BIGINT[], TEXT, TEXT, TEXT, TEXT, UUID) FROM PUBLIC, anon, authenticated;
-GRANT EXECUTE ON FUNCTION public.tax_create_export_batch(UUID, BIGINT, INT, INT, BIGINT[], TEXT, TEXT, TEXT, TEXT, UUID) TO service_role;
+REVOKE ALL ON FUNCTION public.tax_create_export_batch(UUID, BIGINT, INT, INT, BIGINT[], TIMESTAMPTZ[], TEXT, TEXT, TEXT, TEXT, UUID) FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.tax_create_export_batch(UUID, BIGINT, INT, INT, BIGINT[], TIMESTAMPTZ[], TEXT, TEXT, TEXT, TEXT, UUID) TO service_role;
 
 COMMIT;

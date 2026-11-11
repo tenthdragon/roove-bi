@@ -14,12 +14,13 @@ DECLARE
   v_beta_slip bigint := (SELECT id FROM public.tax_withholding_slips WHERE invoice_number = 'INV-BETA-1');
   v_batch record;
   v_second record;
+  v_stale timestamptz := now() - interval '1 day';
 BEGIN
   IF v_ready IS NULL OR v_draft IS NULL THEN RAISE EXCEPTION 'Fixture slips missing'; END IF;
 
   -- A draft slip cannot be exported, and the whole call fails (no partial batch).
   BEGIN
-    PERFORM * FROM public.tax_create_export_batch(v_alpha, v_entity, 2026, 10, ARRAY[v_ready, v_draft],
+    PERFORM * FROM public.tax_create_export_batch(v_alpha, v_entity, 2026, 10, ARRAY[v_ready, v_draft], (SELECT array_agg(updated_at ORDER BY i) FROM unnest(ARRAY[v_ready, v_draft]) WITH ORDINALITY AS u(id, i) JOIN public.tax_withholding_slips s ON s.id = u.id),
       'BPPU - EBUPOT - ALPHA - 10 2026 - ', 'BpuBulk-v3', '<BpuBulk/>', repeat('a', 64), '00000000-0000-4000-8000-000000000002');
     RAISE EXCEPTION 'draft slip must block the batch';
   EXCEPTION WHEN SQLSTATE 'P0003' THEN NULL;
@@ -29,7 +30,7 @@ BEGIN
 
   -- Another workspace's slip is invisible to the function.
   BEGIN
-    PERFORM * FROM public.tax_create_export_batch(v_alpha, v_entity, 2026, 10, ARRAY[v_beta_slip],
+    PERFORM * FROM public.tax_create_export_batch(v_alpha, v_entity, 2026, 10, ARRAY[v_beta_slip], (SELECT array_agg(updated_at ORDER BY i) FROM unnest(ARRAY[v_beta_slip]) WITH ORDINALITY AS u(id, i) JOIN public.tax_withholding_slips s ON s.id = u.id),
       'BPPU - EBUPOT - ALPHA - 10 2026 - ', 'BpuBulk-v3', '<BpuBulk/>', repeat('a', 64), NULL);
     RAISE EXCEPTION 'slip of another workspace must be rejected';
   EXCEPTION WHEN SQLSTATE 'P0003' THEN NULL;
@@ -37,14 +38,28 @@ BEGIN
 
   -- Wrong masa is rejected even for a ready slip.
   BEGIN
-    PERFORM * FROM public.tax_create_export_batch(v_alpha, v_entity, 2026, 11, ARRAY[v_ready],
+    PERFORM * FROM public.tax_create_export_batch(v_alpha, v_entity, 2026, 11, ARRAY[v_ready], (SELECT array_agg(updated_at ORDER BY i) FROM unnest(ARRAY[v_ready]) WITH ORDINALITY AS u(id, i) JOIN public.tax_withholding_slips s ON s.id = u.id),
       'BPPU - EBUPOT - ALPHA - 11 2026 - ', 'BpuBulk-v3', '<BpuBulk/>', repeat('a', 64), NULL);
     RAISE EXCEPTION 'slip outside the masa must be rejected';
   EXCEPTION WHEN SQLSTATE 'P0003' THEN NULL;
   END;
 
+  -- A slip edited after preview (updated_at moved) is rejected even though it is still ready.
+  BEGIN
+    PERFORM * FROM public.tax_create_export_batch(v_alpha, v_entity, 2026, 10, ARRAY[v_ready], ARRAY[v_stale],
+      'BPPU - EBUPOT - ALPHA - 10 2026 - ', 'BpuBulk-v3', '<BpuBulk/>', repeat('a', 64), NULL);
+    RAISE EXCEPTION 'stale slip version must be rejected';
+  EXCEPTION WHEN SQLSTATE 'P0003' THEN NULL;
+  END;
+  BEGIN
+    PERFORM * FROM public.tax_create_export_batch(v_alpha, v_entity, 2026, 10, ARRAY[v_ready], ARRAY[]::timestamptz[],
+      'BPPU - EBUPOT - ALPHA - 10 2026 - ', 'BpuBulk-v3', '<BpuBulk/>', repeat('a', 64), NULL);
+    RAISE EXCEPTION 'missing versions must be rejected';
+  EXCEPTION WHEN SQLSTATE '22023' THEN NULL;
+  END;
+
   -- Happy path: one ready slip, duplicate ids collapse, sequence 01.
-  SELECT * INTO v_batch FROM public.tax_create_export_batch(v_alpha, v_entity, 2026, 10, ARRAY[v_ready, v_ready],
+  SELECT * INTO v_batch FROM public.tax_create_export_batch(v_alpha, v_entity, 2026, 10, ARRAY[v_ready, v_ready], (SELECT array_agg(updated_at ORDER BY i) FROM unnest(ARRAY[v_ready, v_ready]) WITH ORDINALITY AS u(id, i) JOIN public.tax_withholding_slips s ON s.id = u.id),
     'BPPU - EBUPOT - ALPHA - 10 2026 - ', 'BpuBulk-v3', '<BpuBulk>1</BpuBulk>', repeat('a', 64), '00000000-0000-4000-8000-000000000002');
   IF v_batch.sequence <> 1 OR v_batch.file_name <> 'BPPU - EBUPOT - ALPHA - 10 2026 - 01.xml' THEN
     RAISE EXCEPTION 'First batch must be sequence 01: % %', v_batch.sequence, v_batch.file_name;
@@ -59,7 +74,7 @@ BEGIN
 
   -- The same slip cannot enter a second batch.
   BEGIN
-    PERFORM * FROM public.tax_create_export_batch(v_alpha, v_entity, 2026, 10, ARRAY[v_ready],
+    PERFORM * FROM public.tax_create_export_batch(v_alpha, v_entity, 2026, 10, ARRAY[v_ready], (SELECT array_agg(updated_at ORDER BY i) FROM unnest(ARRAY[v_ready]) WITH ORDINALITY AS u(id, i) JOIN public.tax_withholding_slips s ON s.id = u.id),
       'BPPU - EBUPOT - ALPHA - 10 2026 - ', 'BpuBulk-v3', '<BpuBulk/>', repeat('b', 64), NULL);
     RAISE EXCEPTION 'exported slip must not be batched again';
   EXCEPTION WHEN SQLSTATE 'P0003' THEN NULL;
@@ -91,7 +106,7 @@ BEGIN
 
   -- The corrected slip joins the next batch as sequence 02.
   UPDATE public.tax_withholding_slips SET status = 'ready' WHERE id IN (v_ready, v_draft);
-  SELECT * INTO v_second FROM public.tax_create_export_batch(v_alpha, v_entity, 2026, 10, ARRAY[v_ready, v_draft],
+  SELECT * INTO v_second FROM public.tax_create_export_batch(v_alpha, v_entity, 2026, 10, ARRAY[v_ready, v_draft], (SELECT array_agg(updated_at ORDER BY i) FROM unnest(ARRAY[v_ready, v_draft]) WITH ORDINALITY AS u(id, i) JOIN public.tax_withholding_slips s ON s.id = u.id),
     'BPPU - EBUPOT - ALPHA - 10 2026 - ', 'BpuBulk-v3', '<BpuBulk>2</BpuBulk>', repeat('c', 64), NULL);
   IF v_second.sequence <> 2 OR v_second.file_name <> 'BPPU - EBUPOT - ALPHA - 10 2026 - 02.xml' THEN
     RAISE EXCEPTION 'Second batch must be sequence 02';
@@ -106,7 +121,7 @@ BEGIN
   -- An inactive entity cannot export.
   UPDATE public.tax_withholding_entities SET is_active = false WHERE id = v_entity;
   BEGIN
-    PERFORM * FROM public.tax_create_export_batch(v_alpha, v_entity, 2026, 10, ARRAY[v_ready],
+    PERFORM * FROM public.tax_create_export_batch(v_alpha, v_entity, 2026, 10, ARRAY[v_ready], (SELECT array_agg(updated_at ORDER BY i) FROM unnest(ARRAY[v_ready]) WITH ORDINALITY AS u(id, i) JOIN public.tax_withholding_slips s ON s.id = u.id),
       'x - ', 'BpuBulk-v3', '<BpuBulk/>', repeat('d', 64), NULL);
     RAISE EXCEPTION 'inactive entity must be rejected';
   EXCEPTION WHEN SQLSTATE 'P0002' THEN NULL;
@@ -125,9 +140,9 @@ DO $$ BEGIN
     OR NOT has_sequence_privilege('service_role', 'public.tax_export_batches_id_seq', 'USAGE') THEN
     RAISE EXCEPTION 'Unexpected batch grants';
   END IF;
-  IF has_function_privilege('authenticated', 'public.tax_create_export_batch(uuid, bigint, int, int, bigint[], text, text, text, text, uuid)', 'EXECUTE')
-    OR has_function_privilege('anon', 'public.tax_create_export_batch(uuid, bigint, int, int, bigint[], text, text, text, text, uuid)', 'EXECUTE')
-    OR NOT has_function_privilege('service_role', 'public.tax_create_export_batch(uuid, bigint, int, int, bigint[], text, text, text, text, uuid)', 'EXECUTE') THEN
+  IF has_function_privilege('authenticated', 'public.tax_create_export_batch(uuid, bigint, int, int, bigint[], timestamptz[], text, text, text, text, uuid)', 'EXECUTE')
+    OR has_function_privilege('anon', 'public.tax_create_export_batch(uuid, bigint, int, int, bigint[], timestamptz[], text, text, text, text, uuid)', 'EXECUTE')
+    OR NOT has_function_privilege('service_role', 'public.tax_create_export_batch(uuid, bigint, int, int, bigint[], timestamptz[], text, text, text, text, uuid)', 'EXECUTE') THEN
     RAISE EXCEPTION 'Unexpected batch function grants';
   END IF;
   IF (SELECT count(*) FROM pg_policies WHERE tablename = 'tax_export_batches' AND cmd = 'SELECT' AND qual LIKE '%workspace_has_tax_access%') <> 1 THEN
