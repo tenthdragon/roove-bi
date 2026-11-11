@@ -45,13 +45,20 @@ export async function readParserCatalog(workspaceId: string, selectedStoreIds: n
   if (!Array.isArray(requested) || requested.length > 100 || requested.some(code => typeof code !== 'string' || !code || code.length > 100)) throw new Error('Pilihan Business tidak valid.');
   const selected = catalog.businesses.filter(b => requested.includes(b.code));
   if (selected.length !== new Set(requested).size) throw new Error('Business tidak aktif atau bukan milik workspace ini.');
-  // A bundle belongs to the receiving Business even when it has no Store link.
-  // Observe the Business generation on both sides to reject partial snapshots.
+  const decisions = await allPages<any>((from,to) => db.from('marketplace_parser_route_decisions').select('id,account_id,business_code,case_key,items,store_id,revision,actor_name,created_at').eq('workspace_id',workspaceId).order('created_at').order('id').range(from,to));
+  catalog.decisions = decisions.map(d=>({id:d.id,account:d.account_id,business:d.business_code,caseKey:d.case_key,items:d.items,storeId:d.store_id,revision:d.revision,actor:d.actor_name,createdAt:d.created_at}));
   const readSyncs = () => selected.length ? allPages<{ business_id: number; sync_status: string; last_synced_at: string | null; updated_at: string }>((from,to) => db.from('scalev_catalog_sync_state').select('business_id,sync_status,last_synced_at,updated_at').eq('workspace_id',workspaceId).in('business_id',selected.map(b => b.id)).order('business_id').range(from,to)) : Promise.resolve([]);
   const before = await readSyncs();
+  const links = selected.length ? await allPages<any>((from,to) => db.from('scalev_catalog_bundle_store_links').select('id,business_id,scalev_bundle_id,store_name').eq('workspace_id',workspaceId).in('business_id',selected.map(b=>b.id)).eq('is_available',true).order('id').range(from,to)) : [];
+  const linkedStores=new Map<string,number[]>();
+  const storeNames=new Map<string,number[]>();
+  for(const store of catalog.stores){const key=`${store.business}:${store.name}`;storeNames.set(key,[...(storeNames.get(key)||[]),store.id]);}
+  for(const link of links){const ids=storeNames.get(`${codes.get(Number(link.business_id))}:${link.store_name}`)||[];const key=`${link.business_id}:${link.scalev_bundle_id}`;linkedStores.set(key,[...(linkedStores.get(key)||[]),...ids]);}
+  // A bundle belongs to the receiving Business even when it has no Store link.
+  // Observe the Business generation on both sides to reject partial snapshots.
   for (const business of selected) {
     const rows = await allPages<any>((from,to) => db.from('scalev_catalog_bundles').select('id,scalev_bundle_id,custom_id,name,last_synced_at').eq('workspace_id',workspaceId).eq('business_id',business.id).order('id').range(from,to));
-    catalog.bundles.push(...rows.map(row => ({ id: Number(row.scalev_bundle_id),business: business.code,sku: String(row.custom_id || '').trim(),name: String(row.name),syncedAt: row.last_synced_at })));
+    catalog.bundles.push(...rows.map(row => ({ id: Number(row.scalev_bundle_id),business: business.code,sku: String(row.custom_id || ''),name: String(row.name),syncedAt: row.last_synced_at,storeIds: [...new Set(linkedStores.get(`${business.id}:${row.scalev_bundle_id}`)||[])] })));
   }
   const after = await readSyncs();
   catalog.businessSyncs = selected.map(business => {

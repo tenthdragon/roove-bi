@@ -5,6 +5,7 @@ import { randomBytes } from 'node:crypto';
 // Exercise the parser's migrations in a disposable database, never in the
 // shared local snapshot. No historical migration directory is replayed.
 const database = `parser_config_test_${randomBytes(6).toString('hex')}`;
+const serviceActor = `${database}_service`;
 const container = process.argv.includes('--ci') ? 'roove-access-requests-test' : 'supabase_db_roove-bi-local';
 const read = path => readFileSync(new URL(path, import.meta.url), 'utf8');
 const docker = (command, args, input) => execFileSync('docker', [
@@ -15,6 +16,11 @@ const docker = (command, args, input) => execFileSync('docker', [
 
 docker('createdb', [database]);
 try {
+  // Plain PostgreSQL CI creates service_role without Supabase's BYPASSRLS.
+  // Model the production service actor with an isolated, non-login role that
+  // inherits the real migration grants; never alter a shared role's attributes.
+  docker('psql', ['-d', database, '-X', '-Atq', '-v', 'ON_ERROR_STOP=1'],
+    `CREATE ROLE ${serviceActor} NOLOGIN INHERIT BYPASSRLS; GRANT service_role TO ${serviceActor};`);
   process.stdout.write(docker('psql', ['-d', database, '-X', '-Atq', '-v', 'ON_ERROR_STOP=1'], `
 CREATE SCHEMA auth;
 CREATE TABLE auth.users (id uuid PRIMARY KEY);
@@ -116,7 +122,38 @@ BEGIN
   IF public.reserve_scalev_api_request(key_a,NULL,true) < 59000 THEN RAISE EXCEPTION 'Cooldown was shortened by another caller'; END IF;
 END $$;
 SELECT 'PASS: legacy metadata retained, service-only shared request budget, staggered credentials and monotonic cooldown';
+CREATE SCHEMA storage;
+CREATE TABLE storage.buckets(id text PRIMARY KEY,name text,public boolean,file_size_limit bigint);
+CREATE TABLE storage.objects(id integer PRIMARY KEY,bucket_id text);
+ALTER TABLE storage.objects ENABLE ROW LEVEL SECURITY;
+GRANT USAGE ON SCHEMA storage TO authenticated,anon,service_role;
+GRANT SELECT,INSERT ON storage.objects TO authenticated,anon;
+CREATE POLICY existing_broad_policy ON storage.objects FOR ALL TO authenticated,anon USING(true) WITH CHECK(true);
+${read('../supabase/migrations/20261111074823_marketplace_parser_archive_routing.sql')}
+INSERT INTO storage.objects VALUES(1,'marketplace-parser-archive'),(2,'unrelated');
+SET ROLE authenticated;
+DO $$ BEGIN
+ IF EXISTS(SELECT 1 FROM storage.objects WHERE bucket_id='marketplace-parser-archive') THEN RAISE EXCEPTION 'Archive exposed through broad Storage policy'; END IF;
+ IF NOT EXISTS(SELECT 1 FROM storage.objects WHERE bucket_id='unrelated') THEN RAISE EXCEPTION 'Unrelated Storage behavior changed'; END IF;
+ IF has_table_privilege('authenticated','marketplace_parser_batches','SELECT') OR has_table_privilege('anon','marketplace_parser_route_decisions','INSERT') THEN RAISE EXCEPTION 'Archive exposed to client'; END IF;
+END $$;
+RESET ROLE;
+SET ROLE ${serviceActor};
+INSERT INTO public.marketplace_parser_batches(id,workspace_id,account_id,business_code,account_snapshot,filename,source_path,source_sha256,byte_size,batch_date,parsed_file,order_count,created_by,actor_name)
+VALUES('00000000-0000-4000-8000-000000000001','00000000-0000-0000-0000-000000000001','account','RTI','{}','source.xlsx','scope/source.xlsx',repeat('a',64),100,'2026-11-11','{}',1,'00000000-0000-4000-8000-000000000002','Tester');
+INSERT INTO public.marketplace_parser_route_decisions(id,workspace_id,account_id,business_code,case_key,case_hash,items,store_id,store_name,revision,source_batch_id,source_order_key,created_by,actor_name)
+VALUES('00000000-0000-4000-8000-000000000003','00000000-0000-0000-0000-000000000001','account','RTI','[[1,"SKU",1]]',repeat('b',64),'[{}]',1,'Store',1,'00000000-0000-4000-8000-000000000001','order','00000000-0000-4000-8000-000000000002','Tester');
+DO $$ BEGIN
+ BEGIN UPDATE public.marketplace_parser_batches SET filename='changed'; RAISE EXCEPTION 'Source is mutable'; EXCEPTION WHEN insufficient_privilege THEN NULL; END;
+ BEGIN DELETE FROM public.marketplace_parser_batches; RAISE EXCEPTION 'Source deletable'; EXCEPTION WHEN insufficient_privilege THEN NULL; END;
+ BEGIN UPDATE public.marketplace_parser_route_decisions SET store_id=1; RAISE EXCEPTION 'Decisions mutable'; EXCEPTION WHEN insufficient_privilege THEN NULL; END;
+ BEGIN INSERT INTO public.marketplace_parser_route_decisions SELECT '00000000-0000-4000-8000-000000000004'::uuid,workspace_id,account_id,business_code,case_key,case_hash,items,store_id,store_name,revision,source_batch_id,source_order_key,created_by,actor_name,created_at FROM public.marketplace_parser_route_decisions; RAISE EXCEPTION 'Concurrent decision overwrote history'; EXCEPTION WHEN unique_violation THEN NULL; END;
+END $$;
+RESET ROLE;
+SELECT 'PASS: immutable source/export/decision grants, concurrent decision protection and private Storage under broad policies';
+
 `));
 } finally {
   docker('dropdb', ['--if-exists', database]);
+  docker('psql', ['-d', 'postgres', '-X', '-Atq', '-v', 'ON_ERROR_STOP=1'], `DROP ROLE IF EXISTS ${serviceActor};`);
 }

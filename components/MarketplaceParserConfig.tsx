@@ -29,7 +29,7 @@ export default function MarketplaceParserConfig({ config,setConfig,catalog,busy,
     return <select aria-label={label} value={value || ''} onChange={e => onChange(Number(e.target.value))}><option value="">Pilih Store tujuan</option>{value && !options.some(s => s.id === value) ? <option value={value}>Store perlu dipilih ulang</option> : null}{options.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}</select>;
   }
   return <div className={styles.config}>
-    <p>Akun asal menentukan Business. Aturan Produk menentukan Store dalam Business tersebut. Kode SKU marketplace harus sama dengan identifier code bundle Scalev.</p>
+    <p>Akun asal menentukan Business. Keputusan tersimpan dan katalog menentukan Store. Aturan Produk bersifat tambahan. Kode SKU marketplace harus sama dengan identifier code bundle Scalev.</p>
     <details open><summary>Akun marketplace asal <span>{config.accounts.length} akun</span></summary>
       <p>Tetapkan satu Business per akun. Business hasil parsing mengikuti pengaturan ini secara otomatis.</p>
       {config.accounts.length > 0 && <div className={styles.tableWrap}><table><thead><tr><th>Marketplace</th><th>Nama akun</th><th>Business</th><th>Aksi</th></tr></thead><tbody>{config.accounts.map((a,i) => <tr key={a.id}>

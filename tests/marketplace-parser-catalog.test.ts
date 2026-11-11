@@ -46,7 +46,8 @@ test('metadata load avoids bundle queries; receiving Business includes bundles w
   const catalog = await readParserCatalog('workspace-a', [10]);
   assert.deepEqual(catalog.loadedStoreIds, [10]);
   assert.deepEqual(catalog.bundles.map(b => [b.id,b.sku]), [[101,'SKU-A'],[102,'SKU-B']]);
-  assert.ok(!queries.some(q => /store_links|store_syncs/.test(q.table)));
+  assert.deepEqual(catalog.bundles[0].storeIds,[10]);
+  assert.deepEqual(catalog.bundles[1].storeIds,[11]);
   assert.deepEqual(catalog.loadedBusinessCodes,['RTI']);
   assert.equal((await readParserCatalog('workspace-a',[],undefined,['RTI'])).bundles.length,2);
   assert.deepEqual((await readParserCatalog('workspace-a',[10],undefined,['JHN'])).bundles,[]);
@@ -87,6 +88,12 @@ test('Business sync failure and an intervening Business sync cannot unlock a par
   assert.equal((await readParserCatalog('workspace-a',[10])).businessSyncs[0].status,'ready');
 });
 const page = (ids: number[], hasNext: boolean, lastId?: number) => new Response(JSON.stringify({ code: 200,data: { results: ids.map(id => ({ id })),has_next: hasNext,last_id: lastId } }));
+test('Store relation reads are covered by the sync generation and duplicate names remain ambiguous',async()=>{
+ rows.scalev_store_channels.push({...rows.scalev_store_channels[0],id:30});
+ assert.deepEqual((await readParserCatalog('workspace-a',[10,30])).bundles[0].storeIds,[10,30]);
+ onRead=table=>{if(table==='scalev_catalog_bundle_store_links')rows.scalev_catalog_sync_state[0].updated_at='changed';};
+ assert.equal((await readParserCatalog('workspace-a',[10])).businessSyncs[0].status,'failed');
+});
 test('Scalev pagination uses the cursor, rejects repeats/incomplete responses, and restricts endpoints', async () => {
   const urls: string[] = [];
   const result = await readScalevPages('test-secret', 'stores/10/bundles', (async (url: string) => { urls.push(url); return urls.length === 1 ? page([10,9],true,9) : page([8],false); }) as typeof fetch);

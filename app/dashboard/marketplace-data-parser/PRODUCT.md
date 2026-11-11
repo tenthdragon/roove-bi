@@ -10,19 +10,28 @@ Indonesian and the existing Roove BI dashboard design system.
 - Products describe what is sold; SKUs describe the particular bundle purchased.
 - Each account can sell several Products. Scalev Stores are destination entities,
   not names for marketplace accounts or Products.
-- Choose active destination Stores within account Businesses and map each Product.
+- Choose active destination Stores within account Businesses and a Warehouse per Store.
 - Marketplace SKU codes must equal a unique Scalev bundle identifier in the receiving
   Business. Owned and shared bundles both qualify. Store membership and catalog price
   options never determine eligibility. No guessed names or hardcoded destinations.
-- Account + Product rules and configurable combination priorities determine one
-  destination Store for the entire order. Every SKU must have Product classification;
-  there is no fallback from bundle–Store relationships or a single available Store.
+- Exact approved account/Business/bundle decisions take precedence. A unique common
+  Store from cached bundle relationships can determine the destination automatically.
+  Existing saved Product/combination rules remain usable; they are optional. Missing
+  or ambiguous routing requires explicit Store approval, never automatic name guessing.
+- Bonus markers require a first approval. Decisions for mixed orders include the
+  bundle set and quantities and do not overwrite single-bundle decisions. An invalid
+  locked Store requires review; do not silently fall back to a different Store.
 - Warehouse is a global Store setting, selected from connected app master data.
-- Prices and quantities come from the marketplace file. No Scalev price selection.
+- Marketplace source fields are read-only, including SKU, quantity, price, username,
+  receipt and source courier. Scalev courier mapping remains configurable. No Scalev
+  price selection. SKU comparison preserves case and surrounding whitespace.
 - The whole batch must pass before download; missing/ambiguous bundles, missing
   routes, invalid Warehouses and incomplete Business snapshots block the batch.
-- Team configuration is versioned and revalidated on server download. No per-order
-  Business, Store, Warehouse, Product or SKU override is supported.
+- Team configuration and global routing decisions are versioned and revalidated on
+  server download. Inline Store approval creates a reusable decision with actor/time.
+- Archive the original XLSX and parsed source before preview. Each successful export
+  adds a separate CSV and parsing snapshot; opening a batch never replaces old output.
+  Files are private and workspace-scoped. Server export uses archived source only.
 - **Periksa masalah** reads exact codes from the application database. Opening or
   reloading it never calls Scalev. Completed snapshots have no time-based expiry.
 - Sharing a verified bundle from another connected Business remains an explicit
@@ -48,14 +57,17 @@ Use compact tables on desktop, contained horizontal scrolling for comparison
 rows on small screens, and single-column forms where applicable. Preserve useful
 validation detail, disabled download states, keyboard labels and visible focus.
 
-The repair panel leads with Bundle → Business → Store status, pairing icons and
-short text. Store is the read-only mapped destination; missing routing opens global
-settings. Use one primary sharing action for selected foreign bundles, with checkboxes
-for multi-bundle cases. Preserve exclusions on reload even if one candidate remains.
-Keep the marketplace order total visible. Ownership, timestamps, database reload,
-explicit Business sync and routing settings live under **Detail & aksi lain**.
-Incomplete Business snapshots promote sync; missing or duplicate codes link to the
-Business catalog. Keep permissions and partial sharing results visible.
+The main order row shows buyer username, tracking receipt, original and mapped
+courier, exact bundle, Store and validation. A compact **Pilih Store** control
+searches only selected active Stores in the account Business and shows at most six
+results. **Gunakan & simpan** records the decision for future matching cases. Keep
+history collapsed and source rows read-only under **Detail**. Missing/duplicate
+bundles show a short inline Scalev link; foreign bundles retain explicit sharing.
+Do not force a large diagnostic panel for routine Store selection.
+
+**Riwayat batch** exposes the original file, reopening the batch, and each export's
+CSV and parsing snapshot. Unknown/incomplete catalog data must not claim that a
+bundle needs creating; direct the operator to catalog sync instead.
 
 The sidebar label is MP Data Parser. Existing illustrative defaults are replaced
 by workspace configuration. Synthetic acceptance fixtures are labeled SYNTHETIC

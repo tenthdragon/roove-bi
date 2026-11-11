@@ -55,7 +55,7 @@ test('two distinct SKU variants in the same Product use a single Product route',
   const c = configFixture(); c.combinations = [];
   const p = projection(file('ROV20-295','ROV10-150'),c); assert.ok(orderReady(p.orders[0])); assert.deepEqual(p.orders[0].lines.map(l => l.bundleId),[101,105]);
 });
-test('Store requires Product mapping even with one selected Store; bundle relations never infer a destination',() => {
+test('one selected Store alone is not evidence without a bundle relation or approved rule',() => {
   const c = configFixture(); c.routes = []; c.combinations = []; c.stores = [{storeId: 10,warehouseId: 1}];
   blocked(projection(file('ROV20-295'),c));
   c.products = []; blocked(projection(file('ROV20-295'),c));
@@ -127,10 +127,9 @@ test('duplicate receipt, cancellation, formula text and unknown courier remain b
   for (const extra of [{ 'Status Pesanan': 'Dibatalkan' },{ 'Username (Pembeli)': '=SUM(A1)' },{ 'Opsi Pengiriman': 'NEW' }]) blocked(projection(parseWorkbook(book({ orders: [shopee(extra)] }))));
   blocked(projection(parseWorkbook(book({ orders: [shopee(),shopee({ 'No. Pesanan': 'DUP' })] }))));
 });
-test('financial corrections require a reason and invalidate raw source errors only when both fields are supplied',() => {
-  const f = parseWorkbook(book({ orders: [shopee({ Jumlah: 'invalid' })] }));
-  blocked(projection(f,configFixture(),catalogFixture(),undefined,{ orders: {},lines: { 'orders:2': { quantity: '2',price: '295000' } } }));
-  const p = projection(f,configFixture(),catalogFixture(),undefined,{ orders: {},lines: { 'orders:2': { quantity: '2',price: '295000',reason: 'Invoice checked' } } }); assert.ok(orderReady(p.orders[0]));
+test('financial corrections are rejected even with a reason; incomplete source remains blocked',()=> {
+ const file=parseWorkbook(book({Orders:[shopee()]}));
+ assert.throws(()=>projectMarketplace({file,account:'roove',date:'2026-11-11',config:configFixture(),revision:3,catalog:catalogFixture(),edits:{lines:{[file.orders[0].lines[0].key]:{price:'1',quantity:'1',reason:'test'}},orders:{}}}),/tidak boleh dikoreksi/);
 });
 test('no customer-specific accounts, routes, products or warehouse names are hardcoded in new defaults',() => {
   const c = defaultParserConfig(); for (const key of ['accounts','stores','groups','products','routes','combinations'] as const) assert.deepEqual(c[key],[]); validateParserConfig(c);
@@ -156,5 +155,5 @@ test('a Warehouse without a verified CSV integration label blocks export instead
   const catalog = catalogFixture(); catalog.warehouses[0].exportName = null;
   const p = projection(file('ROV20-295'), configFixture(), catalog);
   blocked(p); assert.equal(p.orders[0].rows[0].warehouse, '');
-  assert.match(p.orders[0].errors.join(' '), /Nama ekspor Scalev/);
+  assert.match(p.orders[0].errors.join(' '), /Nama ekspor/);
 });
