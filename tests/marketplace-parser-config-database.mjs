@@ -5,6 +5,7 @@ import { randomBytes } from 'node:crypto';
 // Exercise the parser's migrations in a disposable database, never in the
 // shared local snapshot. No historical migration directory is replayed.
 const database = `parser_config_test_${randomBytes(6).toString('hex')}`;
+const serviceActor = `${database}_service`;
 const container = process.argv.includes('--ci') ? 'roove-access-requests-test' : 'supabase_db_roove-bi-local';
 const read = path => readFileSync(new URL(path, import.meta.url), 'utf8');
 const docker = (command, args, input) => execFileSync('docker', [
@@ -15,6 +16,11 @@ const docker = (command, args, input) => execFileSync('docker', [
 
 docker('createdb', [database]);
 try {
+  // Plain PostgreSQL CI creates service_role without Supabase's BYPASSRLS.
+  // Model the production service actor with an isolated, non-login role that
+  // inherits the real migration grants; never alter a shared role's attributes.
+  docker('psql', ['-d', database, '-X', '-Atq', '-v', 'ON_ERROR_STOP=1'],
+    `CREATE ROLE ${serviceActor} NOLOGIN INHERIT BYPASSRLS; GRANT service_role TO ${serviceActor};`);
   process.stdout.write(docker('psql', ['-d', database, '-X', '-Atq', '-v', 'ON_ERROR_STOP=1'], `
 CREATE SCHEMA auth;
 CREATE TABLE auth.users (id uuid PRIMARY KEY);
@@ -132,7 +138,7 @@ DO $$ BEGIN
  IF has_table_privilege('authenticated','marketplace_parser_batches','SELECT') OR has_table_privilege('anon','marketplace_parser_route_decisions','INSERT') THEN RAISE EXCEPTION 'Archive exposed to client'; END IF;
 END $$;
 RESET ROLE;
-SET ROLE service_role;
+SET ROLE ${serviceActor};
 INSERT INTO public.marketplace_parser_batches(id,workspace_id,account_id,business_code,account_snapshot,filename,source_path,source_sha256,byte_size,batch_date,parsed_file,order_count,created_by,actor_name)
 VALUES('00000000-0000-4000-8000-000000000001','00000000-0000-0000-0000-000000000001','account','RTI','{}','source.xlsx','scope/source.xlsx',repeat('a',64),100,'2026-11-11','{}',1,'00000000-0000-4000-8000-000000000002','Tester');
 INSERT INTO public.marketplace_parser_route_decisions(id,workspace_id,account_id,business_code,case_key,case_hash,items,store_id,store_name,revision,source_batch_id,source_order_key,created_by,actor_name)
@@ -149,4 +155,5 @@ SELECT 'PASS: immutable source/export/decision grants, concurrent decision prote
 `));
 } finally {
   docker('dropdb', ['--if-exists', database]);
+  docker('psql', ['-d', 'postgres', '-X', '-Atq', '-v', 'ON_ERROR_STOP=1'], `DROP ROLE IF EXISTS ${serviceActor};`);
 }
