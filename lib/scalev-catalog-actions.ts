@@ -1,5 +1,7 @@
 'use server';
 
+import { claimCatalogBusiness, assertCatalogBusinessClaim, failCatalogBusinessClaim, completeCatalogBusinessClaim } from './scalev-catalog-lease';
+
 import { ParserScalevClient, type ScalevBusiness } from './marketplace-parser/scalev-client';
 import { cachedBundleMetadata } from './marketplace-parser/catalog-metadata';
 import { scalevFetch, scalevRetryDelay, ScalevThrottleError } from './scalev-request-budget';
@@ -995,36 +997,6 @@ function buildCatalogPayload(
   };
 }
 
-async function upsertSyncState(input: {
-  workspace_id: string;
-  business_id: number;
-  business_code: string;
-  sync_status: 'idle' | 'running' | 'success' | 'failed';
-  last_synced_at?: string | null;
-  last_error?: string | null;
-  products_count?: number;
-  variants_count?: number;
-  bundles_count?: number;
-  identifiers_count?: number;
-}) {
-  const svc = createServiceSupabase();
-  const { error } = await svc
-    .from('scalev_catalog_sync_state')
-    .upsert({
-      workspace_id: input.workspace_id,
-      business_id: input.business_id,
-      business_code: input.business_code,
-      sync_status: input.sync_status,
-      last_synced_at: input.last_synced_at ?? null,
-      last_error: input.last_error ?? null,
-      products_count: input.products_count ?? 0,
-      variants_count: input.variants_count ?? 0,
-      bundles_count: input.bundles_count ?? 0,
-      identifiers_count: input.identifiers_count ?? 0,
-    }, { onConflict: 'business_id' });
-  if (error) throw error;
-}
-
 async function getBusinessById(workspaceId: string, businessId: number): Promise<ScalevBusinessConfig> {
   const svc = createServiceSupabase();
   const { data, error } = await svc
@@ -1155,13 +1127,8 @@ async function performScalevCatalogSync(
     throw new Error(`Business ${business.business_code} belum punya API key.`);
   }
 
-  await upsertSyncState({
-    workspace_id: workspaceId,
-    business_id: business.id,
-    business_code: business.business_code,
-    sync_status: 'running',
-    last_error: null,
-  });
+  const claim = await claimCatalogBusiness(workspaceId,business.id,business.business_code);
+  const ensureCurrent = () => assertCatalogBusinessClaim(workspaceId,business.id,claim);
 
   try {
     const syncAt = new Date().toISOString();
@@ -1174,10 +1141,13 @@ async function performScalevCatalogSync(
     const bundles = await client.catalogBundles();
 
     const payload = buildCatalogPayload(business, products, bundles, syncAt);
-
+    await ensureCurrent();
     await batchUpsert(workspaceId, 'scalev_catalog_products', payload.productRows, 'business_id,scalev_product_id');
+    await ensureCurrent();
     await batchUpsert(workspaceId, 'scalev_catalog_variants', payload.variantRows, 'business_id,scalev_variant_id');
+    await ensureCurrent();
     await batchUpsert(workspaceId, 'scalev_catalog_bundles', payload.bundleRows, 'business_id,scalev_bundle_id');
+    await ensureCurrent();
     await batchUpsert(
       workspaceId,
       'scalev_catalog_identifiers',
@@ -1185,16 +1155,16 @@ async function performScalevCatalogSync(
       'business_id,identifier_normalized,entity_type,source,entity_key',
     );
 
+    await ensureCurrent();
     await cleanupStaleCatalogRows(workspaceId, 'scalev_catalog_identifiers', business.id, syncAt);
+    await ensureCurrent();
     await cleanupStaleCatalogRows(workspaceId, 'scalev_catalog_bundles', business.id, syncAt);
+    await ensureCurrent();
     await cleanupStaleCatalogRows(workspaceId, 'scalev_catalog_variants', business.id, syncAt);
+    await ensureCurrent();
     await cleanupStaleCatalogRows(workspaceId, 'scalev_catalog_products', business.id, syncAt);
 
-    await upsertSyncState({
-      workspace_id: workspaceId,
-      business_id: business.id,
-      business_code: business.business_code,
-      sync_status: 'success',
+    await completeCatalogBusinessClaim(workspaceId,business.id,claim,{
       last_synced_at: syncAt,
       last_error: null,
       products_count: payload.productRows.length,
@@ -1239,13 +1209,7 @@ async function performScalevCatalogSync(
       last_synced_at: syncAt,
     };
   } catch (error: any) {
-    await upsertSyncState({
-      workspace_id: workspaceId,
-      business_id: business.id,
-      business_code: business.business_code,
-      sync_status: 'failed',
-      last_error: error?.message || 'Gagal sync katalog Scalev.',
-    });
+    await failCatalogBusinessClaim(workspaceId,business.id,claim,error?.message || 'Gagal sync katalog Scalev.');
 
     await recordWarehouseActivityLog({
       scope: 'scalev_catalog_sync',

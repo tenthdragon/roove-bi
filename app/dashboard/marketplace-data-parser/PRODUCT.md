@@ -10,31 +10,27 @@ Indonesian and the existing Roove BI dashboard design system.
 - Products describe what is sold; SKUs describe the particular bundle purchased.
 - Each account can sell several Products. Scalev Stores are destination entities,
   not names for marketplace accounts or Products.
-- Choose Stores within account Businesses before loading their bundle catalog.
-- Marketplace SKU codes must equal the Scalev bundle identifier codes. No aliases,
-  guessed names, or customer-specific Business/Store/Warehouse names in code.
+- Choose active destination Stores within account Businesses and map each Product.
+- Marketplace SKU codes must equal a unique Scalev bundle identifier in the receiving
+  Business. Owned and shared bundles both qualify. Store membership and catalog price
+  options never determine eligibility. No guessed names or hardcoded destinations.
 - Account + Product rules and configurable combination priorities determine one
-  destination Store for the whole order. Every item must be available there.
+  destination Store for the entire order. Every SKU must have Product classification;
+  there is no fallback from bundle–Store relationships or a single available Store.
 - Warehouse is a global Store setting, selected from connected app master data.
-- The whole batch must pass before download; missing or ambiguous bundles cannot
-  be skipped. Business and Store are populated automatically.
-- Team configuration is versioned. Changes require revalidation, including on
-  the server at download. Per-order routing overrides are not supported.
-- The existing **Periksa masalah** expansion reads diagnosis from the application catalog and
-  offers explicit Scalev repair, without another modal. Show bundle ownership separately from the
-  account's receiving Business and Store. Installation and sharing change the
-  global Scalev catalog; they never override an order's routing.
-- Readable diagnostics distinguish absence from the saved catalog, incomplete syncs,
-  duplicate identifiers, availability to the Business, and Store membership.
-  A single available price option can be selected automatically; multiple
-  options require an explicit choice. These options never change source prices.
-- Opening or reloading diagnosis never calls Scalev. Synced data has no time-based
-  expiry; metadata missing from older snapshots is labeled unknown. Explicit
-  Store sync refreshes known bundle metadata and membership. An unknown SKU
-  points to Business catalog sync; it never starts a cross-Business API scan.
-- Readers can explicitly sync the catalog; sharing/installation requires the existing
-  catalog management permission. Repairs sync the affected Store and revalidate
-  the entire batch. Partial failures remain actionable and do not unlock export.
+- Prices and quantities come from the marketplace file. No Scalev price selection.
+- The whole batch must pass before download; missing/ambiguous bundles, missing
+  routes, invalid Warehouses and incomplete Business snapshots block the batch.
+- Team configuration is versioned and revalidated on server download. No per-order
+  Business, Store, Warehouse, Product or SKU override is supported.
+- **Periksa masalah** reads exact codes from the application database. Opening or
+  reloading it never calls Scalev. Completed snapshots have no time-based expiry.
+- Sharing a verified bundle from another connected Business remains an explicit
+  global Scalev action. It stops at receiving-Business availability: no attachment
+  to Store, no price option. Unknown owner metadata cannot authorize sharing.
+- Explicit full Business sync and sharing require existing catalog management access.
+  Both use a shared Business lease. Sync failure blocks export; successful sync
+  revalidates every order and clears the previous download confirmation.
 
 ## Interface contract
 
@@ -53,14 +49,13 @@ rows on small screens, and single-column forms where applicable. Preserve useful
 validation detail, disabled download states, keyboard labels and visible focus.
 
 The repair panel leads with Bundle → Business → Store status, pairing icons and
-short text. Show price-option choices only after the installation Store is known;
-one configured Store or one active option needs no redundant picker. Use one
-primary repair action for the selected missing bundles, with checkboxes for
-multi-bundle cases. Preserve explicit exclusions across Store changes and reloads,
-even when only one repair candidate remains. Keep the source order total visible and unchanged. Ownership,
-timestamps, database reload, explicit Store sync and global routing settings live
-under **Detail & aksi lain**; missing metadata promotes sync when needed. Keep
-incomplete syncs, permissions, sharing consequences and partial failures visible.
+short text. Store is the read-only mapped destination; missing routing opens global
+settings. Use one primary sharing action for selected foreign bundles, with checkboxes
+for multi-bundle cases. Preserve exclusions on reload even if one candidate remains.
+Keep the marketplace order total visible. Ownership, timestamps, database reload,
+explicit Business sync and routing settings live under **Detail & aksi lain**.
+Incomplete Business snapshots promote sync; missing or duplicate codes link to the
+Business catalog. Keep permissions and partial sharing results visible.
 
 The sidebar label is MP Data Parser. Existing illustrative defaults are replaced
 by workspace configuration. Synthetic acceptance fixtures are labeled SYNTHETIC

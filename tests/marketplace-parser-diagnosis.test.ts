@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { allowedRepairStores, repairBundles, type CatalogConnection } from '../lib/marketplace-parser/diagnosis';
+import { resolveDiagnosisRoute, shareBundles, type CatalogConnection } from '../lib/marketplace-parser/diagnosis';
 import { ParserScalevClient, type ScalevBundle } from '../lib/marketplace-parser/scalev-client';
 import { signDiagnosis, verifyDiagnosis } from '../lib/marketplace-parser/diagnosis-token';
 import { readCachedDiagnosis } from '../lib/marketplace-parser/cached-diagnosis';
@@ -8,131 +8,90 @@ import { diagnosisDb } from './marketplace-parser-diagnosis-db-fixture';
 import { configFixture } from './marketplace-parser-fixtures';
 
 function fixture() {
-  const targetIdentity = { id: 9,unique_id: 'RTI_UID',account_holder: 'RTI' }, ownerIdentity = { id: 12,unique_id: 'RLB_UID',account_holder: 'RLB' };
-  const bundle: ScalevBundle = { id: 2,name: 'Roove 20',custom_id: 'ROV20-295',business: ownerIdentity };
-  const state = { visible: false,installed: false,shared: false,failAttach: false,unknownAttach: false,duplicate: false,failOther: false,sku: 'ROV20-295',options: [{ id: 4050,name: '295',price: '295000.00',is_visible: true }],writes: [] as string[],audits: [] as string[],checks: 0 };
-  const detail = () => ({ ...bundle,custom_id: state.sku });
+  const targetIdentity = { id: 9,unique_id: 'RTI_UID' }, ownerIdentity = { id: 12,unique_id: 'RLB_UID' };
+  const state = { visible: false,shared: false,unknownPost: false,delayed: false,duplicate: false,failOther: false,sku: 'ROV20-295',ownerUid: 'RLB_UID',writes: [] as string[],audits: [] as string[],checks: 0 };
+  const detail = (): ScalevBundle => ({ id: 2,name: 'Roove',custom_id: state.sku,business: { ...ownerIdentity,unique_id: state.ownerUid } });
   const target: CatalogConnection = { id: 4,code: 'RTI',client: {
-    identity: async () => targetIdentity,
-    stores: async () => [{ id: 15443,name: 'Marketplace' }],
-    store: async id => ({ id,name: 'Marketplace',business: targetIdentity,is_active: true }),
-    bundles: async () => state.visible ? [detail(),...(state.duplicate ? [{ ...detail(),id: 3 }] : [])] : [],
-    storeBundles: async () => state.installed ? [detail()] : [],
-    bundle: async () => state.visible ? detail() : null,
-    options: async () => state.options,
-    partners: async () => [], share: async () => { throw new Error('Wrong credential'); },
-    attach: async (_store,id) => { assert.equal(id,4050); state.writes.push('attach'); if (state.failAttach) throw new Error('Attach rejected'); state.installed = true; if (state.unknownAttach) throw new Error('Hasil belum pasti'); },
+    identity: async () => targetIdentity,bundle: async () => state.visible ? detail() : null,
+    partners: async () => [],share: async () => { throw new Error('Wrong credential'); },
   } };
-  const owner: CatalogConnection = { id: 8,code: 'RLB',client: { ...target.client,
-    identity: async () => ownerIdentity,
-    bundles: async () => { if (state.failOther) throw new Error('API unavailable'); return [detail()]; },
-    bundle: async () => detail(),
+  const owner: CatalogConnection = { id: 8,code: 'RLB',client: {
+    identity: async () => ownerIdentity,bundle: async () => detail(),
     partners: async () => state.shared ? [{ id: 99,partner: targetIdentity }] : [],
-    share: async (id,uid) => { assert.equal(id,2); assert.equal(uid,'RTI_UID'); state.writes.push('share'); state.shared = true; state.visible = true; },
+    share: async (id,uid) => { assert.equal(id,2); assert.equal(uid,'RTI_UID'); state.writes.push('share'); state.shared = true; state.visible = !state.delayed; if (state.unknownPost) throw new Error('Hasil belum pasti'); },
   } };
-  const config = configFixture();
-  const input = { workspaceId: 'w',actorId: 'u',revision: 3,account: 'roove',skus: ['ROV20-295'],config,target,connections: [target,owner],stores: [{ id: 10,name: 'Marketplace',scalevId: 15443,uniqueId: null }] };
+  const input = { workspaceId: 'w',actorId: 'u',revision: 3,account: 'roove',skus: ['ROV20-295'],config: configFixture(),stores: [{ id: 10,name: 'Marketplace' }] };
   const diagnose = () => {
-    const row = (businessId: number,id = 2) => ({ workspace_id: 'w',id: businessId*100+id,business_id: businessId,scalev_bundle_id: id,custom_id: state.sku,name: bundle.name,scalev_owner_uid: ownerIdentity.unique_id,scalev_owner_name: 'RLB',price_options: state.options,last_synced_at: '2026-11-10T00:00:00Z' });
+    const row = (businessId: number,id = 2) => ({ workspace_id: 'w',id: businessId*100+id,business_id: businessId,scalev_bundle_id: id,custom_id: state.sku,name: 'Roove',scalev_owner_uid: 'RLB_UID',scalev_owner_name: 'RLB',last_synced_at: '2026-11-10T00:00:00Z' });
     return readCachedDiagnosis(input,diagnosisDb({
       scalev_webhook_businesses: [target,owner].map(c => ({ workspace_id: 'w',id: c.id,business_code: c.code,scalev_business_uid: c.id === target.id ? targetIdentity.unique_id : ownerIdentity.unique_id,is_active: true })),
       scalev_catalog_bundles: [row(owner.id),...(state.visible ? [row(target.id),...(state.duplicate ? [row(target.id,3)] : [])] : [])],
-      scalev_catalog_sync_state: state.failOther ? [{ workspace_id: 'w',business_id: owner.id,sync_status: 'failed' }] : [],
-      scalev_catalog_bundle_store_links: state.installed ? [{ id: 1,workspace_id: 'w',business_id: target.id,scalev_bundle_id: 2,scalev_store_id: 15443,store_name: 'Marketplace',is_available: true }] : [],
+      scalev_catalog_sync_state: [4,8].map(business_id => ({ workspace_id: 'w',business_id,sync_status: state.failOther && business_id === 8 ? 'failed' : 'success',last_synced_at: '2026-11-10',updated_at: '2026-11-10' })),
     }) as any);
   };
   const assertUnique = async () => { if (state.duplicate) throw new Error('Duplicate identifier'); };
-  const repair = async (permit: Awaited<ReturnType<typeof diagnose>>['permit'], changes: Record<string,unknown> = {}) => repairBundles({ assertUnique,permit,request: { token: '',storeId: 10,mode: 'attach',items: [{ sku: 'ROV20-295',bundleId: 2,optionId: 4050,share: true,...changes }] },target,connections: [target,owner],ensureCurrent: async () => { state.checks++; },audit: async stage => { state.audits.push(stage); } });
-  return { state,input,target,owner,diagnose,repair,assertUnique };
+  const request = { token: '',mode: 'share' as const,items: [{ sku: 'ROV20-295',bundleId: 2 }] };
+  const repair = async (permit: Awaited<ReturnType<typeof diagnose>>['permit']) => shareBundles({ assertUnique,permit,request,target,connections: [target,owner],ensureCurrent: async () => { state.checks++; },audit: async stage => { state.audits.push(stage); } });
+  return { state,input,target,owner,diagnose,repair,assertUnique,request };
 }
-test('diagnosis separates owner, receiving Business and Store and signs only exact, unique candidates',async () => {
+test('owner and receiving Business are separate; permits contain only sharing candidates',async () => {
   const f = fixture(), { diagnosis,permit } = await f.diagnose();
-  assert.equal(diagnosis.business,'RTI'); assert.equal(diagnosis.items[0].bundles[0].owner,'RLB');
-  assert.equal(diagnosis.items[0].bundles[0].availableInBusiness,false);
-  assert.equal(diagnosis.items[0].bundles[0].canShare,true);
-  assert.deepEqual(permit.stores,[{ id: 10,scalevId: 15443,name: 'Marketplace' }]);
-  assert.equal(permit.bundles[0].sourceBusinessId,8);
-  f.state.visible = true; f.state.installed = true;
-  const refreshed = await f.diagnose();
-  assert.deepEqual(refreshed.diagnosis.items[0].bundles[0].installedStoreIds,[10]);
-  assert.equal(refreshed.diagnosis.items[0].bundles[0].canShare,false);
+  assert.equal(diagnosis.items[0].bundles[0].owner,'RLB'); assert.equal(diagnosis.suggestedStoreId,10);
+  assert.equal(diagnosis.items[0].bundles[0].canShare,true); assert.equal(permit.bundles[0].sourceBusinessId,8);
+  assert.ok(!('stores' in permit)); assert.ok(!('optionIds' in permit.bundles[0]));
+  f.state.visible = true;
+  const refreshed = await f.diagnose(); assert.equal(refreshed.diagnosis.items[0].bundles[0].availableInBusiness,true); assert.deepEqual(refreshed.permit.bundles,[]);
 });
-test('failed/partial cross-Business syncs never report missing or enable writes',async () => {
+test('failed cross-Business syncs never infer absence or authorize sharing',async () => {
   const f = fixture(); f.state.failOther = true;
-  const result = await f.diagnose();
-  assert.equal(result.diagnosis.items[0].status,'unavailable'); assert.equal(result.permit.bundles.length,0);
-  assert.match(result.diagnosis.issues.join(' '),/RLB/);
+  const result = await f.diagnose(); assert.equal(result.diagnosis.items[0].status,'unavailable'); assert.deepEqual(result.permit.bundles,[]);
 });
-test('exact identifier matching does not infer names, aliases, price suffixes or case',async () => {
-  const f = fixture(); f.input.skus = ['rov20-295','Roove 20','ROV20-999'];
-  const result = await f.diagnose(); assert.ok(result.diagnosis.items.every(i => i.status === 'missing')); assert.equal(result.permit.bundles.length,0);
+test('exact identifier matching never infers aliases, names, suffixes or case',async () => {
+  const f = fixture(); f.input.skus = ['rov20-295','Roove','ROV20-999'];
+  assert.ok((await f.diagnose()).diagnosis.items.every(i => i.status === 'missing'));
 });
-test('duplicate codes disclose conflicts and receive no repair authorization',async () => {
+test('duplicate receiving codes block sharing authorization',async () => {
   const f = fixture(); f.state.visible = true; f.state.duplicate = true;
-  const result = await f.diagnose(); assert.equal(result.diagnosis.items[0].status,'ambiguous'); assert.equal(result.diagnosis.items[0].bundles.length,2); assert.equal(result.permit.bundles.length,0);
+  const result = await f.diagnose(); assert.equal(result.diagnosis.items[0].status,'ambiguous'); assert.deepEqual(result.permit.bundles,[]);
 });
-test('storefront-hidden BPOs remain valid catalog options',async () => {
-  const f = fixture(); f.state.options[0].is_visible = false;
-  const result = await f.diagnose(); assert.deepEqual(result.permit.bundles[0].optionIds,[4050]);
-  assert.equal((await f.repair(result.permit))[0].stage,'ready');
+test('configured routes are mandatory even with just one Store and partial Product recognition',() => {
+  const f = fixture(); f.input.config.combinations = [];
+  assert.equal(resolveDiagnosisRoute(f.input.config,'roove',['ROV20-295','UNKNOWN'],f.input.stores).suggestedStoreId,null);
+  f.input.config.routes = [];
+  assert.equal(resolveDiagnosisRoute(f.input.config,'roove',['ROV20-295'],f.input.stores).suggestedStoreId,null);
 });
-test('routing and mixed-product combinations restrict the installation Store globally',() => {
-  const f = fixture(); const stores = [10,11,12].map(id => ({ id,name: String(id),scalevId: id,uniqueId: null }));
-  assert.deepEqual(allowedRepairStores(f.input.config,'roove',['ROV20-295'],stores).stores.map(s => s.id),[10]);
-  const config = f.input.config; config.combinations = [];
-  const result = allowedRepairStores(config,'roove',['ROV20-295','PLV10-100'],stores);
-  // Unknown Product alongside a routed Product cannot be silently installed.
-  assert.equal(result.stores.length,0); assert.ok(result.issues.length);
-  config.products = []; config.routes = [];
-  assert.equal(allowedRepairStores(config,'roove',['ANY'],stores).stores.length,3);
-});
-test('without explicit routing, a unique common cached Store is suggested automatically',async () => {
-  const f = fixture(); f.input.config.routes = []; f.input.config.combinations = []; f.state.visible = true; f.state.installed = true;
-  f.input.stores.push({ id: 11,name: 'Other Store',scalevId: 15444,uniqueId: null });
-  f.target.client.stores = async () => [{ id: 15443,name: 'Marketplace' },{ id: 15444,name: 'Other Store' }];
-  const original = f.target.client.store;
-  f.target.client.store = async id => ({ ...await original(id),name: id === 15443 ? 'Marketplace' : 'Other Store' });
-  const originalBundles = f.target.client.storeBundles;
-  f.target.client.storeBundles = async id => id === 15443 ? originalBundles(id) : [];
-  const result = await f.diagnose(); assert.equal(result.diagnosis.suggestedStoreId,10); assert.equal(result.diagnosis.stores.length,2);
-});
-test('sharing uses owner credentials and target unique_id, then attaches chosen BPO; repeat is idempotent',async () => {
+test('sharing uses owner credential and target UID with no Store or price calls, and repeat is idempotent',async () => {
   const f = fixture(), { permit } = await f.diagnose();
-  assert.equal((await f.repair(permit))[0].stage,'ready');
-  assert.deepEqual(f.state.writes,['share','attach']);
-  assert.deepEqual(f.state.audits,['share_requested','shared','attach_requested','attached']);
-  assert.ok(f.state.checks >= 4);
-  assert.equal((await f.repair(permit))[0].stage,'ready'); assert.deepEqual(f.state.writes,['share','attach']);
+  assert.equal((await f.repair(permit))[0].stage,'ready'); assert.deepEqual(f.state.writes,['share']);
+  assert.deepEqual(f.state.audits,['share_requested','shared']); assert.ok(f.state.checks >= 3);
+  assert.equal((await f.repair(permit))[0].stage,'ready'); assert.deepEqual(f.state.writes,['share']);
 });
-test('partial sharing success resumes attachment without sharing twice',async () => {
-  const f = fixture(), { permit } = await f.diagnose(); f.state.failAttach = true;
-  const first = await f.repair(permit); assert.equal(first[0].stage,'shared'); assert.match(first[0].message,/Attach rejected/);
-  f.state.failAttach = false; assert.equal((await f.repair(permit))[0].stage,'ready');
-  assert.deepEqual(f.state.writes,['share','attach','attach']);
+test('delayed sharing visibility preserves partial success; retry never replays confirmed sharing',async () => {
+  const f = fixture(), { permit } = await f.diagnose(); f.state.delayed = true;
+  assert.equal((await f.repair(permit))[0].stage,'shared');
+  f.state.visible = true; assert.equal((await f.repair(permit))[0].stage,'ready'); assert.deepEqual(f.state.writes,['share']);
 });
-test('unknown POST outcome is checked live on retry, without replaying a successful attachment',async () => {
-  const f = fixture(), { permit } = await f.diagnose(); f.state.unknownAttach = true;
+test('unknown POST outcome is checked live before retry',async () => {
+  const f = fixture(), { permit } = await f.diagnose(); f.state.unknownPost = true;
   assert.match((await f.repair(permit))[0].message,/Hasil belum pasti/);
-  assert.equal((await f.repair(permit))[0].stage,'ready'); assert.deepEqual(f.state.writes,['share','attach']);
+  assert.equal((await f.repair(permit))[0].stage,'ready'); assert.deepEqual(f.state.writes,['share']);
 });
-test('forged options, missing sharing consent, changed codes, revoked options and new duplicates block writes',async () => {
-  for (const situation of ['option','consent','sku','revoked','duplicate'] as const) {
+test('changed code, owner or duplicate prevents writes; forged candidates are rejected',async () => {
+  for (const situation of ['sku','owner','duplicate']) {
     const f = fixture(), { permit } = await f.diagnose();
-    if (situation === 'option') await assert.rejects(f.repair(permit,{ optionId: 999 }),/pilihan harga/);
-    else {
-      if (situation === 'sku') f.state.sku = 'CHANGED';
-      if (situation === 'revoked') f.state.options = [];
-      if (situation === 'duplicate') { f.state.visible = true; f.state.duplicate = true; }
-      assert.notEqual((await f.repair(permit,situation === 'consent' ? { share: false } : {}))[0].stage,'ready');
-    }
-    assert.deepEqual(f.state.writes,[],situation);
+    if (situation === 'sku') f.state.sku = 'CHANGED';
+    if (situation === 'owner') f.state.ownerUid = 'CHANGED';
+    if (situation === 'duplicate') f.state.duplicate = true;
+    assert.notEqual((await f.repair(permit))[0].stage,'ready'); assert.deepEqual(f.state.writes,[]);
   }
+  const f = fixture(), { permit } = await f.diagnose(); permit.bundles[0].canShare = false;
+  await assert.rejects(f.repair(permit),/Sharing tidak sesuai/);
 });
 test('revision/lease or audit failures stop before a write',async () => {
   const f = fixture(), { permit } = await f.diagnose();
-  const request = { token: '',storeId: 10,mode: 'attach' as const,items: [{ sku: 'ROV20-295',bundleId: 2,optionId: 4050,share: true }] };
-  await assert.rejects(repairBundles({ assertUnique: f.assertUnique,permit,request,target: f.target,connections: f.input.connections,ensureCurrent: async () => { throw new Error('Revision changed'); },audit: async () => {} }),/Revision changed/);
-  const result = await repairBundles({ assertUnique: f.assertUnique,permit,request,target: f.target,connections: f.input.connections,ensureCurrent: async () => {},audit: async () => { throw new Error('Audit unavailable'); } });
+  const input = { assertUnique: f.assertUnique,permit,request: f.request,target: f.target,connections: [f.target,f.owner],ensureCurrent: async () => {},audit: async () => {} };
+  await assert.rejects(shareBundles({ ...input,ensureCurrent: async () => { throw new Error('Revision changed'); } }),/Revision changed/);
+  const result = await shareBundles({ ...input,audit: async () => { throw new Error('Audit unavailable'); } });
   assert.match(result[0].message,/Audit unavailable/); assert.deepEqual(f.state.writes,[]);
 });
 test('diagnosis permit is bound to actor/workspace and rejects tampering and expiry',async () => {

@@ -5,7 +5,7 @@ import { contextFixture } from './marketplace-parser-fixtures';
 import { signDiagnosis, type DiagnosisPermit } from '../lib/marketplace-parser/diagnosis-token';
 import { ScalevReadError } from '../lib/marketplace-parser/scalev-client';
 const require = createRequire(import.meta.url);
-let context = contextFixture(), forbidden = false, manager = true, channels = true, revision = 3, reads = 0, writes = 0, claims = 0, released = 0, syncs = 0, syncFail = false, installed = false;
+let context = contextFixture(), forbidden = false, manager = true, channels = true, revision = 3, reads = 0, writes = 0, claims = 0, released = 0, syncs = 0, syncFail = false, visible = false;
 let audits: string[] = [];
 let legacyStoreColumns = false;
 let catalogError: Error | null = null;
@@ -19,20 +19,19 @@ require.cache[require.resolve('../lib/dashboard-access')] = { exports: { require
 require.cache[require.resolve('../lib/workspaces')] = { exports: { isWorkspaceModuleEnabled: () => channels } } as any;
 require.cache[require.resolve('../lib/marketplace-parser/actions')] = { exports: { getParserContext: async () => structuredClone(context) } } as any;
 require.cache[require.resolve('../lib/marketplace-parser/catalog')] = { exports: { ...require('../lib/marketplace-parser/catalog'),readParserCatalog: async () => structuredClone(context.catalog) } } as any;
-require.cache[require.resolve('../lib/marketplace-parser/sync')] = { exports: {
-  claimParserStore: async () => { claims++; return 'lease'; },assertParserStoreClaim: async () => {},
-  failParserStoreClaim: async () => { released++; context.catalog.storeSyncs.forEach(s => { s.status = 'failed'; }); },
-  syncParserStore: async (_w: string,_s: number,lease: unknown) => { assert.ok(lease); syncs++; if (syncFail) throw new Error('Sync failed'); },
+require.cache[require.resolve('../lib/scalev-catalog-lease')] = { exports: {
+  claimCatalogBusiness: async () => { claims++; return 'lease'; },assertCatalogBusinessClaim: async () => {},
+  failCatalogBusinessClaim: async () => { if (released) return; released++; context.catalog.businessSyncs.forEach(s => { s.status = 'failed'; }); },
+} } as any;
+require.cache[require.resolve('../lib/scalev-catalog-actions')] = { exports: {
+  syncScalevCatalogBusiness: async (id: number) => { assert.equal(id,4); syncs++; if (syncFail) throw new Error('Sync failed'); return { success: true }; },
 } } as any;
 require.cache[require.resolve('../lib/marketplace-parser/scalev-client')] = { exports: { ScalevReadError,ParserScalevClient: class {
-  async identity() { reads++; return identity; }
-  async stores() { reads++; return [{ id: 15443,name: storeName }]; }
-  async store() { reads++; return { id: 15443,name: storeName,business: identity }; }
-  async bundles() { reads++; if (catalogError) throw catalogError; return [bundle]; }
-  async bundle() { reads++; return bundle; }
-  async options() { reads++; return [{ id: 4050,name: '295',price: '295000' }]; }
-  async storeBundles() { reads++; return installed ? [bundle] : []; }
-  async attach() { writes++; installed = true; }
+  constructor(private key: string) {}
+  async identity() { reads++; return this.key === 'owner' ? { id: 8,unique_id: 'OWNER_UID' } : identity; }
+  async bundle() { reads++; return this.key === 'owner' || visible ? { ...bundle,business: { unique_id: 'OWNER_UID' } } : null; }
+  async partners() { return []; }
+  async share() { assert.equal(this.key,'owner'); writes++; visible = true; }
 } } } as any;
 function from(table: string) {
   const filters: Record<string,unknown> = {}; let payload: any,columns = '';
@@ -40,24 +39,24 @@ function from(table: string) {
     then(resolve: (v: unknown) => void) {
       assert.equal(payload?.workspace_id || filters.workspace_id,'synthetic-test');
       if (table === 'marketplace_parser_configs') return resolve({ data: { revision },error: null });
-      if (table === 'scalev_webhook_businesses') { if (payload) return resolve({ error: null }); assert.equal(filters.is_active,true); return resolve({ data: [{ id: 4,business_code: 'RTI',scalev_business_uid: 'RTI_UID',api_key: 'synthetic' }],error: null }); }
+      if (table === 'scalev_webhook_businesses') { if (payload) return resolve({ error: null }); assert.equal(filters.is_active,true); return resolve({ data: [{ id: 4,business_code: 'RTI',scalev_business_uid: 'RTI_UID',api_key: 'synthetic' },{ id: 8,business_code: 'RLB',scalev_business_uid: 'OWNER_UID',api_key: 'owner' }],error: null }); }
       if (table === 'scalev_store_channels') {
         assert.equal(filters.business_id,4); assert.equal(filters.is_active,true);
         if (legacyStoreColumns && columns.includes('scalev_store_id')) return resolve({ data: null,error: { code: '42703',message: 'column scalev_store_channels.scalev_store_id does not exist' } });
         return resolve({ data: [{ id: 10,store_name: storeName,...(legacyStoreColumns ? {} : { scalev_store_id: 15443,store_unique_id: null }) }],error: null });
       }
       if (table === 'scalev_catalog_bundles') return resolve({ data: [{ id: 1,business_id: 4,scalev_bundle_id: 2,custom_id: 'ROV20-295',name: 'Roove',scalev_owner_uid: 'RTI_UID',scalev_owner_name: 'RTI',price_options: [{ id: 4050,name: '295',price: '295000' }],last_synced_at: '2026-11-10T00:00:00Z' }],error: catalogError });
-      if (table === 'scalev_catalog_sync_state' || table === 'marketplace_parser_store_syncs') return resolve({ data: [],error: null });
-      if (table === 'scalev_catalog_bundle_store_links') return resolve({ data: [{ id: 1,scalev_bundle_id: 2,scalev_store_id: 15443,store_name: storeName,is_available: installed }],error: null });
+      if (table === 'scalev_catalog_sync_state') return resolve({ data: [4,8].map(business_id => ({business_id,sync_status: 'success',last_synced_at: '2026-11-10',updated_at: '2026-11-10'})),error: null });
+      if (table === 'scalev_catalog_bundle_store_links') return resolve({ data: [{ id: 1,scalev_bundle_id: 2,scalev_store_id: 15443,store_name: storeName,is_available: visible }],error: null });
       assert.equal(table,'warehouse_activity_log'); assert.equal(payload.acted_by,'u'); audits.push(payload.action); return resolve({ error: null });
     } };
   return q;
 }
 require.cache[require.resolve('../lib/service-supabase')] = { exports: { createServiceSupabase: () => ({ from }) } } as any;
 const actions = require('../lib/marketplace-parser/case-actions') as typeof import('../lib/marketplace-parser/case-actions');
-const permit = (): DiagnosisPermit => ({ workspaceId: 'synthetic-test',actorId: 'u',revision: 3,account: 'roove',expiresAt: Date.now() + 60000,targetBusinessId: 4,targetUid: 'RTI_UID',skus: ['ROV20-295'],stores: [{ id: 10,name: storeName,scalevId: 15443 }],bundles: [{ sku: 'ROV20-295',id: 2,sourceBusinessId: 4,ownerUid: 'RTI_UID',optionIds: [4050],canShare: false }] });
-const request = () => ({ token: signDiagnosis(permit()),storeId: 10,mode: 'attach' as const,items: [{ sku: 'ROV20-295',bundleId: 2,optionId: 4050,share: false }] });
-beforeEach(() => { context = contextFixture(); forbidden = false; manager = true; channels = true; revision = 3; reads = writes = claims = released = syncs = 0; syncFail = installed = legacyStoreColumns = false; audits = []; catalogError = null; });
+const permit = (): DiagnosisPermit => ({ workspaceId: 'synthetic-test',actorId: 'u',revision: 3,account: 'roove',expiresAt: Date.now() + 60000,targetBusinessId: 4,targetUid: 'RTI_UID',skus: ['ROV20-295'],bundles: [{ sku: 'ROV20-295',id: 2,sourceBusinessId: 8,ownerUid: 'OWNER_UID',canShare: true }] });
+const request = () => ({ token: signDiagnosis(permit()),mode: 'share' as const,items: [{ sku: 'ROV20-295',bundleId: 2 }] });
+beforeEach(() => { context = contextFixture(); forbidden = false; manager = true; channels = true; revision = 3; reads = writes = claims = released = syncs = 0; syncFail = visible = legacyStoreColumns = false; audits = []; catalogError = null; });
 test('diagnosis uses the application database without any Scalev requests or syncs',async () => {
   const diagnosis = JSON.parse(JSON.stringify(await actions.diagnoseParserCase('synthetic-test',{ account: 'roove',revision: 3,skus: ['ROV20-295'] })));
   assert.equal(diagnosis.items[0].status,'found'); assert.ok(diagnosis.token);
@@ -88,24 +87,24 @@ test('workspace, module, auth, and local isolation are checked before Scalev acc
   finally { delete process.env.ROOVE_LOCAL_DEV; }
   assert.equal(reads + writes + claims,0);
 });
-test('forged Store, option, actor and stale config are rejected before claiming a Store',async () => {
-  await assert.rejects(actions.repairParserCase('synthetic-test',{ ...request(),storeId: 20 }),/Store tidak sesuai/);
+test('forged Store, option, actor and stale config are rejected before claiming a Business',async () => {
+  await assert.rejects(actions.repairParserCase('synthetic-test',{ ...request(),storeId: 20 }),/Permintaan perbaikan tidak valid/);
   await assert.rejects(actions.repairParserCase('synthetic-test',{ ...request(),items: [{ ...request().items[0],optionId: 999 }] }),/Pilihan bundle/);
   await assert.rejects(actions.repairParserCase('synthetic-test',{ ...request(),token: signDiagnosis({ ...permit(),actorId: 'other' }) }),/sesi/);
   context.revision = 4;
   await assert.rejects(actions.repairParserCase('synthetic-test',request()),/Aturan berubah/);
   assert.equal(reads + writes + claims,0);
 });
-test('repair records request/outcome, synchronizes the same claimed Store and returns a fresh catalog',async () => {
+test('repair records request/outcome, synchronizes the receiving Business and returns a fresh catalog',async () => {
   const result = await actions.repairParserCase('synthetic-test',request());
-  assert.equal(result.result.synced,true); assert.equal(result.result.items[0].stage,'ready'); assert.equal(claims,1); assert.equal(syncs,1); assert.equal(writes,1); assert.equal(released,0);
-  assert.deepEqual(audits,['parser_bundle_attach_requested','parser_bundle_attached','parser_bundle_completed']);
+  assert.equal(result.result.synced,true); assert.equal(result.result.items[0].stage,'ready'); assert.equal(claims,1); assert.equal(syncs,1); assert.equal(writes,1); assert.equal(released,1);
+  assert.deepEqual(audits,['parser_bundle_share_requested','parser_bundle_shared','parser_bundle_completed']);
   assert.equal(result.catalog.version,context.catalog.version);
 });
-test('sync failure marks the catalog unready, preserves completed external steps, and refresh can recover without management permission',async () => {
+test('sync failure marks the catalog unready, preserves completed external steps, and authorized refresh can recover',async () => {
   syncFail = true; const first = await actions.repairParserCase('synthetic-test',request());
-  assert.equal(first.result.synced,false); assert.equal(first.result.items[0].stage,'ready'); assert.equal(released,1); assert.ok(first.catalog.storeSyncs.every(s => s.status === 'failed'));
-  syncFail = false; manager = false;
+  assert.equal(first.result.synced,false); assert.equal(first.result.items[0].stage,'ready'); assert.equal(released,1); assert.ok(first.catalog.businessSyncs.every(s => s.status === 'failed'));
+  syncFail = false;
   const second = await actions.repairParserCase('synthetic-test',{ ...request(),mode: 'refresh',items: [] });
   assert.equal(second.result.synced,true); assert.equal(writes,1);
 });
@@ -114,10 +113,12 @@ test('configuration changing after diagnosis stops before any external write and
   const result = await actions.repairParserCase('synthetic-test',request());
   assert.equal(writes,0); assert.equal(syncs,0); assert.equal(result.result.synced,false); assert.match(result.result.message,/Aturan tim berubah/); assert.equal(released,1);
 });
-test('legacy Store masters resolve cached identity for diagnosis and reverify it live before repair',async () => {
-  legacyStoreColumns = true;
-  const diagnosis = await actions.diagnoseParserCase('synthetic-test',{ account: 'roove',revision: 3,skus: ['ROV20-295'] });
-  assert.deepEqual(diagnosis.stores,[{ id: 10,name: storeName }]);
-  const result = await actions.repairParserCase('synthetic-test',{ ...request(),token: diagnosis.token });
-  assert.equal(result.result.synced,true); assert.equal(writes,1);
+test('refresh needs no Store selection or price and never mutates Scalev',async () => {
+  context.config.stores = []; context.config.routes = []; context.config.combinations = [];
+  const result = await actions.repairParserCase('synthetic-test',{ token: signDiagnosis(permit()),mode: 'refresh',items: [] });
+  assert.equal(result.result.synced,true); assert.equal(writes,0); assert.equal(syncs,1);
+});
+test('legacy attach requests are rejected before external calls or claims',async () => {
+  await assert.rejects(actions.repairParserCase('synthetic-test',{ ...request(),mode: 'attach',storeId: 10 } as any),/Permintaan perbaikan/);
+  assert.equal(reads + writes + claims + syncs,0);
 });

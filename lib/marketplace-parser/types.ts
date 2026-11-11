@@ -17,7 +17,7 @@ export type ParserConfig = {
   couriers: CourierRule[];
 };
 export type CatalogStore = { id: number; business: string; name: string };
-export type CatalogBundle = { id: number; business: string; sku: string; name: string; storeIds: number[]; syncedAt: string | null };
+export type CatalogBundle = { id: number; business: string; sku: string; name: string; syncedAt: string | null };
 export type CatalogWarehouse = { id: number; name: string; exportName: string | null; businesses: string[] };
 export type Catalog = {
   version: string;
@@ -26,7 +26,8 @@ export type Catalog = {
   bundles: CatalogBundle[];
   warehouses: CatalogWarehouse[];
   loadedStoreIds: number[];
-  storeSyncs: { storeId: number; checkedAt: string | null; bundleCount: number; status: 'ready' | 'unknown' | 'failed' }[];
+  loadedBusinessCodes: string[];
+  businessSyncs: { business: string; checkedAt: string | null; bundleCount: number; status: 'ready' | 'unknown' | 'failed' }[];
 };
 export type ParserContext = { workspaceId: string; config: ParserConfig; revision: number; catalog: Catalog; canSave: boolean; canSync: boolean; canManageCatalog?: boolean; migrationNotes: string[] };
 export type SourceLine = {

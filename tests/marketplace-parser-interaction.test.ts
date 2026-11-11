@@ -15,7 +15,7 @@ const content = (node: ReactTestInstance): string => node.children.map(c => type
 const buttons = (root: ReactTestInstance,label: string) => root.findAllByType('button').filter(b => content(b).includes(label));
 function props() {
   const context = contextFixture();
-  return { context,saveConfig: async (_w: string,_r: number,_c: ParserConfig) => ({ workspaceId: context.workspaceId,revision: 4 }),loadCatalog: async () => structuredClone(context.catalog),syncStore: async (_w: string,id: number) => ({ storeId: id,bundleCount: 4 }),reloadContext: async () => context,
+  return { context,saveConfig: async (_w: string,_r: number,_c: ParserConfig) => ({ workspaceId: context.workspaceId,revision: 4 }),loadCatalog: async () => structuredClone(context.catalog),syncBusiness: async () => ({ success: true }),reloadContext: async () => context,
     prepareDownload: async (_w: string,input: any) => { const p = projectMarketplace({ ...input,config: context.config,catalog: context.catalog }); return { business: 'RTI',csv: exportBusinessCsv(p,'RTI') }; } };
 }
 function uploadFile(sku = 'ROV20-295') {
@@ -104,7 +104,7 @@ test('save failure focuses and reveals the error summary even from a distant act
 test('repair replaces the catalog and revalidates every order, including filtered-out orders, while requiring review again',async () => {
   const p = props(), completeCatalog = structuredClone(p.context.catalog);
   p.context.canManageCatalog = true; p.context.catalog.bundles = [];
-  const data = { checkedAt: '2026-11-10T00:00:00Z',business: 'RTI',account: 'Shopee Roove',stores: [{ id: 10,name: 'Roove Main Store - Marketplace' }],suggestedStoreId: 10,issues: [],token: 'test',items: [{ sku: 'ROV20-295',status: 'found',message: 'Tersedia',bundles: [{ id: 101,name: 'Roove A',sku: 'ROV20-295',owner: 'RLB',ownerBusinessId: 8,availableInBusiness: true,installedStoreIds: [],canShare: false,options: [{ id: 4050,name: '295',price: '295000' }] }] }] };
+  const data = { checkedAt: '2026-11-10T00:00:00Z',business: 'RTI',account: 'Shopee Roove',stores: [{ id: 10,name: 'Roove Main Store - Marketplace' }],suggestedStoreId: 10,issues: [],token: 'test',items: [{ sku: 'ROV20-295',status: 'found',message: 'Tersedia',bundles: [{ id: 101,name: 'Roove A',sku: 'ROV20-295',owner: 'RLB',ownerBusinessId: 8,availableInBusiness: true,canShare: false }] }] };
   let mutations = 0;
   const rendered = create(React.createElement(Tool,{ ...p,diagnoseCase: async () => data,repairCase: async () => { mutations++; return { result: { synced: true,message: 'Seluruh batch divalidasi ulang',items: [] },catalog: completeCatalog }; } }));
   try {
@@ -113,7 +113,7 @@ test('repair replaces the catalog and revalidates every order, including filtere
     assert.match(content(rendered.root),/2 perlu diselesaikan/);
     await act(async () => rendered.root.findByProps({ type: 'search' }).props.onChange({ target: { value: 'ORDER-TEST-1' } }));
     await click(rendered.root,'Periksa masalah');
-    await click(rendered.root,'Tambahkan ke Store');
+    await click(rendered.root,'Sinkronkan Business dari Scalev');
     assert.equal(mutations,1); assert.match(content(rendered.root),/2 order valid/);
     assert.equal(rendered.root.findByProps({ 'aria-label': 'Konfirmasi hasil parsing' }).props.checked,false);
     assert.equal(buttons(rendered.root,'Download CSV')[0].props.disabled,true);

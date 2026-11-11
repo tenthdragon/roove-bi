@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import { createServiceSupabase } from '../service-supabase';
 import { deriveWarehouseOriginBusinessNameFromOriginName, normalizeWarehouseDomainText } from '../warehouse-domain-helpers';
-import type { Catalog, CatalogBundle } from './types';
+import type { Catalog } from './types';
 
 type Db = ReturnType<typeof createServiceSupabase>;
 export async function allPages<T>(fetchPage: (from: number,to: number) => PromiseLike<{ data: T[] | null; error: { message: string } | null }>): Promise<T[]> {
@@ -12,15 +12,15 @@ export async function allPages<T>(fetchPage: (from: number,to: number) => Promis
     rows.push(...(result.data || []));
     if ((result.data || []).length < 1000) return rows;
   }
-  throw new Error('Katalog terlalu besar. Kurangi Store yang digunakan.');
+  throw new Error('Katalog terlalu besar. Batasi Business yang digunakan.');
 }
-export async function readParserCatalog(workspaceId: string, selectedStoreIds: number[], db: Db = createServiceSupabase()): Promise<Catalog> {
+export async function readParserCatalog(workspaceId: string, selectedStoreIds: number[], db: Db = createServiceSupabase(), selectedBusinessCodes?: string[]): Promise<Catalog> {
   if (!Array.isArray(selectedStoreIds) || selectedStoreIds.length > 100 || selectedStoreIds.some(id => !Number.isSafeInteger(id) || id <= 0)) throw new Error('Pilihan Store tidak valid (maksimal 100 Store).');
   const businesses = await db.from('scalev_webhook_businesses').select('id,business_code,business_name').eq('workspace_id',workspaceId).eq('is_active',true).order('id');
   if (businesses.error) throw new Error('Katalog Business belum dapat dimuat.');
   const businessRows = businesses.data || [];
   const codes = new Map(businessRows.map(b => [Number(b.id),String(b.business_code)]));
-  const catalog: Catalog = { version: '', businesses: businessRows.map(b => ({ id: Number(b.id),code: b.business_code,name: b.business_name })), stores: [], bundles: [], warehouses: [], loadedStoreIds: [], storeSyncs: [] };
+  const catalog: Catalog = { version: '', businesses: businessRows.map(b => ({ id: Number(b.id),code: b.business_code,name: b.business_name })), stores: [], bundles: [], warehouses: [], loadedStoreIds: [], loadedBusinessCodes: [], businessSyncs: [] };
   if (!codes.size) return catalog;
   const stores = await allPages<any>((from,to) => db.from('scalev_store_channels').select('id,business_id,store_name').eq('workspace_id',workspaceId).in('business_id',[...codes.keys()]).eq('is_active',true).order('id').range(from,to));
   catalog.stores = stores.map(s => ({ id: Number(s.id),business: codes.get(Number(s.business_id))!,name: String(s.store_name) }));
@@ -41,46 +41,27 @@ export async function readParserCatalog(workspaceId: string, selectedStoreIds: n
   }).filter(w => w.businesses.length > 0);
   const chosen = catalog.stores.filter(s => selectedStoreIds.includes(s.id));
   if (chosen.length !== new Set(selectedStoreIds).size) throw new Error('Salah satu Store tidak aktif atau bukan milik workspace ini. Perbarui pengaturan Store.');
-  // Syncs write cache rows in batches. Observe their generation on both sides
-  // of the read so a partial or mixed snapshot cannot enable export.
-  const readSyncs = async () => ({
-    businesses: chosen.length ? await allPages<{ business_id: number; sync_status: string; updated_at: string }>((from,to) => db.from('scalev_catalog_sync_state').select('business_id,sync_status,updated_at').eq('workspace_id',workspaceId).in('business_id',catalog.businesses.filter(b => chosen.some(s => s.business === b.code)).map(b => b.id)).order('business_id').range(from,to)) : [],
-    stores: chosen.length ? await allPages<{ store_id: number; status: string; updated_at: string }>((from,to) => db.from('marketplace_parser_store_syncs').select('store_id,status,updated_at').eq('workspace_id',workspaceId).in('store_id',selectedStoreIds).order('store_id').range(from,to)) : [],
-  });
+  const requested = selectedBusinessCodes === undefined ? chosen.map(s => s.business) : selectedBusinessCodes;
+  if (!Array.isArray(requested) || requested.length > 100 || requested.some(code => typeof code !== 'string' || !code || code.length > 100)) throw new Error('Pilihan Business tidak valid.');
+  const selected = catalog.businesses.filter(b => requested.includes(b.code));
+  if (selected.length !== new Set(requested).size) throw new Error('Business tidak aktif atau bukan milik workspace ini.');
+  // A bundle belongs to the receiving Business even when it has no Store link.
+  // Observe the Business generation on both sides to reject partial snapshots.
+  const readSyncs = () => selected.length ? allPages<{ business_id: number; sync_status: string; last_synced_at: string | null; updated_at: string }>((from,to) => db.from('scalev_catalog_sync_state').select('business_id,sync_status,last_synced_at,updated_at').eq('workspace_id',workspaceId).in('business_id',selected.map(b => b.id)).order('business_id').range(from,to)) : Promise.resolve([]);
   const before = await readSyncs();
-  const bundles = new Map<string,CatalogBundle>();
-  for (const business of catalog.businesses) {
-    const selected = chosen.filter(s => s.business === business.code);
-    if (!selected.length) continue;
-    const links = await allPages<any>((from,to) => db.from('scalev_catalog_bundle_store_links').select('id,scalev_bundle_id,store_name,last_checked_at').eq('workspace_id',workspaceId).eq('business_id',business.id).in('store_name',selected.map(s => s.name)).eq('is_available',true).order('id').range(from,to));
-    const ids = [...new Set<number>(links.map(link => Number(link.scalev_bundle_id)))];
-    for (let offset = 0; offset < ids.length; offset += 200) {
-      const rows = await allPages<any>((from,to) => db.from('scalev_catalog_bundles').select('id,scalev_bundle_id,custom_id,name,last_synced_at').eq('workspace_id',workspaceId).eq('business_id',business.id).in('scalev_bundle_id',ids.slice(offset,offset + 200)).order('id').range(from,to));
-      for (const row of rows) {
-        const storeIds = selected.filter(store => links.some(link => Number(link.scalev_bundle_id) === Number(row.scalev_bundle_id) && link.store_name === store.name)).map(store => store.id);
-        bundles.set(`${business.id}:${row.scalev_bundle_id}`,{ id: Number(row.scalev_bundle_id),business: business.code,sku: String(row.custom_id || '').trim(),name: String(row.name),storeIds,syncedAt: row.last_synced_at });
-      }
-    }
-    const states = await db.from('marketplace_parser_store_syncs').select('store_id,synced_at,status,bundle_count').eq('workspace_id',workspaceId).in('store_id',selected.map(store => store.id));
-    if (states.error && !['42P01','PGRST205'].includes(states.error.code)) throw new Error('Status sinkronisasi Store belum dapat dimuat.');
-    for (const store of selected) {
-      const state = states.data?.find(row => row.store_id === store.id);
-      const storeLinks = links.filter(link => link.store_name === store.name);
-      const timestamps = storeLinks.map(link => String(link.last_checked_at)).sort();
-      catalog.storeSyncs.push({ storeId: store.id,checkedAt: state?.synced_at || timestamps[0] || null,bundleCount: new Set(storeLinks.map(link => link.scalev_bundle_id)).size,status: state ? (state.status === 'ready' ? 'ready' : 'failed') : storeLinks.length ? 'ready' : 'unknown' });
-    }
+  for (const business of selected) {
+    const rows = await allPages<any>((from,to) => db.from('scalev_catalog_bundles').select('id,scalev_bundle_id,custom_id,name,last_synced_at').eq('workspace_id',workspaceId).eq('business_id',business.id).order('id').range(from,to));
+    catalog.bundles.push(...rows.map(row => ({ id: Number(row.scalev_bundle_id),business: business.code,sku: String(row.custom_id || '').trim(),name: String(row.name),syncedAt: row.last_synced_at })));
   }
   const after = await readSyncs();
-  const incomplete = new Set(after.businesses.filter(s => ['running','failed'].includes(s.sync_status)).map(s => codes.get(s.business_id)));
-  const changed = JSON.stringify(before) !== JSON.stringify(after);
-  for (const store of chosen) {
-    if (changed || incomplete.has(store.business)) {
-      const state = catalog.storeSyncs.find(s => s.storeId === store.id);
-      if (state) state.status = 'failed';
-    }
-  }
-  catalog.bundles = [...bundles.values()].sort((a,b) => a.business.localeCompare(b.business) || a.id - b.id);
+  catalog.businessSyncs = selected.map(business => {
+    const state = after.find(s => s.business_id === business.id);
+    const changed = JSON.stringify(before.find(s => s.business_id === business.id)) !== JSON.stringify(state);
+    return { business: business.code,checkedAt: state?.last_synced_at || null,bundleCount: catalog.bundles.filter(b => b.business === business.code).length,status: changed || (state && ['running','failed'].includes(state.sync_status)) ? 'failed' : state?.sync_status === 'success' && state.last_synced_at ? 'ready' : 'unknown' };
+  });
+  catalog.bundles.sort((a,b) => a.business.localeCompare(b.business) || a.id - b.id);
   catalog.loadedStoreIds = chosen.map(store => store.id).sort((a,b) => a - b);
+  catalog.loadedBusinessCodes = selected.map(b => b.code).sort();
   catalog.version = createHash('sha256').update(JSON.stringify({ ...catalog,version: '' })).digest('hex');
   return catalog;
 }

@@ -36,7 +36,7 @@ require.cache[require.resolve('../lib/marketplace-parser/catalog')] = { exports:
   assert.equal(workspace, 'workspace-a'); catalogReads.push(ids);
   return structuredClone(catalog);
 } } } as any;
-require.cache[require.resolve('../lib/marketplace-parser/sync')] = { exports: { syncParserStore: async (workspace: string, storeId: number) => ({ workspace, storeId }) } } as any;
+require.cache[require.resolve('../lib/scalev-catalog-actions')] = { exports: { syncScalevCatalogBusiness: async (workspace: string, storeId: number) => ({ workspace, storeId }) } } as any;
 const actions = require('../lib/marketplace-parser/actions') as typeof import('../lib/marketplace-parser/actions');
 const input = () => ({ revision: 3, catalogVersion: catalog.version, file: parseWorkbook(book({ Orders: [shopee()] }), 'test.xlsx'), account: 'roove', date: '2026-11-09', edits: { lines: {}, orders: {} } });
 beforeEach(() => { settings = { revision: 3, config: configFixture() }; catalog = catalogFixture(); channels = true; forbidden = false; finalRevision = null; catalogReads = []; writes = 0; });
@@ -64,7 +64,7 @@ test('server disallows per-item routing/SKU overrides and rejects malformed batc
   await assert.rejects(actions.prepareParserDownload('workspace-a', { ...input(), file: {} } as any), /Batch tidak valid/);
 });
 test('all server operations check access and workspace before any catalog read or config write', async () => {
-  const operations = (workspace: string) => [() => actions.getParserContext(workspace), () => actions.getParserCatalog(workspace, [10]), () => actions.syncParserCatalogStore(workspace, 10), () => actions.saveParserConfig(workspace, 3, configFixture()), () => actions.prepareParserDownload(workspace, input())];
+  const operations = (workspace: string) => [() => actions.getParserContext(workspace), () => actions.getParserCatalog(workspace, [10]), () => actions.syncParserCatalogBusiness(workspace, 'RTI'), () => actions.saveParserConfig(workspace, 3, configFixture()), () => actions.prepareParserDownload(workspace, input())];
   for (const run of operations('workspace-b')) await assert.rejects(run(), /Workspace berubah/);
   channels = false;
   for (const run of operations('workspace-a')) await assert.rejects(run(), /Sales Channel tidak aktif/);
@@ -100,7 +100,7 @@ test('local isolation disables external sync before any cache mutation', async (
   process.env.ROOVE_LOCAL_DEV = '1';
   try {
     assert.equal((await actions.getParserContext('workspace-a')).canSync, false);
-    await assert.rejects(actions.syncParserCatalogStore('workspace-a', 10), /tidak aktif di lingkungan lokal/);
+    await assert.rejects(actions.syncParserCatalogBusiness('workspace-a', 'RTI'), /tidak aktif di lingkungan lokal/);
     assert.equal(writes, 0);
   } finally {
     if (previous === undefined) delete process.env.ROOVE_LOCAL_DEV;

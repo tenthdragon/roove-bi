@@ -131,6 +131,7 @@
 .diagnosisFieldsSplit .diagnosisItem { padding: 0; border: 0; }
 .diagnosisItems { display: grid; }
 .diagnosisItem { display: grid; gap: 10px; padding-block: 14px; border-top: 1px solid var(--border); min-width: 0; }
+.diagnosisItem:first-child { border-top: 0; }
 .diagnosisItem:only-child { padding-bottom: 0; }
 .bundleFinding { display: grid; gap: 4px; padding-block: 12px; border-top: 1px solid var(--border); }
 .bundleFinding span { color: var(--dim); }
@@ -164,6 +165,6 @@
 .diagnosisLoading span { height: 42px; border-radius: 6px; background: var(--card-hover); }
 .diagnosis a.diagnosisCatalogLink { padding-block: 10px; font-weight: 600; }
 .diagnosis .good { white-space: normal; justify-self: start; }
-@media (max-width: 700px) { .details { max-width: calc(100vw - 56px); }.diagnosis { padding: 14px; }.diagnosisFieldsSplit { grid-template-columns: 1fr; }.diagnosisDestination label, .diagnosisOption { max-width: none; }.diagnosisProgress { gap: 6px; grid-template-columns: 1fr 12px 1fr 12px 1fr; align-items: start; }.diagnosisStep { flex-direction: column; align-items: start; gap: 6px; }.diagnosisArrow { width: 12px; align-self: center; }.diagnosisFooter { align-items: stretch; flex-direction: column; }.diagnosisActionHint { text-align: left; }.diagnosis select { font-size: 16px; }.diagnosisMore summary, .diagnosis button { min-height: 44px; } }
+@media (max-width: 700px) { .details { max-width: calc(100vw - 56px); }.diagnosis { padding: 14px; }.diagnosisFieldsSplit { grid-template-columns: 1fr; }.diagnosisDestination label, .diagnosisOption { max-width: none; }.diagnosisProgress { gap: 16px; grid-template-columns: 1fr; align-items: start; }.diagnosisStep { align-items: start; gap: 10px; }.diagnosisArrow { display: none; }.diagnosisFooter { align-items: stretch; flex-direction: column; }.diagnosisActionHint { text-align: left; }.diagnosis select { font-size: 16px; }.diagnosisMore summary, .diagnosis button { min-height: 44px; } }
 .warning { color: var(--red); }
 @media (max-width: 700px) { .storeChoices, .productNames { grid-template-columns: 1fr; }.fields { grid-template-columns: 1fr; }.accountContext { padding-inline: 16px; } }
