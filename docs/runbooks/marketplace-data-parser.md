@@ -137,7 +137,9 @@ guessed. Per-Store leases cover repair plus sync. Request/outcome audits use
 The compact panel shows Bundle → Business → Store status before repair controls.
 A unique configured Store or active BPO is selected automatically; otherwise the
 Store precedes the BPO choice. The single primary action applies to the selected
-missing bundles; a single candidate has no batch checkbox. **Detail & aksi lain**
+missing bundles; a single-bundle case has no batch checkbox unless previously
+excluded. Explicit exclusions survive Store changes and reloads; multi-bundle
+cases retain checkboxes even with one remaining candidate. **Detail & aksi lain**
 contains ownership, sync timestamps, database reload, explicit Store sync and
 global routing settings. Unknown cached BPOs promote Store sync to the main
 action. Incomplete snapshots never show a successful installed status. The order

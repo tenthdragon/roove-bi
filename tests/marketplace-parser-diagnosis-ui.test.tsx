@@ -66,6 +66,28 @@ test('unknown cached BPOs ask for explicit sync; database reload never triggers 
     assert.equal(f.calls[0].mode,'refresh');
   } finally { view!.unmount(); }
 });
+test('switching Stores preserves a deselected bundle even when it becomes the only repair candidate',async () => {
+  const f = fixture(); const second = structuredClone(f.data.items[0]);
+  second.sku = 'PLV'; second.bundles[0] = { ...second.bundles[0],sku: 'PLV',id: 3,availableInBusiness: true,installedStoreIds: [11] };
+  f.data.items.push(second); f.props.skus.push('PLV');
+  f.data.stores.push({ id: 11,name: 'Second Store' });
+  f.data.items.forEach(i => { i.bundles[0].options = [i.bundles[0].options[0]]; });
+  let view: ReturnType<typeof create>; await act(async () => { view = create(<Diagnosis {...f.props}/>); });
+  try {
+    const root = view!.root;
+    await act(async () => root.findByProps({ 'aria-label': 'Pilih bundle ROV20-295' }).props.onChange({ target: { checked: false } }));
+    await act(async () => root.findByProps({ 'aria-label': 'Store untuk pemasangan bundle' }).props.onChange({ target: { value: '11' } }));
+    assert.equal(root.findByProps({ 'aria-label': 'Pilih bundle ROV20-295' }).props.checked,false);
+    assert.equal(button(root,'Tambahkan ke Store').props.disabled,true);
+    await act(async () => button(root,'Tambahkan ke Store').props.onClick());
+    assert.deepEqual(f.calls,[]);
+    await act(async () => button(root,'Muat ulang data aplikasi').props.onClick());
+    assert.equal(root.findByProps({ 'aria-label': 'Pilih bundle ROV20-295' }).props.checked,false);
+    await act(async () => root.findByProps({ 'aria-label': 'Pilih bundle ROV20-295' }).props.onChange({ target: { checked: true } }));
+    await act(async () => button(root,'Bagikan & tambahkan ke Store').props.onClick());
+    assert.deepEqual(f.calls[0],{ token: 'test',storeId: 11,mode: 'attach',items: [{ sku: 'ROV20-295',bundleId: 2,optionId: 1,share: true }] });
+  } finally { view!.unmount(); }
+});
 test('diagnosis failures allow retry; a late response cannot overwrite a different account',async () => {
   const f = fixture(); let resolve: (value: ParserDiagnosis) => void = () => {};
   f.props.diagnose = async () => new Promise(r => { resolve = r; });
@@ -117,7 +139,8 @@ test('compact repair asks for a Store before BPOs and uses one explicit action w
     assert.equal(bpo.props.value,0,'No guessing from the SKU or order amount');
     assert.equal(root.findAllByType('button').filter(b => /tambahkan|Tambahkan/.test(content(b))).length,1);
     await act(async () => bpo.props.onChange({ target: { value: '1' } }));
-    assert.match(content(root).replace(/\s/g,''),/HargaorderRp525\.000,00tetap/);
+    // ICU versions differ on IDR's default fraction digits; the source amount must stay the same.
+    assert.match(content(root).replace(/\s/g,''),/HargaorderRp525\.000(?:,00)?tetap/);
     await act(async () => button(root,'Tambahkan ke Store').props.onClick());
     assert.deepEqual(f.calls[0],{ token: 'test',storeId: 11,mode: 'attach',items: [{ sku: 'ROV20-295',bundleId: 2,optionId: 1,share: false }] });
   } finally { view!.unmount(); }

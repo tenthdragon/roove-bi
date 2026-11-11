@@ -55,8 +55,9 @@ validation detail, disabled download states, keyboard labels and visible focus.
 The repair panel leads with Bundle → Business → Store status, pairing icons and
 short text. Show price-option choices only after the installation Store is known;
 one configured Store or one active option needs no redundant picker. Use one
-primary repair action for the selected missing bundles, with checkboxes only for
-multiple candidates. Keep the source order total visible and unchanged. Ownership,
+primary repair action for the selected missing bundles, with checkboxes for
+multi-bundle cases. Preserve explicit exclusions across Store changes and reloads,
+even when only one repair candidate remains. Keep the source order total visible and unchanged. Ownership,
 timestamps, database reload, explicit Store sync and global routing settings live
 under **Detail & aksi lain**; missing metadata promotes sync when needed. Keep
 incomplete syncs, permissions, sharing consequences and partial failures visible.

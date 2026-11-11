@@ -46,7 +46,8 @@ export default function MarketplaceParserDiagnosis({ workspace,account,revision,
   const canWrite = canSync && canManage;
   const items = data?.items || [];
   const candidates = items.filter(i => i.status === 'found' && i.bundles.length === 1 && !i.bundles[0].installedStoreIds.includes(storeId) && (i.bundles[0].availableInBusiness || i.bundles[0].canShare) && i.bundles[0].options.length);
-  const chosen = candidates.length === 1 ? candidates : candidates.filter(i => selected[i.sku]);
+  const chosen = candidates.filter(i => selected[i.sku] !== false);
+  const showSelection = items.length > 1 || candidates.some(i => selected[i.sku] === false);
   const sharing = chosen.some(i => !i.bundles[0].availableInBusiness);
   const allFound = items.length > 0 && items.every(i => i.status === 'found' && i.bundles.length === 1);
   const allAvailable = allFound && items.every(i => i.bundles[0].availableInBusiness);
@@ -108,8 +109,8 @@ export default function MarketplaceParserDiagnosis({ workspace,account,revision,
         const bundle = item.bundles[0], installed = !!storeId && bundle?.installedStoreIds.includes(storeId) && !uncertain;
         const candidate = candidates.some(i => i.sku === item.sku);
         return <section className={styles.diagnosisItem} key={item.sku} aria-label={`Diagnosis ${item.sku}`}>
-          <div className={items.length === 1 ? styles.srOnly : styles.diagnosisItemHeading}>
-            {storeId > 0 && candidate && candidates.length > 1 ? <label className={styles.check}><input type="checkbox" aria-label={`Pilih bundle ${item.sku}`} checked={selected[item.sku] ?? true} disabled={locked || !canWrite} onChange={e => setSelected(old => ({ ...old,[item.sku]: e.target.checked }))}/><span>{item.sku}</span></label> : <h4>{item.sku}</h4>}
+          <div className={items.length === 1 && !showSelection ? styles.srOnly : styles.diagnosisItemHeading}>
+            {storeId > 0 && candidate && showSelection ? <label className={styles.check}><input type="checkbox" aria-label={`Pilih bundle ${item.sku}`} checked={selected[item.sku] ?? true} disabled={locked || !canWrite} onChange={e => setSelected(old => ({ ...old,[item.sku]: e.target.checked }))}/><span>{item.sku}</span></label> : <h4>{item.sku}</h4>}
             {items.length > 1 && <span className={installed ? styles.diagnosisReady : styles.diagnosisPending}>{installed ? 'Terpasang' : item.status === 'missing' ? 'Belum tercatat' : item.status === 'ambiguous' ? 'Kode ganda' : item.status === 'unavailable' || uncertain ? 'Belum pasti' : 'Perlu dilengkapi'}</span>}
           </div>
           {item.status !== 'found' && <p className={styles.dim}>{item.message}</p>}
