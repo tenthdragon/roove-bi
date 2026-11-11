@@ -504,9 +504,8 @@ async function readRekapanSheet(formData: FormData): Promise<{ fileName: string;
   for (const sheetName of candidates) {
     const sheet = workbook.Sheets[sheetName];
     if (!sheet) continue;
-    const rows = sheetToRows(sheet);
-    const headerText = rows.slice(0, 20).map((row) => row.map((cell) => String(cell ?? '').toLowerCase().replace(/\s+/g, ' ')).join('|')).join('\n');
-    if (headerText.includes('periode invoice') && headerText.includes('no invoice')) return { fileName: file.name, sheetName, rows, date1904 };
+    const headerText = sheetToRows(sheet, { maxRows: 20 }).map((row) => row.map((cell) => String(cell ?? '').toLowerCase().replace(/\s+/g, ' ')).join('|')).join('\n');
+    if (headerText.includes('periode invoice') && headerText.includes('no invoice')) return { fileName: file.name, sheetName, rows: sheetToRows(sheet), date1904 };
   }
   throw new Error('Sheet "REKAPAN" tidak ditemukan di workbook ini.');
 }

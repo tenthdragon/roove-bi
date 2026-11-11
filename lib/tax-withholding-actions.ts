@@ -343,9 +343,8 @@ async function readMasterSheet(formData: FormData): Promise<{ fileName: string; 
   for (const sheetName of candidates) {
     const sheet = workbook.Sheets[sheetName];
     if (!sheet) continue;
-    const rows = sheetToRows(sheet);
-    const headerText = rows.slice(0, 15).map((row) => row.map((cell) => String(cell ?? '').toLowerCase()).join('|')).join('\n');
-    if (headerText.includes('nama lawan transaksi')) return { fileName: file.name, sheetName, rows, date1904 };
+    const headerText = sheetToRows(sheet, { maxRows: 15 }).map((row) => row.map((cell) => String(cell ?? '').toLowerCase()).join('|')).join('\n');
+    if (headerText.includes('nama lawan transaksi')) return { fileName: file.name, sheetName, rows: sheetToRows(sheet), date1904 };
   }
   throw new Error('Sheet "MASTER LAWAN TRANSAKSI" tidak ditemukan di workbook ini.');
 }

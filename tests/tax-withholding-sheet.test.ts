@@ -24,3 +24,13 @@ test('sheetToRows returns no rows for an empty sheet and refuses absurdly long o
   tall[XLSX.utils.encode_cell({ r: MAX_SHEET_ROWS, c: 0 })] = { t: 'n', v: 1 };
   assert.throws(() => sheetToRows(tall), /baris/);
 });
+
+test('sheetToRows with maxRows sniffs the header window of an oversized sheet without throwing', () => {
+  const tall: XLSX.WorkSheet = { '!ref': 'A1:A1048576', A1: { t: 's', v: 'Raw export' } };
+  tall[XLSX.utils.encode_cell({ r: MAX_SHEET_ROWS, c: 0 })] = { t: 'n', v: 1 };
+  assert.deepEqual(sheetToRows(tall, { maxRows: 20 }), [['Raw export']]);
+
+  const padded = XLSX.utils.aoa_to_sheet([[], [], [], ['x']]);
+  assert.deepEqual(sheetToRows(padded, { maxRows: 3 }), [], 'window ends before the first value');
+  assert.deepEqual(sheetToRows(padded, { maxRows: 4 }), [[], [], [], ['x']]);
+});
