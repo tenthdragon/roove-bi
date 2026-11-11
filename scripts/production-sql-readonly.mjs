@@ -4,21 +4,14 @@
 //   node scripts/production-sql-readonly.mjs "select count(*) from public.tax_counterparties"
 //   node scripts/production-sql-readonly.mjs --file query.sql [--limit 200] [--json]
 //
-// What this does and does not guarantee:
-//   * the statement is checked offline by scripts/production-sql-readonly-guard.mjs:
-//     one SELECT/WITH/TABLE/VALUES/EXPLAIN/SHOW statement, no data- or
-//     session-changing keyword, no SELECT INTO, and function calls only from
-//     an allowlist of pure/stable inspection functions, so side-effecting
-//     functions such as pg_terminate_backend or dblink_exec are refused before
-//     any request is made;
-//   * the request is sent with read_only: true, so the server runs it in a
-//     read-only transaction and rejects ordinary writes as a second line;
-//   * the credential comes from the Supabase CLI keychain entry via
-//     scripts/local-production-access.mjs and is never printed;
-//   * output is bounded for display: at most --limit rows (default 200, max
-//     2000), each cell clipped to 2,000 characters and the whole output to
-//     256 KB. This is an output cap for inspection, not a bulk-export control:
-//     the executing role can still read anything it is allowed to read.
+// Trusted-operator inspection helper, not a sandbox for untrusted SQL.
+// PostgreSQL AST validation restricts statements, explicit functions and casts;
+// computed-field syntax and qualified column references are refused. Trusted
+// database definitions (views, RLS, implicit casts/operators) may execute code.
+// read_only: true is enforced by the existing Management API helper. Its
+// credential still has its original privileges: never feed this CLI untrusted
+// SQL or use its display limits as an authorization/bulk-export control.
+// See docs/runbooks/production-sql-inspection.md for the supported subset.
 import { readFileSync } from 'node:fs';
 import { productionReadOnlyQuery, PRODUCTION_REF } from './local-production-access.mjs';
 import {
@@ -52,7 +45,7 @@ if (!sql.trim()) {
   process.exit(2);
 }
 
-const verdict = validateInspectionSql(sql, { limit });
+const verdict = await validateInspectionSql(sql, { limit });
 if (!verdict.ok) {
   console.error(`Refused: ${verdict.reason}`);
   process.exit(2);
@@ -65,8 +58,17 @@ try {
   const shown = truncated ? list.slice(0, verdict.rows) : list;
   let output;
   if (asJson) {
-    const clipped = shown.map((row) => Object.fromEntries(Object.entries(row).map(([key, value]) => [key, clipCell(value)])));
-    output = `${JSON.stringify({ project: PRODUCTION_REF, rows: clipped, truncated }, null, 2)}\n`;
+    const clipped = [];
+    let bytes = 256; // reserve the envelope and truncation flags
+    let outputTruncated = false;
+    for (const row of shown) {
+      const item = Object.fromEntries(Object.entries(row).map(([key, value]) => [key, clipCell(value)]));
+      const size = Buffer.byteLength(JSON.stringify(item), 'utf8') + 1;
+      if (bytes + size > MAX_OUTPUT_BYTES) { outputTruncated = true; break; }
+      clipped.push(item);
+      bytes += size;
+    }
+    output = `${JSON.stringify({ project: PRODUCTION_REF, rows: clipped, truncated: truncated || outputTruncated, outputTruncated })}\n`;
   } else if (shown.length === 0) {
     output = '(0 rows)\n';
   } else {
@@ -79,7 +81,11 @@ try {
     output = `${lines.join('\n')}\n`;
   }
   if (Buffer.byteLength(output, 'utf8') > MAX_OUTPUT_BYTES) {
-    output = `${output.slice(0, MAX_OUTPUT_BYTES)}\n… output cut at ${MAX_OUTPUT_BYTES} bytes; narrow the query or lower --limit.\n`;
+    const notice = `\n… output cut at ${MAX_OUTPUT_BYTES} bytes; narrow the query or lower --limit.\n`;
+    const bytes = Buffer.from(output);
+    let end = MAX_OUTPUT_BYTES - Buffer.byteLength(notice);
+    while ((bytes[end] & 0xc0) === 0x80) end -= 1;
+    output = bytes.subarray(0, end).toString('utf8') + notice;
   }
   process.stdout.write(output);
 } catch (error) {

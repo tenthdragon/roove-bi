@@ -53,6 +53,9 @@ jobs:
       - name: Check the read-only production SQL guard
         run: npm run test:production-sql-readonly
 
+      - name: Check SQL inspection against disposable PostgreSQL
+        run: npm run test:production-sql-readonly-db
+
       - name: Check tax withholding domain rules and master import parser
         run: npm run test:tax-withholding
 
