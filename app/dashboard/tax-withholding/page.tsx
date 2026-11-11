@@ -34,8 +34,9 @@ import {
   type TaxArticle,
 } from '@/lib/tax-withholding-domain';
 import { useWorkspace } from '@/lib/WorkspaceContext';
+import { RekapanImportSection, SlipsSection } from '@/components/TaxWithholdingSlips';
 
-type SubTab = 'counterparties' | 'entities' | 'import';
+type SubTab = 'slips' | 'counterparties' | 'entities' | 'import';
 type PageMessage = { type: 'success' | 'error'; text: string };
 
 type CounterpartyForm = {
@@ -180,7 +181,7 @@ function facilityTone(status: ReturnType<typeof facilityExpiryStatus>) {
 
 export default function TaxWithholdingPage() {
   const { activeWorkspace } = useWorkspace();
-  const [subTab, setSubTab] = useState<SubTab>('counterparties');
+  const [subTab, setSubTab] = useState<SubTab>('slips');
   const [data, setData] = useState<TaxWithholdingBootstrap | null>(null);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -273,14 +274,15 @@ export default function TaxWithholdingPage() {
           <div style={{ fontSize: 12, color: 'var(--accent)', fontWeight: 700, marginBottom: 5 }}>{activeWorkspace.name}</div>
           <h1 style={{ margin: 0, fontSize: 24 }}>Bukti Potong (PPh)</h1>
           <p style={{ margin: '6px 0 0', color: 'var(--text-secondary)', fontSize: 13, maxWidth: 640 }}>
-            Master data pemotong dan lawan transaksi untuk bukti potong unifikasi Coretax. Input bukti potong dan export XML menyusul di tahap berikutnya.
+            Bukti potong PPh unifikasi Coretax: input per transaksi dengan tarif otomatis, master pemotong dan lawan transaksi, serta impor dari workbook REKAP. Export XML menyusul di tahap berikutnya.
           </p>
         </div>
         <div role="tablist" aria-label="Bagian" className="tw-tabs">
           {([
+            ['slips', 'Bukti Potong'],
             ['counterparties', 'Lawan Transaksi'],
             ['entities', 'Pemotong'],
-            ['import', 'Impor Master'],
+            ['import', 'Impor'],
           ] as Array<[SubTab, string]>).map(([id, label]) => (
             <button key={id} type="button" role="tab" aria-selected={subTab === id} className="tw-tab" onClick={() => setSubTab(id)}>{label}</button>
           ))}
@@ -294,6 +296,7 @@ export default function TaxWithholdingPage() {
       ) : data ? (
         <>
           {!data.canManage ? <div className="tw-notice">Akun ini hanya dapat melihat data. Perubahan memerlukan role finance.</div> : null}
+          {subTab === 'slips' ? <SlipsSection key={activeWorkspace.id} entities={data.entities} counterparties={data.counterparties} canManage={data.canManage} notify={setMessage} /> : null}
           {subTab === 'counterparties' ? (
             <>
               <div className="tw-summary-grid">
@@ -306,7 +309,12 @@ export default function TaxWithholdingPage() {
             </>
           ) : null}
           {subTab === 'entities' ? <EntitiesSection data={data} onChanged={load} notify={setMessage} /> : null}
-          {subTab === 'import' ? <ImportSection key={activeWorkspace.id} workspaceId={activeWorkspace.id} workspaceName={activeWorkspace.name} canManage={data.canManage} onChanged={load} notify={setMessage} /> : null}
+          {subTab === 'import' ? (
+            <>
+              <ImportSection key={activeWorkspace.id} workspaceId={activeWorkspace.id} workspaceName={activeWorkspace.name} canManage={data.canManage} onChanged={load} notify={setMessage} />
+              <RekapanImportSection key={`rekapan-${activeWorkspace.id}`} entities={data.entities} workspaceId={activeWorkspace.id} canManage={data.canManage} notify={setMessage} onImported={() => { void load(); }} />
+            </>
+          ) : null}
         </>
       ) : null}
 

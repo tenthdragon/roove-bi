@@ -147,8 +147,8 @@ test('two tabs: page workspace is sent before preview and commit; switching the 
   };
   try {
     await act(async () => { renderer = create(<Page />); });
-    await click('Impor Master');
-    await act(async () => renderer.root.findByProps({ type: 'file' }).props.onChange({ target: { files: [workbook([['VENDOR', '0210893970035000']])] } }));
+    await click('Impor');
+    await act(async () => renderer.root.findAllByProps({ type: 'file' })[0].props.onChange({ target: { files: [workbook([['VENDOR', '0210893970035000']])] } }));
     activeWorkspace = B; // Another tab changes the shared cookie before Preview.
     await click('Pratinjau');
     assert.match(JSON.stringify(renderer.toJSON()), /Workspace aktif berubah/);

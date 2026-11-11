@@ -65,6 +65,14 @@ export const UNKNOWN_IDENTITY_PLACEHOLDER = 'TIDAK ADA IDENTITAS';
 
 export const DEFAULT_COUNTRY = 'IDN';
 
+// Coretax <Document> enum for the reference document of a slip.
+export const DOCUMENT_TYPES = [
+  'CommercialInvoice', 'TaxInvoice', 'Contract', 'PaymentProof', 'StatementLetter',
+  'Announchment', 'DeedofEngangement', 'DeedofGeneralMeetingStakeholder', 'BankAccountNumber',
+] as const;
+export type DocumentType = (typeof DOCUMENT_TYPES)[number];
+export type SlipStatus = 'draft' | 'ready' | 'exported' | 'reported' | 'paid';
+
 export function digitsOnly(value: unknown): string {
   return String(value ?? '').replace(/\D/g, '');
 }

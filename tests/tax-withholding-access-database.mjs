@@ -37,6 +37,7 @@ const masterMigration = read('../supabase/migrations/247_tax_withholding.sql');
 const readAccessMigration = read('../supabase/migrations/248_tax_withholding_read_access.sql');
 const facilityIdentityMigration = read('../supabase/migrations/249_tax_facility_identity.sql');
 const readOnlyGrantsMigration = read('../supabase/migrations/250_tax_master_read_only_grants.sql');
+const slipsMigration = read('../supabase/migrations/251_tax_withholding_slips.sql');
 
 // Two imports insert the same certificate at the same time; the constraint must
 // leave exactly one row and neither side may fail.
@@ -123,6 +124,8 @@ ${readAccessMigration}
   assert.equal(psql("SELECT has_table_privilege('authenticated','public.tax_counterparties','TRUNCATE');").trim(), 't');
   psql(readOnlyGrantsMigration);
   psql(readOnlyGrantsMigration);
+  psql(slipsMigration);
+  psql(slipsMigration);
   process.stdout.write(psql(`DO $$ DECLARE target regclass; BEGIN
     FOREACH target IN ARRAY ARRAY['public.tax_object_codes'::regclass,'public.tax_withholding_entities'::regclass,
       'public.tax_counterparties'::regclass,'public.tax_counterparty_facilities'::regclass] LOOP
@@ -143,6 +146,7 @@ ${readAccessMigration}
   SELECT 'PASS: inherited Supabase write and truncate grants removed; service-role writes retained';`));
   process.stdout.write('PASS: populated upgrade preserves conflicts and collapses only equivalent payloads\n');
   process.stdout.write(psql(read('./tax-withholding-access-db.sql')));
+  process.stdout.write(psql(read('./tax-withholding-slips-db.sql')));
 
   await Promise.all([psqlAsync(concurrentFacilityInsert), psqlAsync(concurrentFacilityInsert)]);
   process.stdout.write(psql(`
