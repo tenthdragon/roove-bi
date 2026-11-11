@@ -117,10 +117,13 @@ export type TaxSlip = {
   notes: string | null;
   source: 'manual' | 'import_rekapan';
   workbook_withholding_amount: string | null;
+  export_batch_id: number | null;
+  voided_from_batch_id: number | null;
+  void_reason: string | null;
   updated_at: string;
 };
 
-const SLIP_COLUMNS = 'id, entity_id, counterparty_id, counterparty_name, counterparty_identity_type, counterparty_identity_number, period_month, period_year, invoice_date, invoice_number, description, object_code, pph_article, gross_input_mode, gross_input_amount, gross_amount, rate_percent, rate_source, rate_override_reason, facility_code, facility_document_number, withholding_amount, vat_rate_percent, vat_amount, additional_cost, total_amount, document_type, document_date, withholding_date, status, coretax_slip_number, account_code, account_name, trello_url, notes, source, workbook_withholding_amount, updated_at';
+const SLIP_COLUMNS = 'id, entity_id, counterparty_id, counterparty_name, counterparty_identity_type, counterparty_identity_number, period_month, period_year, invoice_date, invoice_number, description, object_code, pph_article, gross_input_mode, gross_input_amount, gross_amount, rate_percent, rate_source, rate_override_reason, facility_code, facility_document_number, withholding_amount, vat_rate_percent, vat_amount, additional_cost, total_amount, document_type, document_date, withholding_date, status, coretax_slip_number, account_code, account_name, trello_url, notes, source, workbook_withholding_amount, export_batch_id, voided_from_batch_id, void_reason, updated_at';
 
 function normalizeSlipRow(row: Record<string, unknown>): TaxSlip {
   const text = (key: string) => (row[key] === null || row[key] === undefined ? null : String(row[key]));
