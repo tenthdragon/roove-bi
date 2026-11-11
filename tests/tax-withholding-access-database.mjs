@@ -36,6 +36,7 @@ const roleHelpers = ['is_platform_owner', 'workspace_has_membership', 'workspace
 const masterMigration = read('../supabase/migrations/247_tax_withholding.sql');
 const readAccessMigration = read('../supabase/migrations/248_tax_withholding_read_access.sql');
 const facilityIdentityMigration = read('../supabase/migrations/249_tax_facility_identity.sql');
+const readOnlyGrantsMigration = read('../supabase/migrations/250_tax_master_read_only_grants.sql');
 
 // Two imports insert the same certificate at the same time; the constraint must
 // leave exactly one row and neither side may fail.
@@ -113,6 +114,33 @@ ${readAccessMigration}
   assert.equal(psql('SELECT string_agg(id::text,\',\' ORDER BY id) FROM public.tax_counterparty_facilities;').trim(), '900,902');
   psql(facilityIdentityMigration);
   psql('DELETE FROM public.tax_counterparties WHERE id=900;');
+  // Match Supabase's default grants: an earlier SELECT grant does not remove
+  // INSERT/UPDATE/DELETE/TRUNCATE or direct sequence access.
+  psql(`GRANT ALL ON public.tax_object_codes, public.tax_withholding_entities,
+    public.tax_counterparties, public.tax_counterparty_facilities TO authenticated;
+    GRANT ALL ON SEQUENCE public.tax_withholding_entities_id_seq,
+    public.tax_counterparties_id_seq, public.tax_counterparty_facilities_id_seq TO authenticated;`);
+  assert.equal(psql("SELECT has_table_privilege('authenticated','public.tax_counterparties','TRUNCATE');").trim(), 't');
+  psql(readOnlyGrantsMigration);
+  psql(readOnlyGrantsMigration);
+  process.stdout.write(psql(`DO $$ DECLARE target regclass; BEGIN
+    FOREACH target IN ARRAY ARRAY['public.tax_object_codes'::regclass,'public.tax_withholding_entities'::regclass,
+      'public.tax_counterparties'::regclass,'public.tax_counterparty_facilities'::regclass] LOOP
+      IF NOT has_table_privilege('authenticated',target,'SELECT')
+        OR has_table_privilege('authenticated',target,'INSERT,UPDATE,DELETE,TRUNCATE,REFERENCES,TRIGGER')
+        OR has_table_privilege('anon',target,'SELECT,INSERT,UPDATE,DELETE,TRUNCATE')
+        OR NOT has_table_privilege('service_role',target,'INSERT,UPDATE,DELETE')
+      THEN RAISE EXCEPTION 'Unexpected tax table grants: %', target; END IF;
+    END LOOP;
+    FOREACH target IN ARRAY ARRAY['public.tax_withholding_entities_id_seq'::regclass,
+      'public.tax_counterparties_id_seq'::regclass,'public.tax_counterparty_facilities_id_seq'::regclass] LOOP
+      IF has_sequence_privilege('authenticated',target,'USAGE,SELECT,UPDATE')
+        OR has_sequence_privilege('anon',target,'USAGE,SELECT,UPDATE')
+        OR NOT has_sequence_privilege('service_role',target,'USAGE')
+      THEN RAISE EXCEPTION 'Unexpected tax sequence grants: %', target; END IF;
+    END LOOP;
+  END $$;
+  SELECT 'PASS: inherited Supabase write and truncate grants removed; service-role writes retained';`));
   process.stdout.write('PASS: populated upgrade preserves conflicts and collapses only equivalent payloads\n');
   process.stdout.write(psql(read('./tax-withholding-access-db.sql')));
 
