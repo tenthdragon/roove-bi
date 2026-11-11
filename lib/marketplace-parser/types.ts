@@ -17,7 +17,13 @@ export type ParserConfig = {
   couriers: CourierRule[];
 };
 export type CatalogStore = { id: number; business: string; name: string };
-export type CatalogBundle = { id: number; business: string; sku: string; name: string; syncedAt: string | null };
+export type CatalogBundle = { id: number; business: string; sku: string; name: string; syncedAt: string | null; storeIds?: number[] };
+export type RoutingCaseItem = { bundleId: number; sku: string; quantity: number };
+export type RouteDecision = { id: string; account: string; business: string; caseKey: string; items: RoutingCaseItem[]; storeId: number; revision: number; actor: string; createdAt: string };
+export type RoutingResult = { status: 'saved' | 'catalog' | 'rule' | 'approval' | 'invalid' | 'bundle'; storeId: number | null; candidateIds: number[]; suggestedIds: number[]; caseKey: string; items: RoutingCaseItem[]; decisionId: string | null; message: string };
+export type ParserBatch = { id: string; filename: string; sourceSha256: string; account: string; business: string; date: string; createdAt: string; actor: string; file: ParsedFile };
+export type ParserBatchSummary = Omit<ParserBatch,'file'> & { orderCount: number };
+export type ParserExport = { id: string; createdAt: string; actor: string; configRevision: number; business: string };
 export type CatalogWarehouse = { id: number; name: string; exportName: string | null; businesses: string[] };
 export type Catalog = {
   version: string;
@@ -28,6 +34,7 @@ export type Catalog = {
   loadedStoreIds: number[];
   loadedBusinessCodes: string[];
   businessSyncs: { business: string; checkedAt: string | null; bundleCount: number; status: 'ready' | 'unknown' | 'failed' }[];
+  decisions?: RouteDecision[];
 };
 export type ParserContext = { workspaceId: string; config: ParserConfig; revision: number; catalog: Catalog; canSave: boolean; canSync: boolean; canManageCatalog?: boolean; migrationNotes: string[] };
 export type SourceLine = {
@@ -50,5 +57,6 @@ export type PreviewLine = { source: SourceLine; sku: string; productIds: string[
 export type PreviewOrder = {
   source: SourceOrder; business: string; storeId: number | null; store: string; warehouse: string; courier: string; service: string;
   lines: PreviewLine[]; errors: string[]; warnings: string[]; totalCents: number; routeIds: string[]; rows: CsvRow[];
+  routing?: RoutingResult;
 };
 export type Projection = { orders: PreviewOrder[]; date: string; account: string; configRevision: number; configSnapshot: ParserConfig; editsSnapshot: Edits };

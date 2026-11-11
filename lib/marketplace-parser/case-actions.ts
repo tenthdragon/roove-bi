@@ -34,7 +34,7 @@ export async function diagnoseParserCase(workspaceId: string, input: DiagnosisRe
   const target = context.catalog.businesses.find(c => c.code === account?.business);
   if (!account || !target) throw new Error('Business akun asal belum terhubung atau tidak aktif. Perbaiki aturan akun.');
   const scoped = context.catalog.stores.filter(s => s.business === target.code && context.config.stores.some(scope => scope.storeId === s.id));
-  const skus = [...new Set(input.skus.map(s => s.trim()))];
+  const skus = [...new Set(input.skus)];
   try {
     const result = await readCachedDiagnosis({ workspaceId,actorId: ctx.profile.id,revision: context.revision,account: account.id,skus,config: context.config,stores: scoped });
     return { ...result.diagnosis,token: signDiagnosis(result.permit) };

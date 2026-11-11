@@ -1,14 +1,17 @@
 import test, { beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
+import { createHash } from 'node:crypto';
 import { catalogFixture, configFixture, book, shopee } from './marketplace-parser-fixtures';
 import { parseWorkbook } from '../lib/marketplace-parser/read';
 import { exportBusinessCsv, projectMarketplace } from '../lib/marketplace-parser/project';
 
 const require = createRequire(import.meta.url);
 let settings: any, catalog = catalogFixture(), channels = true, forbidden = false, finalRevision: number | null = null;
-let catalogReads: number[][] = [], writes = 0;
+let catalogReads: number[][] = [], writes = 0, exportsSaved = 0;
+let decisionsWritten: any[] = [], decisionConflict=false, changeDuringDownload=false;
 function from(table: string) {
+  if(table==='marketplace_parser_route_decisions')return {insert:async(payload:any)=>{if(decisionConflict)return {error:{code:'23505'}};decisionsWritten.push(payload);return {error:null};}};
   assert.equal(table, 'marketplace_parser_configs');
   const filters: Record<string, unknown> = {}; let operation = 'read', payload: any, single = false;
   const query: any = {
@@ -29,39 +32,73 @@ function from(table: string) {
 require.cache[require.resolve('../lib/dashboard-access')] = { exports: { requireDashboardTabAccess: async () => {
   if (forbidden) throw new Error('Forbidden');
   return { workspaceId: 'workspace-a', workspace: {}, profile: { id: 'user-a' } };
-} } } as any;
+}, requireDashboardPermissionAccess:async()=>{throw new Error('Not a catalog manager');} } } as any;
 require.cache[require.resolve('../lib/workspaces')] = { exports: { isWorkspaceModuleEnabled: () => channels } } as any;
 require.cache[require.resolve('../lib/service-supabase')] = { exports: { createServiceSupabase: () => ({ from }) } } as any;
 require.cache[require.resolve('../lib/marketplace-parser/catalog')] = { exports: { readParserCatalog: async (workspace: string, ids: number[]) => {
   assert.equal(workspace, 'workspace-a'); catalogReads.push(ids);
+  if(changeDuringDownload && catalogReads.length===2)settings.revision++;
   return structuredClone(catalog);
 } } } as any;
 require.cache[require.resolve('../lib/scalev-catalog-actions')] = { exports: { syncScalevCatalogBusiness: async (workspace: string, storeId: number) => ({ workspace, storeId }) } } as any;
+require.cache[require.resolve('../lib/marketplace-parser/archive')] = { exports: {
+ readBatch:async (_db:any,w:string,id:string)=>{if(id!=='batch-a')throw new Error('Batch tidak valid.');return {id,workspace_id:w,account_id:'roove',business_code:'RTI',batch_date:'2026-11-09',parsed_file:parseWorkbook(book({Orders:[shopee()]}))};},
+ assertBatchAccount:()=>{},archiveExport:async()=>{exportsSaved++;return 'export-a';},digest:(text:string)=>createHash('sha256').update(text).digest('hex')
+} } as any;
+require.cache[require.resolve('../lib/marketplace-parser/access')] = { exports: {
+ parserAccess:async(workspace:string)=>{if(forbidden)throw new Error('Forbidden');if(workspace!=='workspace-a')throw new Error('Workspace berubah');if(!channels)throw new Error('Sales Channel tidak aktif');return {profile:{id:'user-a'},workspaceId:workspace,workspace:{}};},parserActorName:async()=> 'Tester'
+} } as any;
 const actions = require('../lib/marketplace-parser/actions') as typeof import('../lib/marketplace-parser/actions');
-const input = () => ({ revision: 3, catalogVersion: catalog.version, file: parseWorkbook(book({ Orders: [shopee()] }), 'test.xlsx'), account: 'roove', date: '2026-11-09', edits: { lines: {}, orders: {} } });
-beforeEach(() => { settings = { revision: 3, config: configFixture() }; catalog = catalogFixture(); channels = true; forbidden = false; finalRevision = null; catalogReads = []; writes = 0; });
+const input = () => ({ revision:3,catalogVersion:catalog.version,batchId:'batch-a' });
+beforeEach(() => { settings = { revision: 3, config: configFixture() }; catalog = catalogFixture(); channels = true; forbidden = false; finalRevision = null; catalogReads = []; writes = 0; exportsSaved=0;decisionsWritten=[];decisionConflict=false;changeDuringDownload=false; });
 
 test('server regenerates CSV using the saved global configuration and selected Store catalog', async () => {
   const request = input();
   const result = await actions.prepareParserDownload('workspace-a', request);
-  assert.equal(result.csv, exportBusinessCsv(projectMarketplace({ ...request, config: settings.config, catalog }), 'RTI'));
+  assert.equal(result.csv, exportBusinessCsv(projectMarketplace({ file:parseWorkbook(book({Orders:[shopee()]})),account:'roove',date:'2026-11-09',revision:3,config:settings.config,catalog }), 'RTI'));
   assert.equal(result.business, 'RTI');
-  assert.deepEqual(catalogReads, [[], [10, 11, 12, 20]]);
+  assert.deepEqual(catalogReads, [[], [10, 11, 12, 20],[], [10, 11, 12, 20]]);
+  assert.equal(exportsSaved,1);
   assert.equal(writes, 0);
 });
 test('download rejects stale configuration/catalog, config changing during validation, and invalid bundles', async () => {
   await assert.rejects(actions.prepareParserDownload('workspace-a', { ...input(), revision: 2 }), /Konfigurasi berubah/);
   await assert.rejects(actions.prepareParserDownload('workspace-a', { ...input(), catalogVersion: 'old' }), /Katalog berubah/);
-  finalRevision = 4;
-  await assert.rejects(actions.prepareParserDownload('workspace-a', input()), /berubah saat validasi/);
-  finalRevision = null; catalog.bundles = [];
+  settings.revision=4;
+  await assert.rejects(actions.prepareParserDownload('workspace-a', input()), /Konfigurasi berubah/);
+  settings.revision=3; catalog.bundles = [];
   await assert.rejects(actions.prepareParserDownload('workspace-a', input()), /Selesaikan semua masalah/);
 });
-test('server disallows per-item routing/SKU overrides and rejects malformed batch envelopes', async () => {
-  const request = input();
-  (request.edits.lines as any)[request.file.orders[0].lines[0].key] = { sku: 'ANOTHER' };
-  await assert.rejects(actions.prepareParserDownload('workspace-a', request), /tidak boleh dikoreksi/);
-  await assert.rejects(actions.prepareParserDownload('workspace-a', { ...input(), file: {} } as any), /Batch tidak valid/);
+test('server accepts only archived batch identity and rejects client source replacements',async()=>{
+ await assert.rejects(actions.prepareParserDownload('workspace-a',{...input(),file:{},edits:{}} as any),/tidak boleh dikoreksi/);
+ await assert.rejects(actions.prepareParserDownload('workspace-a',{...input(),batchId:'other-workspace-batch'}),/Batch tidak valid/);
+ assert.equal(exportsSaved,0);
+});
+test('a configuration change during export prevents archiving the stale output',async()=>{changeDuringDownload=true;await assert.rejects(actions.prepareParserDownload('workspace-a',input()),/berubah saat validasi/);assert.equal(exportsSaved,0);});
+const approval=()=>({...input(),orderKey:parseWorkbook(book({Orders:[shopee()]})).orders[0].key,storeId:11,previousDecisionId:null});
+test('Store approval derives exact bundle identity from the archived source and records the actor',async()=>{
+ await actions.approveParserStore('workspace-a',approval());
+ assert.equal(decisionsWritten.length,1);const d=decisionsWritten[0];
+ assert.deepEqual(d.items,[{bundleId:101,sku:'ROV20-295',quantity:1}]);
+ assert.equal(d.account_id,'roove');assert.equal(d.business_code,'RTI');assert.equal(d.store_id,11);assert.equal(d.created_by,'user-a');assert.equal(d.revision,1);assert.equal(d.source_batch_id,'batch-a');
+});
+test('approval rejects stale context, cross-Business Stores, unknown orders and unresolved bundles',async()=>{
+ await assert.rejects(actions.approveParserStore('workspace-b',approval()),/Workspace/);
+ await assert.rejects(actions.approveParserStore('workspace-a',{...approval(),revision:2}),/berubah/);
+ await assert.rejects(actions.approveParserStore('workspace-a',{...approval(),storeId:20}),/Business akun/);
+ await assert.rejects(actions.approveParserStore('workspace-a',{...approval(),orderKey:'fabricated'}),/bundle/);
+ catalog.bundles.push({...catalog.bundles[0],id:999});
+ await assert.rejects(actions.approveParserStore('workspace-a',approval()),/bundle/);
+ assert.equal(decisionsWritten.length,0);
+});
+test('approval compare-and-swap preserves earlier decisions and rejects simultaneous approvals',async()=>{
+ const identity='[[101,"ROV20-295",1]]';catalog.decisions=[{id:'old',account:'roove',business:'RTI',caseKey:identity,items:[],storeId:10,revision:3,actor:'Other',createdAt:'2026-11-10'}];
+ await assert.rejects(actions.approveParserStore('workspace-a',approval()),/Keputusan sudah berubah/);
+ await actions.approveParserStore('workspace-a',{...approval(),previousDecisionId:'old'});
+ assert.equal(decisionsWritten[0].revision,4);assert.equal(catalog.decisions[0].storeId,10);
+ decisionConflict=true;
+ await assert.rejects(actions.approveParserStore('workspace-a',{...approval(),previousDecisionId:'old'}),/pengguna lain/);
+ assert.equal(decisionsWritten.length,1);
 });
 test('all server operations check access and workspace before any catalog read or config write', async () => {
   const operations = (workspace: string) => [() => actions.getParserContext(workspace), () => actions.getParserCatalog(workspace, [10]), () => actions.syncParserCatalogBusiness(workspace, 'RTI'), () => actions.saveParserConfig(workspace, 3, configFixture()), () => actions.prepareParserDownload(workspace, input())];

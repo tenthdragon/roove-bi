@@ -168,3 +168,14 @@
 @media (max-width: 700px) { .details { max-width: calc(100vw - 56px); }.diagnosis { padding: 14px; }.diagnosisFieldsSplit { grid-template-columns: 1fr; }.diagnosisDestination label, .diagnosisOption { max-width: none; }.diagnosisProgress { gap: 16px; grid-template-columns: 1fr; align-items: start; }.diagnosisStep { align-items: start; gap: 10px; }.diagnosisArrow { display: none; }.diagnosisFooter { align-items: stretch; flex-direction: column; }.diagnosisActionHint { text-align: left; }.diagnosis select { font-size: 16px; }.diagnosisMore summary, .diagnosis button { min-height: 44px; } }
 .warning { color: var(--red); }
 @media (max-width: 700px) { .storeChoices, .productNames { grid-template-columns: 1fr; }.fields { grid-template-columns: 1fr; }.accountContext { padding-inline: 16px; } }
+.storePicker { min-width: 210px; max-width: 320px; }
+.storePicker > div[role="group"] { display: grid; gap: 10px; padding-top: 8px; }
+.storePicker label > span { display: flex; gap: 6px; align-items: center; }
+.storeResults { display: grid; max-height: 230px; overflow-y: auto; }
+.page .storeResults button { justify-content: space-between; text-align: left; background: transparent; color: var(--text); border-radius: 4px; font-weight: 400; }
+.page .storeResults button:hover, .page .storeResults button[aria-pressed="true"] { background: var(--accent-subtle); color: var(--accent); }
+.storeResults small { color: var(--accent); margin: 0; }
+.page a { color: var(--accent); text-decoration: underline; text-underline-offset: 3px; }
+.page a:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+.bundleStatus { margin-top: 6px; max-width: 300px; }
+@media(max-width:600px){.storePicker{min-width:190px}.storePicker input{font-size:16px}}

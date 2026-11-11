@@ -5,6 +5,7 @@ import React from 'react';
 import { create,act,type ReactTestInstance } from 'react-test-renderer';
 import * as XLSX from 'xlsx';
 import { contextFixture,book,shopee } from './marketplace-parser-fixtures';
+import { parseWorkbook,readMarketplaceFile } from '../lib/marketplace-parser/read';
 import { projectMarketplace,exportBusinessCsv } from '../lib/marketplace-parser/project';
 import type { ParserConfig } from '../lib/marketplace-parser/types';
 const require = createRequire(import.meta.url);
@@ -14,9 +15,11 @@ const Tool = require('../components/MarketplaceParserTool').default;
 const content = (node: ReactTestInstance): string => node.children.map(c => typeof c === 'string' ? c : content(c)).join(' ').replace(/\s+/g,' ').trim();
 const buttons = (root: ReactTestInstance,label: string) => root.findAllByType('button').filter(b => content(b).includes(label));
 function props() {
-  const context = contextFixture();
+  const context = contextFixture(); let archived:any;
   return { context,saveConfig: async (_w: string,_r: number,_c: ParserConfig) => ({ workspaceId: context.workspaceId,revision: 4 }),loadCatalog: async () => structuredClone(context.catalog),syncBusiness: async () => ({ success: true }),reloadContext: async () => context,
-    prepareDownload: async (_w: string,input: any) => { const p = projectMarketplace({ ...input,config: context.config,catalog: context.catalog }); return { business: 'RTI',csv: exportBusinessCsv(p,'RTI') }; } };
+    uploadSource:async(_w:string,file:any,account:string,date:string)=>{archived={id:'batch-a',filename:file.name,sourceSha256:'test-hash',account,business:context.config.accounts.find(a=>a.id===account)!.business,date,actor:'Tester',createdAt:'2026-11-11',file:readMarketplaceFile(await file.arrayBuffer(),file.name)};return archived;},
+    listBatches:async()=>[],listExports:async()=>[],openBatch:async()=>archived,approveStore:async()=>context,
+    prepareDownload: async (_w: string,input: any) => { const p = projectMarketplace({ file:archived.file,account:archived.account,date:archived.date,revision:3,config: context.config,catalog: context.catalog }); return { business: 'RTI',csv: exportBusinessCsv(p,'RTI') }; } };
 }
 function uploadFile(sku = 'ROV20-295') {
   const bytes = XLSX.write(book({ orders: [shopee({ 'Nomor Referensi SKU': sku })] }),{ type: 'buffer',bookType: 'xlsx' });
@@ -43,12 +46,12 @@ function interceptDownload() {
 test('upload automatically fills Business/Store/bundle and server-validates the exact preview CSV before download',async () => {
   const p = props(), original = p.prepareDownload; let validated = 0; p.prepareDownload = async (...args) => { validated++; return original(...args); };
   const intercepted = interceptDownload(), rendered = create(React.createElement(Tool,p));
-  try { await upload(rendered.root); assert.ok(content(rendered.root).includes('Bundle #101')); assert.ok(content(rendered.root).includes('Roove Main Store - Marketplace')); assert.ok(buttons(rendered.root,'Download CSV')[0].props.disabled); await review(rendered.root); await click(rendered.root,'Download CSV'); assert.equal(validated,1); assert.ok((await intercepted.blob()!.text()).includes('ORDER-TEST-1')); }
+  try { await upload(rendered.root); assert.ok(content(rendered.root).includes('Bundle # 101')); assert.ok(content(rendered.root).includes('Roove Main Store - Marketplace')); assert.ok(buttons(rendered.root,'Download CSV')[0].props.disabled); await review(rendered.root); await click(rendered.root,'Download CSV'); assert.equal(validated,1); assert.ok((await intercepted.blob()!.text()).includes('ORDER-TEST-1')); }
   finally { rendered.unmount(); intercepted.restore(); }
 });
 test('unresolved bundle blocks review and download and has no manual SKU or destination override',async () => {
   const rendered = create(React.createElement(Tool,props()));
-  try { await upload(rendered.root,'MISSING'); assert.ok(rendered.root.findByProps({ 'aria-label': 'Konfirmasi hasil parsing' }).props.disabled); assert.ok(buttons(rendered.root,'Download CSV')[0].props.disabled); await click(rendered.root,'Periksa masalah'); const labels = rendered.root.findAllByType('label').map(content); assert.ok(!labels.some(t => /^(SKU Scalev|Business tujuan|Store tujuan|Warehouse tujuan)/.test(t))); assert.ok(content(rendered.root).includes('identifier code')); }
+  try { await upload(rendered.root,'MISSING'); assert.ok(rendered.root.findByProps({ 'aria-label': 'Konfirmasi hasil parsing' }).props.disabled); assert.ok(buttons(rendered.root,'Download CSV')[0].props.disabled); await click(rendered.root,'Detail'); const labels = rendered.root.findAllByType('label').map(content); assert.ok(!labels.some(t => /^(SKU Scalev|Business tujuan|Store tujuan|Warehouse tujuan)/.test(t))); assert.ok(content(rendered.root).includes('identifier code')); }
   finally { rendered.unmount(); }
 });
 test('editing global rules invalidates review and blocks export until saved for the team',async () => {
@@ -84,10 +87,10 @@ test('save disables controls until complete and preserves revision conflict feed
   const failed = props(); failed.saveConfig = async () => { throw new Error('Konfigurasi telah diubah pengguna lain.'); }; const second = create(React.createElement(Tool,failed));
   try { await click(second.root,'Aturan parsing'); await click(second.root,'Simpan konfigurasi tim'); assert.ok(content(second.root).includes('Konfigurasi telah diubah pengguna lain.')); } finally { second.unmount(); }
 });
-test('failed replacement upload and financial edits invalidate download review',async () => {
-  const rendered = create(React.createElement(Tool,props()));
-  try { await upload(rendered.root); await review(rendered.root); await act(async () => { await rendered.root.findByProps({ type: 'file' }).props.onChange({ target: { files: [{ ...uploadFile(),name: 'wrong.csv' }],value: '' } }); }); assert.equal(rendered.root.findByProps({ 'aria-label': 'Konfirmasi hasil parsing' }).props.checked,false); assert.ok(buttons(rendered.root,'Download CSV')[0].props.disabled); await click(rendered.root,'Detail order'); const price = rendered.root.findAllByType('label').find(l => content(l).startsWith('Harga satuan (Rp)'))!; await act(async () => { price.findByType('input').props.onChange({ target: { value: '280000' } }); }); assert.ok(content(rendered.root).includes('Isi alasan koreksi item')); }
-  finally { rendered.unmount(); }
+test('failed replacement upload invalidates review; source fields have no edit controls',async()=>{
+ const rendered=create(React.createElement(Tool,props()));
+ try{await upload(rendered.root);await review(rendered.root);await act(async()=>{await rendered.root.findByProps({type:'file'}).props.onChange({target:{files:[{...uploadFile(),name:'wrong.csv'}],value:''}});});assert.equal(rendered.root.findByProps({'aria-label':'Konfirmasi hasil parsing'}).props.checked,false);await click(rendered.root,'Detail');assert.ok(content(rendered.root).includes('Data asli marketplace'));assert.equal(rendered.root.findAllByType('input').filter(i=>['numeric','decimal'].includes(i.props.inputMode)).length,0);assert.ok(!content(rendered.root).includes('Koreksi kurir atau nama pembeli'));}
+ finally{rendered.unmount();}
 });
 
 test('save failure focuses and reveals the error summary even from a distant action', async () => {
@@ -101,21 +104,10 @@ test('save failure focuses and reveals the error summary even from a distant act
   } finally { rendered.unmount(); }
 });
 
-test('repair replaces the catalog and revalidates every order, including filtered-out orders, while requiring review again',async () => {
-  const p = props(), completeCatalog = structuredClone(p.context.catalog);
-  p.context.canManageCatalog = true; p.context.catalog.bundles = [];
-  const data = { checkedAt: '2026-11-10T00:00:00Z',business: 'RTI',account: 'Shopee Roove',stores: [{ id: 10,name: 'Roove Main Store - Marketplace' }],suggestedStoreId: 10,issues: [],token: 'test',items: [{ sku: 'ROV20-295',status: 'found',message: 'Tersedia',bundles: [{ id: 101,name: 'Roove A',sku: 'ROV20-295',owner: 'RLB',ownerBusinessId: 8,availableInBusiness: true,canShare: false }] }] };
-  let mutations = 0;
-  const rendered = create(React.createElement(Tool,{ ...p,diagnoseCase: async () => data,repairCase: async () => { mutations++; return { result: { synced: true,message: 'Seluruh batch divalidasi ulang',items: [] },catalog: completeCatalog }; } }));
-  try {
-    const bytes = XLSX.write(book({ orders: [shopee(),shopee({ 'No. Pesanan': 'ORDER-TEST-2','No. Resi': '00054321' })] }),{ type: 'buffer',bookType: 'xlsx' });
-    await uploadData(rendered.root,{ name: 'synthetic-two-orders.xlsx',size: bytes.length,arrayBuffer: async () => bytes.buffer.slice(bytes.byteOffset,bytes.byteOffset + bytes.byteLength) });
-    assert.match(content(rendered.root),/2 perlu diselesaikan/);
-    await act(async () => rendered.root.findByProps({ type: 'search' }).props.onChange({ target: { value: 'ORDER-TEST-1' } }));
-    await click(rendered.root,'Periksa masalah');
-    await click(rendered.root,'Sinkronkan Business dari Scalev');
-    assert.equal(mutations,1); assert.match(content(rendered.root),/2 order valid/);
-    assert.equal(rendered.root.findByProps({ 'aria-label': 'Konfirmasi hasil parsing' }).props.checked,false);
-    assert.equal(buttons(rendered.root,'Download CSV')[0].props.disabled,true);
-  } finally { rendered.unmount(); }
+test('catalog reload revalidates every order while preserving archived source and requiring review',async()=>{
+ const p=props(),cat=structuredClone(p.context.catalog);p.context.catalog.bundles=[];
+ p.loadCatalog=async()=>cat;
+ const rendered=create(React.createElement(Tool,p));
+ try{await upload(rendered.root);assert.match(content(rendered.root),/1 perlu diselesaikan/);await click(rendered.root,'Muat ulang katalog');assert.match(content(rendered.root),/1 order valid/);assert.equal(rendered.root.findByProps({'aria-label':'Konfirmasi hasil parsing'}).props.checked,false);assert.match(content(rendered.root),/pembeli-test/);assert.match(content(rendered.root),/00012345/);}
+ finally{rendered.unmount();}
 });

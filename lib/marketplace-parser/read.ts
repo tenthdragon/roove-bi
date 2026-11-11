@@ -5,7 +5,7 @@ import type { ParsedFile, Platform, SourceLine, SourceOrder } from './types';
 const text = (v: unknown) => String(v ?? '').trim();
 function identifier(value: unknown): string {
   if (typeof value === 'number' && !Number.isSafeInteger(value)) throw new Error('ID pada Excel sudah kehilangan presisi angka. Ekspor ulang dari marketplace dengan ID sebagai teks.');
-  return text(value);
+  return String(value ?? '');
 }
 export function readMarketplaceFile(buffer: ArrayBuffer, filename: string): ParsedFile {
   if (!/\.xlsx$/i.test(filename)) throw new Error('Gunakan file .xlsx asli dari marketplace.');
@@ -35,15 +35,15 @@ export function parseWorkbook(book: XLSX.WorkBook, filename='marketplace.xlsx'):
       const idValue=platform==='tiktokshop'?raw['Order ID']:platform==='lazada'?raw.orderItemId:kind==='booking'?raw['Booking SN']:raw['No. Pesanan'];
       if (platform==='tiktokshop' && /platform unique|order id/i.test(text(idValue))) continue; // export description row
       const id=identifier(idValue);
-      if (!id) throw new Error(`${sheet} baris ${i+1}: ID pesanan kosong. Baris tidak diabaikan.`);
+      if (!id.trim()) throw new Error(`${sheet} baris ${i+1}: ID pesanan kosong. Baris tidak diabaikan.`);
       const marketplaceOrderId=platform==='lazada'?identifier(raw.orderNumber):id;
-      if (!marketplaceOrderId) throw new Error(`${sheet} baris ${i+1}: orderNumber kosong.`);
+      if (!marketplaceOrderId.trim()) throw new Error(`${sheet} baris ${i+1}: orderNumber kosong.`);
       const key=`${platform}:${kind}:${platform==='lazada'?marketplaceOrderId:id}`;
       const tracking=identifier(platform==='tiktokshop'?raw['Tracking ID']:platform==='lazada'?raw.trackingCode:raw['No. Resi']);
       const provider=text(platform==='tiktokshop'?raw['Shipping Provider Name']:platform==='lazada'?raw.shippingProvider:raw['Opsi Pengiriman']);
-      const username=text(platform==='tiktokshop'?raw['Buyer Username']:platform==='lazada'?raw.customerName:raw['Username (Pembeli)']);
-      const strings=Object.fromEntries(Object.entries(raw).filter(([h])=>h).map(([h,v])=>[h,text(v)]));
-      const source: SourceLine={key:`${sheet}:${i+1}`,sheet,row:i+1,sku:text(platform==='tiktokshop'?raw['Seller SKU']:platform==='lazada'?raw.sellerSku:raw['Nomor Referensi SKU']),name:text(platform==='tiktokshop'?raw['Product Name']:platform==='lazada'?raw.itemName:raw['Nama Produk']),variation:text(platform==='tiktokshop'?raw.Variation:platform==='lazada'?raw.variation:raw['Nama Variasi']),quantity:null,unitCents:null,totalCents:null,raw:strings,errors:[]};
+      const username=String((platform==='tiktokshop'?raw['Buyer Username']:platform==='lazada'?raw.customerName:raw['Username (Pembeli)']) ?? '');
+      const strings=Object.fromEntries(Object.entries(raw).filter(([h])=>h).map(([h,v])=>[h,String(v ?? '')]));
+      const source: SourceLine={key:`${sheet}:${i+1}`,sheet,row:i+1,sku:String((platform==='tiktokshop'?raw['Seller SKU']:platform==='lazada'?raw.sellerSku:raw['Nomor Referensi SKU']) ?? ''),name:text(platform==='tiktokshop'?raw['Product Name']:platform==='lazada'?raw.itemName:raw['Nama Produk']),variation:text(platform==='tiktokshop'?raw.Variation:platform==='lazada'?raw.variation:raw['Nama Variasi']),quantity:null,unitCents:null,totalCents:null,raw:strings,errors:[]};
       try {
         source.quantity=kind==='booking'?null:platform==='lazada'?1:quantity(platform==='tiktokshop'?raw.Quantity:raw.Jumlah);
         if (kind!=='booking') {
