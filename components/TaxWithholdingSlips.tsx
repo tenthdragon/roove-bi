@@ -411,9 +411,9 @@ function ExportModal({ entity, year, month, onClose, onChanged, notify }: {
 
   useEffect(() => { void refresh(); }, [refresh]);
 
-  // One batch takes at most maxBatchSlips; the rest stay ready for the next batch.
-  const batchIds = preview ? preview.eligibleIds.slice(0, preview.maxBatchSlips) : [];
-  const deferredCount = preview ? preview.eligibleIds.length - batchIds.length : 0;
+  // The server decides which eligible slips fit this batch; totals and labels follow that subset.
+  const batchIds = preview ? preview.batchIds : [];
+  const deferredCount = preview ? preview.deferredCount : 0;
 
   const create = async () => {
     if (!preview || batchIds.length === 0) return;
@@ -496,9 +496,11 @@ function ExportModal({ entity, year, month, onClose, onChanged, notify }: {
                         <td style={numberCellStyle}>{formatMoney(row.gross_amount, 2)}</td>
                         <td style={numberCellStyle}>{formatMoney(row.withholding_amount)}</td>
                         <td style={cellStyle}>
-                          {row.errors.length === 0
-                            ? <StatusPill tone="green">Masuk batch</StatusPill>
-                            : <><StatusPill tone="red">Terblokir</StatusPill><div style={{ color: 'var(--red)', fontSize: 11, marginTop: 4 }}>{row.errors.join(' ')}</div></>}
+                          {row.errors.length > 0
+                            ? <><StatusPill tone="red">Terblokir</StatusPill><div style={{ color: 'var(--red)', fontSize: 11, marginTop: 4 }}>{row.errors.join(' ')}</div></>
+                            : row.inBatch
+                              ? <StatusPill tone="green">Masuk batch</StatusPill>
+                              : <StatusPill tone="muted">Batch berikutnya</StatusPill>}
                         </td>
                       </tr>
                     ))}

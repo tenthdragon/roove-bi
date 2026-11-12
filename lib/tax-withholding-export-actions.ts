@@ -120,6 +120,8 @@ export type TaxExportPreviewRow = {
   withholding_amount: string;
   export_batch_id: number | null;
   errors: string[];
+  /** True for the slips the next batch will contain; valid slips beyond the batch limit wait for the following batch. */
+  inBatch: boolean;
 };
 
 export type TaxExportBatchSummary = {
@@ -143,8 +145,14 @@ export type TaxExportPreview = {
   /** Largest number of slips one batch accepts; the UI sends the first N eligible ids and leaves the rest for the next batch. */
   maxBatchSlips: number;
   rows: TaxExportPreviewRow[];
+  /** Every slip that passes validation, in list order. */
   eligibleIds: number[];
-  totals: { eligibleCount: number; blockedCount: number; grossAmount: string; withholdingAmount: string };
+  /** The first maxBatchSlips eligible ids: exactly what createTaxExportBatch should receive. */
+  batchIds: number[];
+  /** Eligible slips that do not fit in this batch. */
+  deferredCount: number;
+  /** Totals of batchIds, so the cards match the XML about to be created. */
+  totals: { eligibleCount: number; batchCount: number; blockedCount: number; grossAmount: string; withholdingAmount: string };
   statusCounts: Record<SlipStatus, number>;
   batches: TaxExportBatchSummary[];
 };
@@ -184,7 +192,7 @@ async function loadBatches(workspaceId: string, input: TaxExportPeriodInput): Pr
   }));
 }
 
-function toPreviewRow(slip: SlipRow, errors: string[]): TaxExportPreviewRow {
+function toPreviewRow(slip: SlipRow, errors: string[], inBatch: boolean): TaxExportPreviewRow {
   return {
     id: slip.id,
     status: slip.status as SlipStatus,
@@ -201,6 +209,7 @@ function toPreviewRow(slip: SlipRow, errors: string[]): TaxExportPreviewRow {
     withholding_amount: slip.withholding_amount,
     export_batch_id: slip.export_batch_id,
     errors,
+    inBatch,
   };
 }
 
@@ -216,21 +225,23 @@ export async function previewTaxExport(input: TaxExportPeriodInput): Promise<Tax
   ]);
   const period = { year: input.year, month: input.month };
   const statusCounts: Record<SlipStatus, number> = { draft: 0, ready: 0, exported: 0, reported: 0, paid: 0 };
-  const rows: TaxExportPreviewRow[] = [];
-  const eligibleIds: number[] = [];
-  let gross = 0n;
-  let withholding = 0n;
+  const candidates: Array<{ slip: SlipRow; errors: string[] }> = [];
   for (const slip of slips) {
     statusCounts[slip.status as SlipStatus] += 1;
     // Slips already handed to Coretax are not candidates and are not listed as problems.
     if (slip.status !== 'draft' && slip.status !== 'ready') continue;
-    const errors = validateSlipForXml(slip, period, codes);
-    rows.push(toPreviewRow(slip, errors));
-    if (errors.length === 0) {
-      eligibleIds.push(slip.id);
-      gross += toMicro(slip.gross_amount);
-      withholding += toMicro(slip.withholding_amount);
-    }
+    candidates.push({ slip, errors: validateSlipForXml(slip, period, codes) });
+  }
+  const eligibleIds = candidates.filter((row) => row.errors.length === 0).map((row) => row.slip.id);
+  const batchIds = eligibleIds.slice(0, MAX_BATCH_SLIPS);
+  const batchSet = new Set(batchIds);
+  const rows = candidates.map((row) => toPreviewRow(row.slip, row.errors, batchSet.has(row.slip.id)));
+  let gross = 0n;
+  let withholding = 0n;
+  for (const row of candidates) {
+    if (!batchSet.has(row.slip.id)) continue;
+    gross += toMicro(row.slip.gross_amount);
+    withholding += toMicro(row.slip.withholding_amount);
   }
   const nextSequence = batches.reduce((max, batch) => Math.max(max, batch.sequence), 0) + 1;
   return {
@@ -240,8 +251,11 @@ export async function previewTaxExport(input: TaxExportPeriodInput): Promise<Tax
     maxBatchSlips: MAX_BATCH_SLIPS,
     rows,
     eligibleIds,
+    batchIds,
+    deferredCount: eligibleIds.length - batchIds.length,
     totals: {
       eligibleCount: eligibleIds.length,
+      batchCount: batchIds.length,
       blockedCount: rows.length - eligibleIds.length,
       grossAmount: fromMicro(gross),
       withholdingAmount: fromMicro(withholding, 0),

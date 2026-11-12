@@ -77,7 +77,10 @@ async function rpc(name: string, args: Record<string, any>) {
   const batch = {
     id: batches.length + 1, workspace_id: args.p_workspace_id, entity_id: args.p_entity_id, period_year: args.p_period_year, period_month: args.p_period_month,
     sequence, file_name: `${args.p_file_name_prefix}${String(sequence).padStart(2, '0')}.xml`, schema_version: args.p_schema_version,
-    slip_count: locked.length, total_gross: 0, total_withholding: 0, xml_sha256: args.p_xml_sha256, xml_content: args.p_xml_content, created_at: stamp(),
+    slip_count: locked.length,
+    total_gross: String(locked.reduce((sum, row) => sum + Number(row.gross_amount), 0)),
+    total_withholding: String(locked.reduce((sum, row) => sum + Number(row.withholding_amount), 0)),
+    xml_sha256: args.p_xml_sha256, xml_content: args.p_xml_content, created_at: stamp(),
   };
   batches.push(batch);
   for (const row of locked) Object.assign(row, { status: 'exported', export_batch_id: batch.id, updated_at: stamp() });
@@ -215,4 +218,31 @@ test('previewTaxExport counts every attached slip of a batch beyond one PostgRES
   assert.equal(preview.statusCounts.exported, 1001);
   assert.equal(preview.batches[0].current_slip_count, 1001);
   assert.equal(preview.batches[0].slip_count, 1001);
+});
+
+test('preview totals and membership describe the first batch when more slips are eligible than one batch holds', async () => {
+  for (let index = 0; index < 2001; index += 1) {
+    db.tax_withholding_slips.push({ id: index + 1, ...readySlip({ invoice_number: `INV-${index}`, gross_amount: '1000', gross_input_amount: '1000', withholding_amount: '20', total_amount: '1110' }), updated_at: stamp() });
+  }
+  const preview = await exportActions.previewTaxExport({ entityId: 1, year: 2026, month: 1 });
+  assert.equal(preview.eligibleIds.length, 2001);
+  assert.equal(preview.batchIds.length, 2000);
+  assert.equal(preview.deferredCount, 1);
+  assert.equal(preview.totals.batchCount, 2000);
+  assert.equal(preview.totals.grossAmount, '2000000');
+  assert.equal(preview.totals.withholdingAmount, '40000');
+  assert.equal(preview.rows.filter((row) => row.inBatch).length, 2000);
+  assert.equal(preview.rows[2000].inBatch, false);
+  assert.deepEqual(preview.rows[2000].errors, []);
+
+  const batch = await exportActions.createTaxExportBatch({ entityId: 1, year: 2026, month: 1, slipIds: preview.batchIds });
+  assert.equal(batch.slipCount, 2000);
+  assert.equal(String(db.tax_export_batches[0].total_gross), preview.totals.grossAmount);
+  assert.equal(String(db.tax_export_batches[0].total_withholding), preview.totals.withholdingAmount);
+  assert.equal((batch.xml.match(/<Bpu>/g) ?? []).length, 2000);
+  assert.equal(db.tax_withholding_slips.filter((row) => row.status === 'ready').length, 1, 'the deferred slip stays ready for the next batch');
+
+  const next = await exportActions.previewTaxExport({ entityId: 1, year: 2026, month: 1 });
+  assert.deepEqual(next.batchIds, [2001]);
+  assert.equal(next.totals.grossAmount, '1000');
 });
