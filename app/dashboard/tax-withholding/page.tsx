@@ -35,8 +35,9 @@ import {
 } from '@/lib/tax-withholding-domain';
 import { useWorkspace } from '@/lib/WorkspaceContext';
 import { RekapanImportSection, SlipsSection } from '@/components/TaxWithholdingSlips';
+import { TaxRecapSection } from '@/components/TaxWithholdingRecap';
 
-type SubTab = 'slips' | 'counterparties' | 'entities' | 'import';
+type SubTab = 'slips' | 'recap' | 'counterparties' | 'entities' | 'import';
 type PageMessage = { type: 'success' | 'error'; text: string };
 
 type CounterpartyForm = {
@@ -274,12 +275,13 @@ export default function TaxWithholdingPage() {
           <div style={{ fontSize: 12, color: 'var(--accent)', fontWeight: 700, marginBottom: 5 }}>{activeWorkspace.name}</div>
           <h1 style={{ margin: 0, fontSize: 24 }}>Bukti Potong (PPh)</h1>
           <p style={{ margin: '6px 0 0', color: 'var(--text-secondary)', fontSize: 13, maxWidth: 640 }}>
-            Bukti potong PPh unifikasi Coretax: input per transaksi dengan tarif otomatis, master pemotong dan lawan transaksi, impor dari workbook REKAP, dan export XML BPPU per masa untuk diunggah ke Coretax.
+            Bukti potong PPh unifikasi Coretax: input per transaksi dengan tarif otomatis, master pemotong dan lawan transaksi, impor dari workbook REKAP, export XML BPPU per masa, pencatatan nomor bukti potong Coretax, dan rekap setor per KAP/KJS.
           </p>
         </div>
         <div role="tablist" aria-label="Bagian" className="tw-tabs">
           {([
             ['slips', 'Bukti Potong'],
+            ['recap', 'Rekap Setor'],
             ['counterparties', 'Lawan Transaksi'],
             ['entities', 'Pemotong'],
             ['import', 'Impor'],
@@ -297,6 +299,7 @@ export default function TaxWithholdingPage() {
         <>
           {!data.canManage ? <div className="tw-notice">Akun ini hanya dapat melihat data. Perubahan memerlukan role finance.</div> : null}
           {subTab === 'slips' ? <SlipsSection key={activeWorkspace.id} entities={data.entities} counterparties={data.counterparties} canManage={data.canManage} notify={setMessage} /> : null}
+          {subTab === 'recap' ? <TaxRecapSection key={`recap-${activeWorkspace.id}`} entities={data.entities} notify={setMessage} /> : null}
           {subTab === 'counterparties' ? (
             <>
               <div className="tw-summary-grid">

@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useId, useMemo, useRef, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   commitRekapanImport,
   deleteTaxSlip,
@@ -27,124 +27,35 @@ import {
 import type { TaxCounterparty, TaxWithholdingEntity } from '@/lib/tax-withholding-actions';
 import { DOCUMENT_TYPES, IDENTITY_LABELS, TAX_ARTICLE_LABELS, formatIdentity, type TaxArticle } from '@/lib/tax-withholding-domain';
 import type { GrossInputMode } from '@/lib/tax-withholding-rules';
+import {
+  MONTHS,
+  ModalShell,
+  STATUS_LABELS,
+  STATUS_TONE,
+  StatusPill,
+  SummaryCard,
+  cellStyle,
+  downloadTextFile,
+  errorText,
+  formatDate,
+  formatDateTime,
+  formatMoney,
+  headCellStyle,
+  inputStyle,
+  labelStyle,
+  numberCellStyle,
+  primaryButtonStyle,
+  secondaryButtonStyle,
+  type Notify,
+} from '@/components/TaxWithholdingShared';
+import { CoretaxNumberModal, CoretaxRecordModal } from '@/components/TaxWithholdingCoretax';
 
-type PageMessage = { type: 'success' | 'error'; text: string };
-type Notify = (message: PageMessage) => void;
-
-const STATUS_LABELS: Record<SlipStatus, string> = {
-  draft: 'Draft', ready: 'Siap', exported: 'Di-export', reported: 'Dilaporkan', paid: 'Dibayar',
-};
-const STATUS_TONE: Record<SlipStatus, 'muted' | 'accent' | 'yellow' | 'green' | 'green'> = {
-  draft: 'muted', ready: 'accent', exported: 'yellow', reported: 'green', paid: 'green',
-};
-const MONTHS = ['Januari', 'Februari', 'Maret', 'April', 'Mei', 'Juni', 'Juli', 'Agustus', 'September', 'Oktober', 'November', 'Desember'];
 const DOCUMENT_LABELS: Record<DocumentType, string> = {
   CommercialInvoice: 'Surat Tagihan / Invoice', TaxInvoice: 'Faktur Pajak', Contract: 'Kontrak', PaymentProof: 'Bukti Pembayaran',
   StatementLetter: 'Surat Pernyataan', Announchment: 'Pengumuman', DeedofEngangement: 'Akta Perjanjian',
   DeedofGeneralMeetingStakeholder: 'Akta RUPS', BankAccountNumber: 'Nomor Rekening',
 };
-
-const rupiah = new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR', maximumFractionDigits: 0 });
-const formatMoney = (value: string | number | null | undefined, decimals = 0) => {
-  if (value === null || value === undefined || value === '') return '—';
-  const number = Number(value);
-  if (!Number.isFinite(number)) return String(value);
-  return decimals > 0
-    ? new Intl.NumberFormat('id-ID', { minimumFractionDigits: 0, maximumFractionDigits: decimals }).format(number)
-    : rupiah.format(number);
-};
-const formatDate = (date: string | null) => {
-  if (!date) return '—';
-  const [year, month, day] = date.split('-').map(Number);
-  return new Date(year, month - 1, day).toLocaleDateString('id-ID', { day: 'numeric', month: 'short', year: 'numeric' });
-};
-const errorText = (error: unknown) => (error instanceof Error ? error.message : 'Terjadi kesalahan.');
 const todayIso = () => new Date().toISOString().slice(0, 10);
-const formatDateTime = (value: string) => new Date(value).toLocaleString('id-ID', { dateStyle: 'medium', timeStyle: 'short' });
-function downloadXml(fileName: string, xml: string) {
-  const url = URL.createObjectURL(new Blob([xml], { type: 'application/xml;charset=utf-8' }));
-  const anchor = document.createElement('a');
-  anchor.href = url;
-  anchor.download = fileName;
-  document.body.appendChild(anchor);
-  anchor.click();
-  anchor.remove();
-  window.setTimeout(() => URL.revokeObjectURL(url), 1000);
-}
-
-const inputStyle = {
-  width: '100%', border: '1px solid var(--border)', borderRadius: 8,
-  background: 'var(--input-bg)', color: 'var(--text)', padding: '10px 12px', fontSize: 13, boxSizing: 'border-box',
-} as const;
-const labelStyle = { display: 'grid', gap: 6, color: 'var(--text-secondary)', fontSize: 12, fontWeight: 600 } as const;
-const secondaryButtonStyle = {
-  border: '1px solid var(--border)', borderRadius: 8, padding: '9px 14px',
-  color: 'var(--text-secondary)', background: 'transparent', cursor: 'pointer', fontWeight: 650,
-} as const;
-const primaryButtonStyle = {
-  border: 0, borderRadius: 8, padding: '10px 16px', background: 'var(--accent-solid)', color: '#fff', fontWeight: 700, cursor: 'pointer',
-} as const;
-const cellStyle = { padding: '11px 12px', borderBottom: '1px solid var(--border)', verticalAlign: 'top' } as const;
-const headCellStyle = { ...cellStyle, fontSize: 11, textTransform: 'uppercase', letterSpacing: 0.4, color: 'var(--dim)', textAlign: 'left' } as const;
-const numberCellStyle = { ...cellStyle, textAlign: 'right', whiteSpace: 'nowrap', fontVariantNumeric: 'tabular-nums' } as const;
-
-function StatusPill({ tone, children }: { tone: 'green' | 'yellow' | 'red' | 'muted' | 'accent'; children: ReactNode }) {
-  const palette = {
-    green: { background: 'var(--green-subtle)', color: 'var(--green)' },
-    yellow: { background: 'color-mix(in srgb, var(--yellow) 14%, transparent)', color: 'var(--yellow)' },
-    red: { background: 'color-mix(in srgb, var(--red) 14%, transparent)', color: 'var(--red)' },
-    muted: { background: 'var(--input-bg)', color: 'var(--dim)' },
-    accent: { background: 'var(--accent-subtle)', color: 'var(--accent)' },
-  }[tone];
-  return <span className="tw-pill" style={palette}>{children}</span>;
-}
-
-function SummaryCard({ label, value, hint }: { label: string; value: string | number; hint?: string }) {
-  return (
-    <div className="tw-summary-card">
-      <div style={{ color: 'var(--dim)', fontSize: 12 }}>{label}</div>
-      <div style={{ fontSize: 22, fontWeight: 750, marginTop: 6, overflowWrap: 'anywhere' }}>{value}</div>
-      {hint ? <div style={{ color: 'var(--text-secondary)', fontSize: 12, marginTop: 4 }}>{hint}</div> : null}
-    </div>
-  );
-}
-
-function ModalShell({ title, subtitle, onClose, maxWidth = 760, children }: {
-  title: string; subtitle?: string; onClose: () => void; maxWidth?: number; children: ReactNode;
-}) {
-  const titleId = useId();
-  const dialogRef = useRef<HTMLDivElement>(null);
-  const onCloseRef = useRef(onClose);
-  useEffect(() => { onCloseRef.current = onClose; }, [onClose]);
-  useEffect(() => {
-    const previousOverflow = document.body.style.overflow;
-    document.body.style.overflow = 'hidden';
-    const handleKeyDown = (event: KeyboardEvent) => { if (event.key === 'Escape') onCloseRef.current(); };
-    document.addEventListener('keydown', handleKeyDown);
-    const timer = window.setTimeout(() => {
-      dialogRef.current?.querySelector<HTMLElement>('input:not([disabled]), select:not([disabled])')?.focus();
-    }, 0);
-    return () => {
-      document.body.style.overflow = previousOverflow;
-      document.removeEventListener('keydown', handleKeyDown);
-      window.clearTimeout(timer);
-    };
-  }, []);
-  return (
-    <div className="tw-modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}>
-      <div ref={dialogRef} role="dialog" aria-modal="true" aria-labelledby={titleId} tabIndex={-1} className="tw-modal-panel" style={{ maxWidth }}>
-        <div className="tw-modal-header">
-          <div>
-            <h2 id={titleId} style={{ margin: 0, fontSize: 17 }}>{title}</h2>
-            {subtitle ? <div style={{ color: 'var(--dim)', fontSize: 12, marginTop: 4 }}>{subtitle}</div> : null}
-          </div>
-          <button type="button" onClick={onClose} className="tw-close-button" aria-label="Tutup dialog">×</button>
-        </div>
-        {children}
-      </div>
-    </div>
-  );
-}
 
 function useObjectCodes(notify: Notify, enabled: boolean) {
   const [codes, setCodes] = useState<TaxObjectCodeOption[]>([]);
@@ -178,6 +89,8 @@ export function SlipsSection({ entities, counterparties, canManage, notify }: {
   const [deleting, setDeleting] = useState<TaxSlip | null>(null);
   const [exporting, setExporting] = useState(false);
   const [voiding, setVoiding] = useState<TaxSlip | null>(null);
+  const [recording, setRecording] = useState(false);
+  const [numbering, setNumbering] = useState<TaxSlip | null>(null);
   const loadSequence = useRef(0);
   const selectedEntity = entities.find((entity) => entity.id === entityId);
   const canEdit = canManage && Boolean(selectedEntity?.is_active);
@@ -263,6 +176,7 @@ export function SlipsSection({ entities, counterparties, canManage, notify }: {
               {(Object.keys(STATUS_LABELS) as SlipStatus[]).map((status) => <option key={status} value={status}>{STATUS_LABELS[status]}</option>)}
             </select>
             {canManage ? <button type="button" style={secondaryButtonStyle} disabled={!canEdit} onClick={() => setExporting(true)}>Export XML</button> : null}
+            {canManage ? <button type="button" style={secondaryButtonStyle} disabled={!canEdit} onClick={() => setRecording(true)}>Catat nomor Coretax</button> : null}
             {canManage ? <button type="button" style={primaryButtonStyle} disabled={!canEdit} onClick={() => setEditing('new')}>+ Tambah</button> : null}
           </div>
         </div>
@@ -330,7 +244,9 @@ export function SlipsSection({ entities, counterparties, canManage, notify }: {
                         ) : (
                           <>
                             <button type="button" className="tw-action-button" style={{ color: 'var(--accent)' }} onClick={() => setEditing(slip)}>Lihat</button>
+                            {canEdit && slip.status === 'exported' ? <button type="button" className="tw-action-button" style={{ color: 'var(--green)' }} onClick={() => setNumbering(slip)}>Catat nomor</button> : null}
                             {canEdit && slip.status === 'exported' ? <button type="button" className="tw-action-button" style={{ color: 'var(--yellow)' }} onClick={() => setVoiding(slip)}>Batalkan export</button> : null}
+                            {canEdit && slip.status === 'reported' ? <button type="button" className="tw-action-button" style={{ color: 'var(--accent)' }} onClick={() => setNumbering(slip)}>Ubah nomor</button> : null}
                           </>
                         )}
                       </td>
@@ -364,6 +280,25 @@ export function SlipsSection({ entities, counterparties, canManage, notify }: {
           onClose={() => setExporting(false)}
           onChanged={load}
           notify={notify}
+        />
+      ) : null}
+
+      {recording && selectedEntity ? (
+        <CoretaxRecordModal
+          entity={selectedEntity}
+          year={year}
+          month={month}
+          onClose={() => setRecording(false)}
+          onChanged={load}
+          notify={notify}
+        />
+      ) : null}
+
+      {numbering ? (
+        <CoretaxNumberModal
+          slip={numbering}
+          onClose={() => setNumbering(null)}
+          onDone={async (text) => { notify({ type: 'success', text }); setNumbering(null); await load(); }}
         />
       ) : null}
 
@@ -421,7 +356,7 @@ function ExportModal({ entity, year, month, onClose, onChanged, notify }: {
     setError(null);
     try {
       const result = await createTaxExportBatch({ entityId: entity.id, year, month, slipIds: batchIds });
-      downloadXml(result.fileName, result.xml);
+      downloadTextFile(result.fileName, result.xml);
       notify({ type: 'success', text: `Batch ${result.fileName} dibuat: ${result.slipCount} bukti potong berstatus di-export.` });
       await Promise.all([refresh(), onChanged()]);
     } catch (err) {
@@ -435,7 +370,7 @@ function ExportModal({ entity, year, month, onClose, onChanged, notify }: {
     setBusy(batchId);
     try {
       const result = await getTaxExportBatchXml(batchId);
-      downloadXml(result.fileName, result.xml);
+      downloadTextFile(result.fileName, result.xml);
     } catch (err) {
       notify({ type: 'error', text: errorText(err) });
     } finally {
