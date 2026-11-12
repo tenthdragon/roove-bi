@@ -452,6 +452,12 @@ Dua workbook per PT (RTI dan PT lain) diimpor terpisah; `entity` dipilih di UI.
 - Void mengembalikan bupot ke `draft`, memindahkan penunjuk ke `voided_from_batch_id` dan menyimpan
   alasan; file batch tidak berubah (immutable), pengguna diingatkan untuk membatalkan di Coretax.
 - Unduhan dilakukan di klien dari string XML yang dikembalikan action (Blob), tanpa route API baru.
+- Kolom `tax_invoice_number` menyimpan nomor faktur pajak terpisah dari `invoice_number` (identitas
+  impor). Untuk `document_type = TaxInvoice`, nomor faktur itulah `<DocumentNumber>` dan wajib 16 digit;
+  impor REKAPAN mengisinya dari kolom FAKTUR PAJAK, baris lama di-backfill dari `notes` oleh migration 252.
+- Hasil review: fungsi batch memverifikasi `updated_at` setiap bupot di bawah lock; UPDATE/DELETE bupot
+  hanya menyentuh baris yang masih draft/ready tanpa batch dan memeriksa jumlah baris; satu batch
+  maksimal 2.000 bupot (sisanya menunggu batch berikutnya); hitungan bupot per batch dipaginasi.
 
 ## 11. Pertanyaan terbuka (perlu jawaban sebelum fase terkait)
 

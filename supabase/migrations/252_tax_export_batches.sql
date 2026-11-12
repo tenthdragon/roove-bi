@@ -50,10 +50,21 @@ CREATE POLICY tax_export_batches_read ON public.tax_export_batches
   USING (public.workspace_has_tax_access(workspace_id));
 
 -- Slips remember the batch they belong to, and the batch they were voided from.
+-- A TaxInvoice document references the faktur pajak number, kept apart from the
+-- commercial invoice number that identifies the slip.
 ALTER TABLE public.tax_withholding_slips
   ADD COLUMN IF NOT EXISTS export_batch_id BIGINT REFERENCES public.tax_export_batches(id) ON DELETE RESTRICT,
   ADD COLUMN IF NOT EXISTS voided_from_batch_id BIGINT REFERENCES public.tax_export_batches(id) ON DELETE RESTRICT,
-  ADD COLUMN IF NOT EXISTS void_reason TEXT;
+  ADD COLUMN IF NOT EXISTS void_reason TEXT,
+  ADD COLUMN IF NOT EXISTS tax_invoice_number TEXT;
+
+-- Slips imported before this column existed carried the faktur number in notes.
+UPDATE public.tax_withholding_slips
+  SET tax_invoice_number = btrim(substring(notes FROM 'Faktur pajak ([^;]+)'))
+  WHERE tax_invoice_number IS NULL
+    AND document_type = 'TaxInvoice'
+    AND source = 'import_rekapan'
+    AND notes ~ 'Faktur pajak [^;]+';
 
 CREATE INDEX IF NOT EXISTS idx_tax_withholding_slips_export_batch
   ON public.tax_withholding_slips (export_batch_id);

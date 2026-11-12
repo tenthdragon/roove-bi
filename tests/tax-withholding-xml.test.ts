@@ -30,6 +30,7 @@ const slip = (overrides: Partial<ExportSlip> = {}): ExportSlip => ({
   withholding_amount: '0',
   document_type: 'CommercialInvoice',
   invoice_number: 'IVR/20261005/XXVI/X/3214199800',
+  tax_invoice_number: null,
   document_date: '2026-10-05',
   withholding_date: '2026-10-05',
   ...overrides,
@@ -124,8 +125,17 @@ test('validateSlipForXml accepts a ready NPWP/NIK slip and names every blocking 
   assert.ok(problems.some((message) => /Nomor dokumen kosong/.test(message)));
   assert.ok(problems.some((message) => /lebih awal dari masa pajak/.test(message)));
 
-  assert.deepEqual(validateSlipForXml(slip({ document_type: 'TaxInvoice', invoice_number: 'INV-123' }), period, codes), ['Dokumen TaxInvoice memerlukan nomor faktur pajak 16 digit.']);
-  assert.deepEqual(validateSlipForXml(slip({ document_type: 'TaxInvoice', invoice_number: '010.000-26.12345678' }), period, codes), []);
+  assert.deepEqual(validateSlipForXml(slip({ document_type: 'TaxInvoice', invoice_number: 'INV-123' }), period, codes), ['Dokumen TaxInvoice memerlukan nomor faktur pajak.']);
+  assert.deepEqual(validateSlipForXml(slip({ document_type: 'TaxInvoice', invoice_number: 'INV-123', tax_invoice_number: '0100002612' }), period, codes), ['Dokumen TaxInvoice memerlukan nomor faktur pajak 16 digit.']);
+  assert.deepEqual(validateSlipForXml(slip({ document_type: 'TaxInvoice', invoice_number: 'INV-123', tax_invoice_number: '010.000-26.12345678' }), period, codes), []);
+  // A 16-digit commercial invoice number never stands in for the faktur pajak.
+  assert.equal(validateSlipForXml(slip({ document_type: 'TaxInvoice', invoice_number: '1234567890123456' }), period, codes).length, 1);
+});
+
+test('buildBpuBulkXml writes the faktur pajak number as DocumentNumber for TaxInvoice slips', () => {
+  const xml = buildBpuBulkXml(entity, [slip({ document_type: 'TaxInvoice', invoice_number: 'INV-2026-001', tax_invoice_number: '010.000-26.12345678' })]);
+  assert.match(xml, /<Document>TaxInvoice<\/Document>\n\s+<DocumentNumber>010.000-26.12345678<\/DocumentNumber>/);
+  assert.doesNotMatch(xml, /INV-2026-001/);
 });
 
 test('validateEntityForXml requires a 16-digit NPWP, 22-digit TKU and an active entity', () => {

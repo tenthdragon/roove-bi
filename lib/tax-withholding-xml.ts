@@ -37,6 +37,8 @@ export type ExportSlip = {
   withholding_amount: string;
   document_type: DocumentType;
   invoice_number: string;
+  /** Faktur pajak number; the reference document when document_type is TaxInvoice. */
+  tax_invoice_number: string | null;
   document_date: string;
   withholding_date: string;
 };
@@ -44,6 +46,11 @@ export type ExportSlip = {
 export type ExportPeriod = { year: number; month: number };
 
 const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
+
+/** The DocumentNumber Coretax receives: the faktur pajak for TaxInvoice, else the commercial invoice. */
+export function xmlDocumentNumber(slip: Pick<ExportSlip, 'document_type' | 'invoice_number' | 'tax_invoice_number'>): string {
+  return (slip.document_type === 'TaxInvoice' ? slip.tax_invoice_number ?? '' : slip.invoice_number).trim();
+}
 
 export function validateEntityForXml(entity: ExportEntity): string[] {
   const errors: string[] = [];
@@ -86,10 +93,12 @@ export function validateSlipForXml(slip: ExportSlip, period: ExportPeriod, activ
   } catch {
     errors.push('Tarif bukan angka.');
   }
-  const documentNumber = slip.invoice_number.trim();
-  if (!documentNumber) errors.push('Nomor dokumen kosong.');
-  else if (slip.document_type === 'TaxInvoice' && digitsOnly(documentNumber).length !== 16) {
-    errors.push('Dokumen TaxInvoice memerlukan nomor faktur pajak 16 digit.');
+  const documentNumber = xmlDocumentNumber(slip);
+  if (slip.document_type === 'TaxInvoice') {
+    if (!documentNumber) errors.push('Dokumen TaxInvoice memerlukan nomor faktur pajak.');
+    else if (digitsOnly(documentNumber).length !== 16) errors.push('Dokumen TaxInvoice memerlukan nomor faktur pajak 16 digit.');
+  } else if (!documentNumber) {
+    errors.push('Nomor dokumen kosong.');
   }
   if (!ISO_DATE.test(slip.document_date)) errors.push('Tanggal dokumen tidak valid.');
   if (!ISO_DATE.test(slip.withholding_date)) errors.push('Tanggal pemotongan tidak valid.');
@@ -150,7 +159,7 @@ export function buildBpuBulkXml(entity: Pick<ExportEntity, 'npwp' | 'tku_id'>, s
       `      <TaxBase>${formatXmlDecimal(slip.gross_amount)}</TaxBase>`,
       `      <Rate>${formatXmlDecimal(slip.rate_percent, 3)}</Rate>`,
       `      <Document>${escapeXml(slip.document_type)}</Document>`,
-      `      <DocumentNumber>${escapeXml(slip.invoice_number.trim())}</DocumentNumber>`,
+      `      <DocumentNumber>${escapeXml(xmlDocumentNumber(slip))}</DocumentNumber>`,
       `      <DocumentDate>${escapeXml(slip.document_date)}</DocumentDate>`,
       `      <IDPlaceOfBusinessActivity>${escapeXml(entity.tku_id)}</IDPlaceOfBusinessActivity>`,
       '      <GovTreasurerOpt>N/A</GovTreasurerOpt>',

@@ -601,6 +601,7 @@ type SlipFormState = {
   rateOverridePercent: string;
   rateOverrideReason: string;
   documentType: DocumentType;
+  taxInvoiceNumber: string;
   documentDate: string;
   withholdingDate: string;
   accountCode: string;
@@ -619,12 +620,12 @@ function SlipForm({ slip, entityId, entities, counterparties, objectCodes, readO
     objectCode: slip.object_code, objectQuery: slip.object_code, grossInputMode: slip.gross_input_mode, grossInputAmount: slip.gross_input_amount,
     additionalCost: slip.additional_cost === '0' ? '' : slip.additional_cost,
     rateOverridePercent: slip.rate_source === 'override' ? slip.rate_percent : '', rateOverrideReason: slip.rate_override_reason ?? '',
-    documentType: slip.document_type, documentDate: slip.document_date, withholdingDate: slip.withholding_date,
+    documentType: slip.document_type, taxInvoiceNumber: slip.tax_invoice_number ?? '', documentDate: slip.document_date, withholdingDate: slip.withholding_date,
     accountCode: slip.account_code ?? '', accountName: slip.account_name ?? '', trelloUrl: slip.trello_url ?? '', notes: slip.notes ?? '',
   } : {
     entityId, counterpartyId: null, counterpartyQuery: '', invoiceDate: todayIso(), invoiceNumber: '', description: '',
     objectCode: '', objectQuery: '', grossInputMode: 'total_incl_vat', grossInputAmount: '', additionalCost: '',
-    rateOverridePercent: '', rateOverrideReason: '', documentType: 'CommercialInvoice', documentDate: '', withholdingDate: '',
+    rateOverridePercent: '', rateOverrideReason: '', documentType: 'CommercialInvoice', taxInvoiceNumber: '', documentDate: '', withholdingDate: '',
     accountCode: '', accountName: '', trelloUrl: '', notes: '',
   });
   const [preview, setPreview] = useState<Awaited<ReturnType<typeof previewTaxSlip>> | null>(null);
@@ -679,7 +680,8 @@ function SlipForm({ slip, entityId, entities, counterparties, objectCodes, readO
         invoiceNumber: form.invoiceNumber, description: form.description, objectCode: form.objectCode,
         grossInputMode: form.grossInputMode, grossInputAmount: form.grossInputAmount, additionalCost: form.additionalCost || null,
         rateOverridePercent: form.rateOverridePercent || null, rateOverrideReason: form.rateOverrideReason || null,
-        documentType: form.documentType, documentDate: form.documentDate || null, withholdingDate: form.withholdingDate || null,
+        documentType: form.documentType, taxInvoiceNumber: form.documentType === 'TaxInvoice' ? form.taxInvoiceNumber : null,
+        documentDate: form.documentDate || null, withholdingDate: form.withholdingDate || null,
         periodMonth: slip?.period_month ?? null, periodYear: slip?.period_year ?? null,
         accountCode: form.accountCode, accountName: form.accountName, trelloUrl: form.trelloUrl, notes: form.notes,
       });
@@ -773,6 +775,11 @@ function SlipForm({ slip, entityId, entities, counterparties, objectCodes, readO
               {DOCUMENT_TYPES.map((type) => <option key={type} value={type}>{DOCUMENT_LABELS[type]}</option>)}
             </select>
           </label>
+          {form.documentType === 'TaxInvoice' ? (
+            <label style={labelStyle}>Nomor faktur pajak (16 digit, menjadi nomor dokumen di XML)
+              <input style={inputStyle} value={form.taxInvoiceNumber} onChange={(event) => update('taxInvoiceNumber', event.target.value)} placeholder="010.000-26.12345678" inputMode="numeric" disabled={disabled} />
+            </label>
+          ) : null}
           <label style={labelStyle}>Tarif manual (%) — kosongkan untuk otomatis
             <input style={inputStyle} value={form.rateOverridePercent} onChange={(event) => update('rateOverridePercent', event.target.value)} placeholder="otomatis" inputMode="decimal" disabled={disabled} />
           </label>

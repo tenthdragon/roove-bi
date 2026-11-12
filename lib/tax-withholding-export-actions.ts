@@ -66,7 +66,7 @@ async function loadEntity(workspaceId: string, entityId: number): Promise<Entity
   return result.data as EntityRow;
 }
 
-const SLIP_COLUMNS = 'id, status, period_month, period_year, counterparty_name, counterparty_identity_type, counterparty_identity_number, object_code, pph_article, facility_code, gross_amount, rate_percent, withholding_amount, document_type, invoice_number, invoice_date, description, document_date, withholding_date, export_batch_id, updated_at';
+const SLIP_COLUMNS = 'id, status, period_month, period_year, counterparty_name, counterparty_identity_type, counterparty_identity_number, object_code, pph_article, facility_code, gross_amount, rate_percent, withholding_amount, document_type, invoice_number, tax_invoice_number, invoice_date, description, document_date, withholding_date, export_batch_id, updated_at';
 
 type SlipRow = ExportSlip & {
   pph_article: TaxArticle;
@@ -157,15 +157,16 @@ async function loadBatches(workspaceId: string, input: TaxExportPeriodInput): Pr
       .eq('workspace_id', workspaceId).eq('entity_id', input.entityId)
       .eq('period_year', input.year).eq('period_month', input.month)
       .order('sequence'),
-    svc.from('tax_withholding_slips').select('export_batch_id')
+    // Paginated: a masa can hold more attached slips than one PostgREST page.
+    fetchAllRows<{ export_batch_id: number }>((from, to) => svc.from('tax_withholding_slips').select('export_batch_id')
       .eq('workspace_id', workspaceId).eq('entity_id', input.entityId)
       .eq('period_year', input.year).eq('period_month', input.month)
-      .not('export_batch_id', 'is', null),
+      .not('export_batch_id', 'is', null)
+      .order('id').range(from, to)),
   ]);
   if (batches.error) throw batches.error;
-  if (attached.error) throw attached.error;
   const counts = new Map<number, number>();
-  for (const row of attached.data ?? []) {
+  for (const row of attached) {
     const id = Number((row as { export_batch_id: number }).export_batch_id);
     counts.set(id, (counts.get(id) ?? 0) + 1);
   }
