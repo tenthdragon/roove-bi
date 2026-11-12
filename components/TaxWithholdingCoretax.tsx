@@ -74,8 +74,17 @@ export function CoretaxRecordModal({ entity, year, month, onClose, onChanged, no
   const [onlyPending, setOnlyPending] = useState(true);
   const [typed, setTyped] = useState<Record<number, string>>({});
   const fileInput = useRef<HTMLInputElement>(null);
+  // The source last matched and the batch filter live in refs so a refresh
+  // never depends on them through the callback identity: changing the batch
+  // issues exactly one request, with the current source, and only the latest
+  // request may replace the preview.
+  const sourceRef = useRef<{ text: string; file: File | null }>({ text: '', file: null });
+  const batchRef = useRef(batchId);
+  const requestSequence = useRef(0);
 
-  const refresh = useCallback(async (source: { text?: string; file?: File | null; batchId?: string } = {}) => {
+  const refresh = useCallback(async (source?: { text?: string; file?: File | null }) => {
+    if (source) sourceRef.current = { text: source.text ?? '', file: source.file ?? null };
+    const sequence = ++requestSequence.current;
     setLoading(true);
     setError(null);
     try {
@@ -83,19 +92,26 @@ export function CoretaxRecordModal({ entity, year, month, onClose, onChanged, no
       formData.set('entityId', String(entity.id));
       formData.set('year', String(year));
       formData.set('month', String(month));
-      formData.set('batchId', source.batchId ?? batchId);
-      if (source.file) formData.set('file', source.file);
-      else if (source.text?.trim()) formData.set('text', source.text);
-      setPreview(await previewCoretaxRecording(formData));
+      formData.set('batchId', batchRef.current);
+      if (sourceRef.current.file) formData.set('file', sourceRef.current.file);
+      else if (sourceRef.current.text.trim()) formData.set('text', sourceRef.current.text);
+      const result = await previewCoretaxRecording(formData);
+      if (sequence !== requestSequence.current) return;
+      setPreview(result);
       setTyped({});
     } catch (err) {
-      setError(errorText(err));
+      if (sequence === requestSequence.current) setError(errorText(err));
     } finally {
-      setLoading(false);
+      if (sequence === requestSequence.current) setLoading(false);
     }
-  }, [entity.id, year, month, batchId]);
+  }, [entity.id, year, month]);
 
   useEffect(() => { void refresh(); }, [refresh]);
+  const changeBatch = (value: string) => {
+    setBatchId(value);
+    batchRef.current = value;
+    void refresh();
+  };
 
   const decisions = useMemo(() => {
     const map = new Map<number, RowDecision>();
@@ -137,7 +153,7 @@ export function CoretaxRecordModal({ entity, year, month, onClose, onChanged, no
       setText('');
       setFile(null);
       if (fileInput.current) fileInput.current.value = '';
-      await Promise.all([refresh(), onChanged()]);
+      await Promise.all([refresh({ text: '', file: null }), onChanged()]);
     } catch (err) {
       setError(errorText(err));
     } finally {
@@ -168,8 +184,8 @@ export function CoretaxRecordModal({ entity, year, month, onClose, onChanged, no
                 Tempel dari Coretax / spreadsheet
                 <textarea value={text} onChange={(event) => setText(event.target.value)} rows={4} style={{ ...inputStyle, resize: 'vertical', fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace', fontSize: 12 }} placeholder={'INV/2026/10/001\t26000UK7L\nINV/2026/10/002\t26000UK7M'} />
                 <div style={{ display: 'flex', gap: 8 }}>
-                  <button type="button" style={secondaryButtonStyle} disabled={loading || !text.trim()} onClick={() => void refresh({ text })}>Cocokkan tempelan</button>
-                  {text ? <button type="button" className="tw-action-button" style={{ color: 'var(--dim)' }} onClick={() => { setText(''); void refresh({ text: '' }); }}>Kosongkan</button> : null}
+                  <button type="button" style={secondaryButtonStyle} disabled={loading || !text.trim()} onClick={() => { setFile(null); if (fileInput.current) fileInput.current.value = ''; void refresh({ text }); }}>Cocokkan tempelan</button>
+                  {text ? <button type="button" className="tw-action-button" style={{ color: 'var(--dim)' }} onClick={() => { setText(''); void refresh({ text: '', file }); }}>Kosongkan</button> : null}
                 </div>
               </label>
               <div style={{ display: 'grid', gap: 10, alignContent: 'start' }}>
@@ -178,13 +194,13 @@ export function CoretaxRecordModal({ entity, year, month, onClose, onChanged, no
                   <input ref={fileInput} type="file" accept=".xlsx,.xlsm,.xls,.csv,.txt" style={inputStyle} onChange={(event) => {
                     const selected = event.target.files?.[0] ?? null;
                     setFile(selected);
-                    if (selected) void refresh({ file: selected });
+                    if (selected) void refresh({ file: selected, text });
                   }} />
                   {file ? <div style={{ fontSize: 12, color: 'var(--dim)', fontWeight: 400 }}>{file.name}</div> : null}
                 </label>
                 <label style={labelStyle}>
                   Batas ke batch
-                  <select className="tw-filter" style={{ ...inputStyle, padding: '9px 12px' }} value={batchId} onChange={(event) => { setBatchId(event.target.value); void refresh({ batchId: event.target.value, text, file }); }}>
+                  <select className="tw-filter" style={{ ...inputStyle, padding: '9px 12px' }} value={batchId} onChange={(event) => changeBatch(event.target.value)}>
                     <option value="">Semua batch masa ini</option>
                     {preview.batches.map((batch) => <option key={batch.id} value={batch.id}>{batch.file_name} · {batch.exported_count} menunggu, {batch.reported_count} dilaporkan</option>)}
                   </select>
@@ -278,7 +294,7 @@ export function CoretaxRecordModal({ entity, year, month, onClose, onChanged, no
       </div>
       <div className="tw-modal-actions">
         <button type="button" style={secondaryButtonStyle} onClick={onClose} disabled={busy}>Tutup</button>
-        <button type="button" style={secondaryButtonStyle} disabled={loading || busy} onClick={() => void refresh({ text, file })}>Muat ulang</button>
+        <button type="button" style={secondaryButtonStyle} disabled={loading || busy} onClick={() => void refresh()}>Muat ulang</button>
         <button type="button" style={primaryButtonStyle} disabled={!canSubmit} onClick={() => void submit()}>
           {busy ? 'Mencatat…' : `Catat nomor (${pendingAssignments.length})`}
         </button>
@@ -315,7 +331,7 @@ export function CoretaxNumberModal({ slip, onClose, onDone }: { slip: TaxSlip; o
     setBusy('clear');
     setError(null);
     try {
-      await clearCoretaxNumber({ slipId: slip.id });
+      await clearCoretaxNumber({ slipId: slip.id, version: slip.updated_at });
       await onDone('Nomor Coretax dihapus; bukti potong kembali berstatus di-export.');
     } catch (err) {
       setError(errorText(err));

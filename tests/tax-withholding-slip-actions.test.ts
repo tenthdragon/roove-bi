@@ -322,16 +322,22 @@ test('Coretax numbers pasted for a batch are matched by document number, recorde
   await assert.rejects(coretaxActions.recordCoretaxNumbers({ entityId: 1, year: 2026, month: 1, assignments: [{ slipId: 2, coretaxNumber: 'SUDAH DIUPLOAD', version: 'x' }] }), /tanpa spasi/);
   await assert.rejects(coretaxActions.recordCoretaxNumbers({ entityId: 1, year: 2026, month: 1, assignments: [{ slipId: 2, coretaxNumber: '26000AAA2', version: 'x' }, { slipId: 3, coretaxNumber: '26000AAA2', version: 'y' }] }), /sama diberikan/);
 
-  await coretaxActions.clearCoretaxNumber({ slipId: 4 });
+  // Clearing needs the version the dialog showed: a number corrected meanwhile survives.
+  const shown = after.candidates.find((row) => row.id === 4)!;
+  await coretaxActions.recordCoretaxNumbers({ entityId: 1, year: 2026, month: 1, allowReplace: true, assignments: [{ slipId: 4, coretaxNumber: '26000AAA5', version: shown.updated_at }] });
+  await assert.rejects(coretaxActions.clearCoretaxNumber({ slipId: 4, version: shown.updated_at }), /berubah sejak dibuka/);
+  assert.equal(db.tax_withholding_slips.find((row) => row.id === 4).coretax_slip_number, '26000AAA5');
+  const latest = (await coretaxActions.previewCoretaxRecording(recordingForm({}))).candidates.find((row) => row.id === 4)!;
+  await coretaxActions.clearCoretaxNumber({ slipId: 4, version: latest.updated_at });
   const cleared = db.tax_withholding_slips.find((row) => row.id === 4);
   assert.equal(cleared.status, 'exported');
   assert.equal(cleared.coretax_slip_number, null);
-  await assert.rejects(coretaxActions.clearCoretaxNumber({ slipId: 4 }), /berstatus dilaporkan/);
+  await assert.rejects(coretaxActions.clearCoretaxNumber({ slipId: 4, version: cleared.updated_at }), /berstatus dilaporkan/);
 });
 
 test('clearCoretaxNumber refuses an imported reported slip that has no batch to return to', async () => {
   db.tax_withholding_slips.push({ id: 1, ...readySlip({ status: 'reported', coretax_slip_number: '26000AAA1', source: 'import_rekapan' }), updated_at: stamp() });
-  await assert.rejects(coretaxActions.clearCoretaxNumber({ slipId: 1 }), /tanpa batch export/);
+  await assert.rejects(coretaxActions.clearCoretaxNumber({ slipId: 1, version: db.tax_withholding_slips[0].updated_at }), /tanpa batch export/);
   assert.equal(db.tax_withholding_slips[0].status, 'reported');
 });
 
@@ -358,4 +364,18 @@ test('getTaxYearSummary groups the year per masa and pasal + KAP + KJS with pend
     ['pph23', 3, '60000', '40000', 1, 1],
     ['pph4_2', 1, '200000', '200000', 0, 0],
   ]);
+});
+
+test('a multi-column CSV download with quoted fields is parsed as a sheet and matched', async () => {
+  db.tax_withholding_slips.push({ id: 1, ...readySlip({ invoice_number: 'INV, 1', status: 'exported', export_batch_id: 1 }), updated_at: stamp() });
+  db.tax_withholding_slips.push({ id: 2, ...readySlip({ invoice_number: 'INV-2', status: 'exported', export_batch_id: 1 }), updated_at: stamp() });
+  const csv = 'Nomor Dokumen,NPWP,DPP,Nomor Bukti Potong\n"INV, 1",0012345678901000,1000000,26000CSV01\nINV-2,0012345678901000,1000000,26000CSV02\n';
+  const file = new File([csv], 'daftar-bpu.csv', { type: 'text/csv' });
+  const preview = await coretaxActions.previewCoretaxRecording(recordingForm({ file }));
+  assert.deepEqual(preview.issues, []);
+  assert.equal(preview.parsedRows, 2);
+  assert.deepEqual(preview.candidates.map((row) => [row.id, row.proposedNumber, row.action]), [[1, '26000CSV01', 'record'], [2, '26000CSV02', 'record']]);
+  const semicolon = new File(['Nomor Dokumen;Nomor Bukti Potong\nINV-2;26000CSV09\n'], 'daftar.txt', { type: 'text/plain' });
+  const second = await coretaxActions.previewCoretaxRecording(recordingForm({ file: semicolon }));
+  assert.equal(second.candidates.find((row) => row.id === 2)?.proposedNumber, '26000CSV09');
 });

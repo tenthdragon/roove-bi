@@ -192,8 +192,11 @@ async function parseUpload(formData: FormData): Promise<{ rows: CoretaxInputRow[
   if (file instanceof File && file.size > 0) {
     if (file.size > MAX_UPLOAD_BYTES) throw new Error('Ukuran file melebihi 15 MB.');
     if (!/\.(xlsx|xlsm|xls|csv|txt)$/i.test(file.name)) throw new Error('Format file harus .xlsx, .xlsm, .csv, atau .txt.');
-    if (/\.(csv|txt)$/i.test(file.name)) return parseCoretaxPaste(await file.text());
-    const workbook = XLSX.read(await file.arrayBuffer(), { type: 'array' });
+    // Delimited text goes through SheetJS too, so quoted fields, comma/semicolon/tab
+    // delimiters and extra columns are handled like a workbook sheet.
+    const workbook = /\.(csv|txt)$/i.test(file.name)
+      ? XLSX.read(await file.text(), { type: 'string', raw: true })
+      : XLSX.read(await file.arrayBuffer(), { type: 'array' });
     const issues: string[] = [];
     for (const sheetName of workbook.SheetNames) {
       const sheet = workbook.Sheets[sheetName];
@@ -364,12 +367,14 @@ function translateRecordError(message: string): string {
   return message;
 }
 
-/** Removes a recorded number: the slip returns to `exported` so it can be recorded again or voided. */
-export async function clearCoretaxNumber(input: { slipId: number }): Promise<void> {
+/** Removes a recorded number: the slip returns to `exported` so it can be recorded again or voided. `version` is the updated_at the caller saw. */
+export async function clearCoretaxNumber(input: { slipId: number; version: string }): Promise<void> {
   const { workspaceId } = await requireTaxManageAccess();
   if (!Number.isInteger(input.slipId) || input.slipId <= 0) throw new Error('Bukti potong tidak valid.');
+  const version = String(input.version ?? '');
+  if (!version) throw new Error('Versi baris tidak dikirim; muat ulang.');
   const svc = createServiceSupabase();
-  const current = await svc.from('tax_withholding_slips').select('id, status, export_batch_id')
+  const current = await svc.from('tax_withholding_slips').select('id, status, export_batch_id, updated_at')
     .eq('workspace_id', workspaceId).eq('id', input.slipId).maybeSingle();
   if (current.error) throw current.error;
   if (!current.data) throw new Error('Bukti potong tidak ditemukan.');
@@ -380,9 +385,11 @@ export async function clearCoretaxNumber(input: { slipId: number }): Promise<voi
   const update = await svc.from('tax_withholding_slips')
     .update({ coretax_slip_number: null, status: 'exported', coretax_recorded_at: null, coretax_recorded_by: null })
     .eq('workspace_id', workspaceId).eq('id', input.slipId).eq('status', 'reported').not('export_batch_id', 'is', null)
+    // The version the dialog showed: a number corrected meanwhile is not silently deleted.
+    .eq('updated_at', version)
     .select('id');
   if (update.error) throw update.error;
-  if (!update.data || update.data.length !== 1) throw new Error('Bukti potong berubah saat nomor dihapus; muat ulang.');
+  if (!update.data || update.data.length !== 1) throw new Error('Bukti potong berubah sejak dibuka (nomor diubah orang lain atau status berganti); muat ulang.');
 }
 
 // ---------------------------------------------------------------------------
