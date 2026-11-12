@@ -36,6 +36,14 @@ BEGIN
   EXCEPTION WHEN check_violation THEN NULL;
   END;
 
+  -- The entity must belong to the record's workspace (composite foreign key).
+  BEGIN
+    INSERT INTO public.tax_payment_records (workspace_id, entity_id, period_month, period_year, pph_article, kap, kjs, billing_id, billing_amount)
+    VALUES (v_alpha, (SELECT id FROM public.tax_withholding_entities WHERE legal_name = 'PT BETA'), 10, 2026, 'pph23', '411124', '104', '012345678901234', 137);
+    RAISE EXCEPTION 'entity of another workspace must be rejected';
+  EXCEPTION WHEN foreign_key_violation THEN NULL;
+  END;
+
   INSERT INTO public.tax_payment_records (workspace_id, entity_id, period_month, period_year, pph_article, kap, kjs, billing_id, billing_amount, created_by)
   VALUES (v_alpha, v_entity, 10, 2026, 'pph23', '411124', '104', '012345678901234', 137, v_user) RETURNING id INTO v_a;
   BEGIN

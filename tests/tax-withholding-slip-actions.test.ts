@@ -452,6 +452,9 @@ test('payment records validate the billing id and group, record NTPN to pay the 
   await assert.rejects(paymentActions.saveTaxPaymentRecord({ ...base, billingId: '012345678901234', billingAmount: '400.5' }), /rupiah bulat/);
   await assert.rejects(paymentActions.saveTaxPaymentRecord({ ...base, billingId: '012345678901234', billingAmount: '40000', billingValidUntil: '2026-01-01' }), /sebelum tanggal pembuatannya/);
 
+  await assert.rejects(paymentActions.saveTaxPaymentRecord({ ...base, entityId: 99, billingId: '012345678901234', billingAmount: '40000' }), /Pemotong tidak ditemukan di workspace ini/);
+  await assert.rejects(paymentActions.listTaxPaymentRecords({ entityId: 99, year: 2026 }), /Pemotong tidak ditemukan di workspace ini/);
+
   const record = await paymentActions.saveTaxPaymentRecord({ ...base, billingId: '0123 4567 8901 234', billingAmount: '40000', billingValidUntil: '2026-03-05' });
   assert.equal(record.billing_id, '012345678901234');
   assert.equal(record.groupKey, '1|pph23|411124|104');
@@ -476,4 +479,18 @@ test('payment records validate the billing id and group, record NTPN to pay the 
   const afterClear = (await paymentActions.listTaxPaymentRecords({ entityId: 1, year: 2026 }))[0];
   await paymentActions.deleteTaxPaymentRecord({ id: record.id, version: afterClear.updated_at });
   assert.equal((await paymentActions.listTaxPaymentRecords({ entityId: 1, year: 2026 })).length, 0);
+});
+
+test('listTaxPaymentRecords pages past the PostgREST row limit so yearly totals and late billings are not cut off', async () => {
+  const records = db.tax_payment_records ??= [];
+  for (let index = 0; index < DEFAULT_PAGE + 1; index += 1) {
+    records.push({
+      id: index + 1, workspace_id: A, entity_id: 1, period_month: 1 + (index % 12), period_year: 2026, pph_article: 'pph23', kap: '411124', kjs: '104',
+      billing_id: String(100000000000000 + index), billing_amount: '1000', billing_created_at: '2026-02-03', billing_valid_until: null,
+      ntpn: `NTPN${String(index).padStart(12, '0')}`, paid_at: '2026-02-05', paid_amount: '1000', notes: null, created_at: stamp(), updated_at: stamp(),
+    });
+  }
+  const listed = await paymentActions.listTaxPaymentRecords({ entityId: 1, year: 2026 });
+  assert.equal(listed.length, DEFAULT_PAGE + 1);
+  assert.equal(listed.reduce((sum, record) => sum + Number(record.paid_amount), 0), (DEFAULT_PAGE + 1) * 1000);
 });

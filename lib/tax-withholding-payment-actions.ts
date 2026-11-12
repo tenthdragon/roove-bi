@@ -15,6 +15,7 @@ import {
   paymentGroupKey,
 } from './tax-withholding-payment';
 
+const PAGE_SIZE = 1000;
 const TAB_ID = 'tax-withholding';
 const TAB_LABEL = 'Bukti Potong (PPh)';
 const MANAGE_ROLES = ['owner', 'admin', 'direktur_finance', 'staf_finance'];
@@ -27,6 +28,26 @@ async function requireTaxManageAccess() {
   const ctx = await requireTaxAccess();
   if (!ctx.canManage) throw new Error('Hanya role finance yang dapat mencatat setoran.');
   return ctx;
+}
+
+type PageResult<T> = { data: T[] | null; error: { message: string } | null };
+async function fetchAllRows<T>(page: (from: number, to: number) => PromiseLike<PageResult<T>>): Promise<T[]> {
+  const rows: T[] = [];
+  for (let from = 0; ; from += PAGE_SIZE) {
+    const result = await page(from, from + PAGE_SIZE - 1);
+    if (result.error) throw result.error;
+    const chunk = result.data ?? [];
+    rows.push(...chunk);
+    if (chunk.length < PAGE_SIZE) return rows;
+  }
+}
+
+/** The entity must exist in the caller's workspace; the service role would otherwise accept any id. */
+async function requireEntity(workspaceId: string, entityId: number): Promise<void> {
+  const svc = createServiceSupabase();
+  const result = await svc.from('tax_withholding_entities').select('id').eq('workspace_id', workspaceId).eq('id', entityId).maybeSingle();
+  if (result.error) throw result.error;
+  if (!result.data) throw new Error('Pemotong tidak ditemukan di workspace ini.');
 }
 
 export type TaxPaymentRecord = {
@@ -77,16 +98,16 @@ function checkEntityYear(entityId: number, year: number) {
   if (!Number.isInteger(year) || year < 2000 || year > 2100) throw new Error('Tahun pajak tidak valid.');
 }
 
-/** Payment records of one entity and year, oldest first. */
+/** All payment records of one entity and year, oldest first (paged past the PostgREST row limit). */
 export async function listTaxPaymentRecords(input: { entityId: number; year: number }): Promise<TaxPaymentRecord[]> {
   const { workspaceId } = await requireTaxAccess();
   checkEntityYear(input.entityId, input.year);
+  await requireEntity(workspaceId, input.entityId);
   const svc = createServiceSupabase();
-  const result = await svc.from('tax_payment_records').select(RECORD_COLUMNS)
+  const rows = await fetchAllRows<Record<string, unknown>>((from, to) => svc.from('tax_payment_records').select(RECORD_COLUMNS)
     .eq('workspace_id', workspaceId).eq('entity_id', input.entityId).eq('period_year', input.year)
-    .order('period_month').order('id');
-  if (result.error) throw result.error;
-  return (result.data ?? []).map((row) => normalizeRecord(row as Record<string, unknown>));
+    .order('period_month').order('id').range(from, to));
+  return rows.map(normalizeRecord);
 }
 
 export type TaxPaymentRecordInput = {
@@ -131,6 +152,7 @@ export async function saveTaxPaymentRecord(input: TaxPaymentRecordInput): Promis
   if (validUntil && validUntil < createdAt) throw new Error('Masa berlaku ID Billing tidak boleh sebelum tanggal pembuatannya.');
   const notes = String(input.notes ?? '').trim() || null;
 
+  await requireEntity(workspaceId, input.entityId);
   const svc = createServiceSupabase();
   const codes = await svc.from('tax_object_codes').select('code').eq('pph_article', input.article).eq('kap', kap).eq('kjs', kjs).limit(1);
   if (codes.error) throw codes.error;
@@ -158,6 +180,7 @@ export async function saveTaxPaymentRecord(input: TaxPaymentRecordInput): Promis
 
 function translatePaymentError(message: string): string {
   if (/tax_payment_records_workspace_id_entity_id_billing_id_key|duplicate key/i.test(message)) return 'ID Billing ini sudah tercatat untuk pemotong ini.';
+  if (/tax_payment_records_workspace_entity_fkey/i.test(message)) return 'Pemotong tidak ditemukan di workspace ini.';
   if (/idx_tax_payment_records_ntpn|sudah dipakai catatan setoran lain/i.test(message)) return 'NTPN ini sudah tercatat pada setoran lain.';
   if (/berubah sejak dibaca|belum punya NTPN|sudah tercatat untuk ID Billing/i.test(message)) return `${message.replace(/^[^:]*: ?/, '')} Muat ulang lalu coba lagi.`;
   return message;

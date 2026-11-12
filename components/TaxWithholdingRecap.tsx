@@ -177,7 +177,7 @@ export function TaxRecapSection({ entities, canManage, notify }: { entities: Tax
             </select>
           </div>
           <div className="tw-toolbar-actions">
-            <button type="button" style={secondaryButtonStyle} disabled={!summary || summary.count === 0} onClick={() => summary && downloadTextFile(`Rekap PPh ${summary.year} - ${summary.entity.legal_name}.csv`, recapCsv(summary, payments), 'text/csv;charset=utf-8')}>Unduh CSV</button>
+            <button type="button" style={secondaryButtonStyle} disabled={!summary || summary.months.length === 0} onClick={() => summary && downloadTextFile(`Rekap PPh ${summary.year} - ${summary.entity.legal_name}.csv`, recapCsv(summary, payments), 'text/csv;charset=utf-8')}>Unduh CSV</button>
           </div>
         </div>
         <div style={{ padding: '10px 18px 0', fontSize: 12, color: 'var(--text-secondary)' }}>
@@ -185,7 +185,7 @@ export function TaxRecapSection({ entities, canManage, notify }: { entities: Tax
         </div>
         {loading && !summary ? (
           <div style={{ padding: 24, color: 'var(--text-secondary)', fontSize: 13 }}>Memuat…</div>
-        ) : summary && summary.count === 0 ? (
+        ) : summary && summary.months.length === 0 ? (
           <div style={{ padding: 28, textAlign: 'center', color: 'var(--text-secondary)', fontSize: 13 }}>Belum ada bukti potong untuk tahun {summary.year}.</div>
         ) : summary ? (
           <div className="table-scroll">

@@ -38,6 +38,19 @@ CREATE TABLE IF NOT EXISTS public.tax_payment_records (
   UNIQUE (workspace_id, entity_id, billing_id)
 );
 
+-- The entity must belong to the record's workspace: a composite foreign key on
+-- (workspace_id, entity_id) enforces it, which needs (workspace_id, id) unique
+-- on the entities table (it is, id being the primary key).
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'tax_withholding_entities_workspace_id_id_key') THEN
+    ALTER TABLE public.tax_withholding_entities ADD CONSTRAINT tax_withholding_entities_workspace_id_id_key UNIQUE (workspace_id, id);
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'tax_payment_records_workspace_entity_fkey') THEN
+    ALTER TABLE public.tax_payment_records ADD CONSTRAINT tax_payment_records_workspace_entity_fkey
+      FOREIGN KEY (workspace_id, entity_id) REFERENCES public.tax_withholding_entities (workspace_id, id) ON DELETE RESTRICT;
+  END IF;
+END $$;
+
 CREATE UNIQUE INDEX IF NOT EXISTS idx_tax_payment_records_ntpn
   ON public.tax_payment_records (workspace_id, entity_id, ntpn)
   WHERE ntpn IS NOT NULL;

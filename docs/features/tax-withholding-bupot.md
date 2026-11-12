@@ -511,7 +511,13 @@ Dua workbook per PT (RTI dan PT lain) diimpor terpisah; `entity` dipilih di UI.
   NTPN pada catatan berbeda di kelompok yang sama tidak saling melewati pemeriksaan "masih ada NTPN lain".
 - Catatan billing yang kelompok bupotnya sudah tidak ada (bupot dihapus atau dipindah masa/kode objek
   setelah billing dibuat) tetap muncul sebagai baris rekap kosong (`withPaymentOnlyGroups`) dengan
-  peringatan, agar masih bisa diubah, dihapus, atau diberi NTPN.
+  peringatan, agar masih bisa diubah, dihapus, atau diberi NTPN; tabel rekap tampil selama ada bupot
+  atau catatan setoran (bukan hanya bila ada bupot).
+- Pemotong diverifikasi milik workspace pemanggil sebelum catatan dibuat atau dibaca, dan FK komposit
+  `(workspace_id, entity_id) → tax_withholding_entities(workspace_id, id)` menjaganya di database.
+  `listTaxPaymentRecords` membaca semua halaman (batas PostgREST 1.000 baris), seperti rekap bupot.
+- Test harness DB menjalankan dua koneksi yang menghapus NTPN dua catatan satu kelompok bersamaan;
+  koneksi kedua menunggu lock kelompok lalu mengembalikan bupot ke `reported`.
 - Kolom "PPh disetor (NTPN)" dan status kelompok (belum ada billing / belum disetor / disetor / kurang)
   dihitung di klien dari catatan tahun berjalan; CSV rekap memuat ID Billing, NTPN, tanggal dan jumlah setor.
 - Pengingat fasilitas (`listExpiringFacilities`): fasilitas vendor aktif dengan `valid_to` ≤ 30 hari ke
