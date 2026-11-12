@@ -5,6 +5,7 @@ import {
   coretaxNumberWarning,
   matchCoretaxNumbers,
   normalizeCoretaxNumber,
+  parseAmount,
   parseCoretaxPaste,
   parseCoretaxSheetRows,
   type CoretaxMatchSlip,
@@ -59,6 +60,20 @@ test('parseCoretaxPaste explains a single-column or empty paste instead of guess
   assert.match(parseCoretaxPaste('INV-1\tkosong\nINV-2\tbelum').issues[0], /tidak dikenali/);
 });
 
+test('parseAmount keeps numeric cells as decimals and reads Indonesian or English text separators', () => {
+  assert.equal(parseAmount(1.234), 1_234_000n, 'a numeric cell is never a thousands group');
+  assert.equal(parseAmount(1234), 1_234_000_000n);
+  assert.equal(parseAmount(1801.8018), 1_801_801_800n);
+  assert.equal(parseAmount('1000,50'), 1_000_500_000n, 'decimal comma without thousands separator');
+  assert.equal(parseAmount('1.234'), 1_234_000_000n, 'Indonesian thousands text');
+  assert.equal(parseAmount('1.234.567,89'), 1_234_567_890_000n);
+  assert.equal(parseAmount('1,234,567.89'), 1_234_567_890_000n);
+  assert.equal(parseAmount('Rp 2.500.000'), 2_500_000_000_000n);
+  assert.equal(parseAmount('12.5'), 12_500_000n);
+  assert.equal(parseAmount(''), null);
+  assert.equal(parseAmount('abc'), null);
+});
+
 test('parseCoretaxSheetRows finds the header row of a Coretax download and skips rows above it', () => {
   const rows = [
     ['Daftar Bukti Potong', null, null],
@@ -74,6 +89,9 @@ test('parseCoretaxSheetRows finds the header row of a Coretax download and skips
     [4, 'INV-1', '26000UK7L', '0012345678901000', 1_801_801_800n],
     [5, 'INV-2', '26000UK7M', '3273010101010001', 4_444_444_000_000n],
   ]);
+  // A three-decimal numeric cell survives untouched; the same digits as text are a thousands group.
+  const decimals = parseCoretaxSheetRows([['Nomor Dokumen', 'DPP', 'Nomor Bukti Potong'], ['INV-A', 1.234, '26000UK7N'], ['INV-B', '1.234', '26000UK7P']]);
+  assert.deepEqual(decimals.rows.map((row) => row.grossMicro), [1_234_000n, 1_234_000_000n]);
   assert.match(parseCoretaxSheetRows([['a', 'b'], ['c', 'd']]).issues[0], /tidak ditemukan/);
 });
 
@@ -96,6 +114,8 @@ test('matchCoretaxNumbers ties rows to slips by the XML document number, then NP
     { line: 6, documentNumber: 'SAME', coretaxNumber: 'A0000006', identity: null, grossMicro: null },
     { line: 7, documentNumber: 'MISSING', coretaxNumber: 'A0000007', identity: null, grossMicro: null },
     { line: 8, documentNumber: 'INV-1', coretaxNumber: null, identity: null, grossMicro: null },
+    // A document number from another masa with the same NPWP and DPP as slip 5 must not be matched by amount.
+    { line: 9, documentNumber: 'INV-DEC', coretaxNumber: 'A0000009', identity: '0012345678901000', grossMicro: 500_000_000_000n },
   ]);
   assert.deepEqual(result.assignments.map((row) => [row.slipId, row.coretaxNumber, row.matchedBy]), [
     [1, 'A0000001', 'document'],
@@ -105,9 +125,11 @@ test('matchCoretaxNumbers ties rows to slips by the XML document number, then NP
     [5, 'A0000005', 'identity+amount'],
   ]);
   assert.deepEqual(result.ambiguous.map((row) => [row.row.line, row.slipIds]), [[6, [3, 4]]]);
-  assert.deepEqual(result.unmatched.map((row) => row.row.line), [7, 8]);
+  assert.deepEqual(result.unmatched.map((row) => row.row.line), [7, 8, 9]);
   assert.match(result.unmatched[0].reason, /MISSING/);
+  assert.match(result.unmatched[2].reason, /INV-DEC tidak ada .* NPWP \+ DPP sama dengan TWIN; ketik/);
   assert.deepEqual(result.conflicts, []);
+  assert.deepEqual(result.conflictedSlipIds, []);
 });
 
 test('matchCoretaxNumbers reports a slip given two numbers and a number given to two slips', () => {
@@ -117,9 +139,12 @@ test('matchCoretaxNumbers reports a slip given two numbers and a number given to
     { line: 3, documentNumber: 'INV-1', coretaxNumber: 'A0000001', identity: null, grossMicro: null },
     { line: 4, documentNumber: 'INV-2', coretaxNumber: 'B0000002', identity: null, grossMicro: null },
     { line: 5, documentNumber: 'INV-3', coretaxNumber: 'B0000002', identity: null, grossMicro: null },
+    // A later row repeating the first number must not bring the conflicted slip back.
+    { line: 6, documentNumber: 'INV-1', coretaxNumber: 'A0000001', identity: null, grossMicro: null },
   ]);
-  assert.deepEqual(result.assignments.map((row) => [row.slipId, row.coretaxNumber]), [[1, 'A0000001']]);
+  assert.deepEqual(result.assignments, [], 'a conflicted slip gets no proposal at all');
+  assert.deepEqual([...result.conflictedSlipIds].sort(), [1, 2, 3]);
   assert.equal(result.conflicts.length, 2);
-  assert.match(result.conflicts[0], /INV-1 mendapat dua nomor berbeda/);
+  assert.match(result.conflicts[0], /INV-1 mendapat dua nomor berbeda .* tidak ada yang diusulkan/);
   assert.match(result.conflicts[1], /B0000002 dipakai 2 bukti potong/);
 });

@@ -379,3 +379,22 @@ test('a multi-column CSV download with quoted fields is parsed as a sheet and ma
   const second = await coretaxActions.previewCoretaxRecording(recordingForm({ file: semicolon }));
   assert.equal(second.candidates.find((row) => row.id === 2)?.proposedNumber, '26000CSV09');
 });
+
+test('previewCoretaxRecording proposes nothing for a slip with conflicting source numbers or a document from another masa', async () => {
+  db.tax_withholding_slips.push({ id: 1, ...readySlip({ invoice_number: 'INV-ONE', status: 'exported', export_batch_id: 1 }), updated_at: stamp() });
+  db.tax_withholding_slips.push({ id: 2, ...readySlip({ invoice_number: 'INV-JAN', status: 'exported', export_batch_id: 1 }), updated_at: stamp() });
+  const preview = await coretaxActions.previewCoretaxRecording(recordingForm({
+    text: 'Nomor Dokumen\tNPWP\tDPP\tNomor Bukti Potong\nINV-ONE\t\t\t26000REV3\nINV-ONE\t\t\t26000REV4\nINV-DEC\t0012345678901000\t1000000\t26000REV2',
+  }));
+  const one = preview.candidates.find((row) => row.id === 1)!;
+  assert.equal(one.proposedNumber, null);
+  assert.equal(one.action, 'none');
+  assert.match(one.problems[0], /bertentangan/);
+  const jan = preview.candidates.find((row) => row.id === 2)!;
+  assert.equal(jan.proposedNumber, null, 'INV-DEC is not tied to INV-JAN by NPWP + DPP');
+  assert.equal(preview.unmatched.length, 1);
+  assert.match(preview.unmatched[0].reason, /INV-DEC tidak ada .* sama dengan INV-ONE, INV-JAN; ketik/);
+  assert.equal(preview.conflicts.length, 1);
+  assert.equal(preview.totals.record, 0);
+  assert.equal(preview.totals.blocked, 1);
+});

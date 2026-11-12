@@ -240,6 +240,7 @@ export async function previewCoretaxRecording(formData: FormData): Promise<Coret
   const slips = batchId === null ? allSlips : allSlips.filter((slip) => slip.export_batch_id === batchId);
   const match = parsed ? matchCoretaxNumbers(slips, parsed.rows) : null;
   const assignmentBySlip = new Map((match?.assignments ?? []).map((assignment) => [assignment.slipId, assignment]));
+  const conflictedSlips = new Set(match?.conflictedSlipIds ?? []);
 
   const candidates: CoretaxCandidate[] = slips.map((slip) => {
     const assignment = assignmentBySlip.get(slip.id) ?? null;
@@ -247,6 +248,7 @@ export async function previewCoretaxRecording(formData: FormData): Promise<Coret
     const problems: string[] = [];
     const warnings: string[] = [];
     let action: CoretaxCandidateAction = 'none';
+    if (conflictedSlips.has(slip.id)) problems.push('Sumber memberi nomor yang bertentangan untuk bukti potong ini; ketik nomor yang benar.');
     if (proposedNumber) {
       const problem = coretaxNumberProblem(proposedNumber);
       if (problem) problems.push(problem);

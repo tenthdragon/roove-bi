@@ -52,13 +52,36 @@ const cellText = (cell: unknown): string => {
 const normalizeKey = (value: string): string => value.trim().toUpperCase().replace(/\s+/g, ' ');
 const digitsOf = (value: string): string => value.replace(/\D/g, '');
 
-function parseAmount(text: string): bigint | null {
-  const cleaned = text.replace(/[^\d.,-]/g, '');
+/**
+ * DPP from a source cell. A numeric Excel cell is taken as-is (1.234 is one
+ * point two three four); only text goes through separator heuristics:
+ * `1.234.567,89` and `1,234,567.89` (the last separator is the decimal one),
+ * `1000,50` (decimal comma), `1.234` (Indonesian thousands).
+ */
+export function parseAmount(cell: unknown): bigint | null {
+  if (cell === null || cell === undefined || cell === '') return null;
+  if (typeof cell === 'number') {
+    if (!Number.isFinite(cell)) return null;
+    try { return toMicro(cell); } catch { return null; }
+  }
+  const cleaned = String(cell).replace(/[^\d.,-]/g, '');
   if (!cleaned) return null;
-  // Indonesian sheets write 1.234.567,89; accept plain decimals as well.
-  const normalized = /,\d{1,2}$/.test(cleaned) && cleaned.includes('.')
-    ? cleaned.replace(/\./g, '').replace(',', '.')
-    : /^\d{1,3}(\.\d{3})+$/.test(cleaned) ? cleaned.replace(/\./g, '') : cleaned.replace(/,/g, '');
+  const lastDot = cleaned.lastIndexOf('.');
+  const lastComma = cleaned.lastIndexOf(',');
+  let normalized: string;
+  if (lastDot >= 0 && lastComma >= 0) {
+    normalized = lastComma > lastDot
+      ? cleaned.replace(/\./g, '').replace(',', '.')
+      : cleaned.replace(/,/g, '');
+  } else if (lastComma >= 0) {
+    normalized = /^-?\d{1,3}(,\d{3})+$/.test(cleaned) && !/^-?\d{1,3},\d{1,2}$/.test(cleaned)
+      ? cleaned.replace(/,/g, '')
+      : cleaned.replace(/,/g, (match, offset: number) => (offset === lastComma ? '.' : ''));
+  } else if (lastDot >= 0) {
+    normalized = /^-?\d{1,3}(\.\d{3})+$/.test(cleaned) ? cleaned.replace(/\./g, '') : cleaned;
+  } else {
+    normalized = cleaned;
+  }
   try {
     return toMicro(normalized);
   } catch {
@@ -131,7 +154,7 @@ function rowsToInput(rows: SheetRow[], roles: ColumnRoles, firstDataIndex: numbe
       documentNumber: documentNumber || null,
       coretaxNumber: coretaxNumber || null,
       identity: identityText.length === 16 ? identityText : null,
-      grossMicro: roles.gross === null ? null : parseAmount(cellText(row[roles.gross])),
+      grossMicro: roles.gross === null ? null : parseAmount(row[roles.gross]),
     });
   }
   return result;
@@ -200,12 +223,17 @@ export type CoretaxMatchResult = {
   ambiguous: Array<{ row: CoretaxInputRow; slipIds: number[] }>;
   /** Slips that received different numbers from several rows, or numbers given to several slips. */
   conflicts: string[];
+  /** Slips left without a proposal because of a conflict; the user picks their number by hand. */
+  conflictedSlipIds: number[];
 };
 
 /**
  * Ties parsed rows to slips. The document number Coretax echoes is the one the
  * XML carried (faktur pajak for TaxInvoice, else the commercial invoice), so
- * that key is tried first, then the plain invoice number, then NPWP + DPP.
+ * that key is tried first, then the plain invoice number. NPWP + DPP alone
+ * identify a slip only for rows without a document number: a filled number
+ * that matches nothing stays unmatched (it may belong to another masa), with
+ * the look-alike slip named so the user can type the number there on purpose.
  */
 export function matchCoretaxNumbers(slips: CoretaxMatchSlip[], rows: CoretaxInputRow[]): CoretaxMatchResult {
   const byDocument = new Map<string, CoretaxMatchSlip[]>();
@@ -224,8 +252,12 @@ export function matchCoretaxNumbers(slips: CoretaxMatchSlip[], rows: CoretaxInpu
     try { return toMicro(slip.gross_amount); } catch { return null; }
   };
 
-  const result: CoretaxMatchResult = { assignments: [], unmatched: [], ambiguous: [], conflicts: [] };
+  const result: CoretaxMatchResult = { assignments: [], unmatched: [], ambiguous: [], conflicts: [], conflictedSlipIds: [] };
   const numberBySlip = new Map<number, CoretaxAssignment>();
+  const conflicted = new Set<number>();
+  const lookAlikes = (row: CoretaxInputRow) => (row.identity && row.grossMicro !== null
+    ? slips.filter((slip) => digitsOf(slip.counterparty_identity_number) === row.identity && grossOf(slip) === row.grossMicro)
+    : []);
   for (const row of rows) {
     if (!row.coretaxNumber) {
       result.unmatched.push({ row, reason: 'Nomor bukti potong kosong.' });
@@ -245,12 +277,20 @@ export function matchCoretaxNumbers(slips: CoretaxMatchSlip[], rows: CoretaxInpu
         if (narrowed.length > 0) { candidates = narrowed; matchedBy = 'document+amount'; }
       }
     }
-    if (candidates.length === 0 && row.identity && row.grossMicro !== null) {
-      candidates = slips.filter((slip) => digitsOf(slip.counterparty_identity_number) === row.identity && grossOf(slip) === row.grossMicro);
+    if (candidates.length === 0 && !row.documentNumber) {
+      candidates = lookAlikes(row);
       matchedBy = 'identity+amount';
     }
     if (candidates.length === 0) {
-      result.unmatched.push({ row, reason: row.documentNumber ? `Nomor dokumen ${row.documentNumber} tidak ada di bukti potong masa ini.` : 'Baris tanpa nomor dokumen; NPWP + DPP tidak cocok dengan bukti potong mana pun.' });
+      if (!row.documentNumber) {
+        result.unmatched.push({ row, reason: 'Baris tanpa nomor dokumen; NPWP + DPP tidak cocok dengan bukti potong mana pun.' });
+        continue;
+      }
+      const similar = lookAlikes(row).map((slip) => xmlDocumentNumber(slip) || slip.invoice_number);
+      result.unmatched.push({
+        row,
+        reason: `Nomor dokumen ${row.documentNumber} tidak ada di bukti potong masa ini.${similar.length > 0 ? ` NPWP + DPP sama dengan ${similar.join(', ')}; ketik nomornya di baris itu bila memang dokumen yang sama.` : ''}`,
+      });
       continue;
     }
     if (candidates.length > 1) {
@@ -258,9 +298,13 @@ export function matchCoretaxNumbers(slips: CoretaxMatchSlip[], rows: CoretaxInpu
       continue;
     }
     const slip = candidates[0];
+    if (conflicted.has(slip.id)) continue;
     const existing = numberBySlip.get(slip.id);
     if (existing && existing.coretaxNumber !== row.coretaxNumber) {
-      result.conflicts.push(`Dokumen ${xmlDocumentNumber(slip) || slip.invoice_number} mendapat dua nomor berbeda (${existing.coretaxNumber} baris ${existing.line}, ${row.coretaxNumber} baris ${row.line}).`);
+      // Neither number is proposed: the user resolves the slip by hand.
+      result.conflicts.push(`Dokumen ${xmlDocumentNumber(slip) || slip.invoice_number} mendapat dua nomor berbeda (${existing.coretaxNumber} baris ${existing.line}, ${row.coretaxNumber} baris ${row.line}); tidak ada yang diusulkan.`);
+      numberBySlip.delete(slip.id);
+      conflicted.add(slip.id);
       continue;
     }
     if (!existing) numberBySlip.set(slip.id, { slipId: slip.id, coretaxNumber: row.coretaxNumber, matchedBy, line: row.line });
@@ -273,10 +317,11 @@ export function matchCoretaxNumbers(slips: CoretaxMatchSlip[], rows: CoretaxInpu
   }
   for (const [number, slipIds] of slipsByNumber) {
     if (slipIds.length > 1) {
-      result.conflicts.push(`Nomor ${number} dipakai ${slipIds.length} bukti potong sekaligus.`);
-      for (const slipId of slipIds) numberBySlip.delete(slipId);
+      result.conflicts.push(`Nomor ${number} dipakai ${slipIds.length} bukti potong sekaligus; tidak ada yang diusulkan.`);
+      for (const slipId of slipIds) { numberBySlip.delete(slipId); conflicted.add(slipId); }
     }
   }
   result.assignments = [...numberBySlip.values()];
+  result.conflictedSlipIds = [...conflicted];
   return result;
 }

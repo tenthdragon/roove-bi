@@ -47,7 +47,7 @@ type RowDecision = { number: string; action: 'record' | 'replace' | 'keep' | 'no
 
 function decideRow(candidate: CoretaxCandidate, typed: string | undefined, allowReplace: boolean): RowDecision {
   const number = normalizeCoretaxNumber(typed ?? candidate.proposedNumber ?? '');
-  if (!number) return { number, action: 'none', problem: null, warning: null };
+  if (!number) return { number, action: 'none', problem: typed === undefined && candidate.problems.length > 0 ? candidate.problems[0] : null, warning: null };
   const problem = coretaxNumberProblem(number);
   if (problem) return { number, action: 'none', problem, warning: null };
   const warning = coretaxNumberWarning(number);
