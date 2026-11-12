@@ -397,4 +397,10 @@ test('previewCoretaxRecording proposes nothing for a slip with conflicting sourc
   assert.equal(preview.conflicts.length, 1);
   assert.equal(preview.totals.record, 0);
   assert.equal(preview.totals.blocked, 1);
+
+  // Combined conflicts: INV-JAN claiming the number INV-ONE also claimed gets no proposal either.
+  const combined = await coretaxActions.previewCoretaxRecording(recordingForm({ text: 'INV-ONE\t26000AAA1\nINV-ONE\t26000AAA2\nINV-JAN\t26000AAA1' }));
+  assert.deepEqual(combined.candidates.map((row) => [row.id, row.proposedNumber, row.action, row.problems.length]), [[1, null, 'none', 1], [2, null, 'none', 1]]);
+  assert.equal(combined.totals.record, 0);
+  await assert.rejects(coretaxActions.recordCoretaxNumbers({ entityId: 1, year: 2026, month: 1, assignments: [] }), /Tidak ada nomor/);
 });

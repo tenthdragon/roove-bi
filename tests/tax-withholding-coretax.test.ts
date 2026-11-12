@@ -145,6 +145,24 @@ test('matchCoretaxNumbers reports a slip given two numbers and a number given to
   assert.deepEqual(result.assignments, [], 'a conflicted slip gets no proposal at all');
   assert.deepEqual([...result.conflictedSlipIds].sort(), [1, 2, 3]);
   assert.equal(result.conflicts.length, 2);
-  assert.match(result.conflicts[0], /INV-1 mendapat dua nomor berbeda .* tidak ada yang diusulkan/);
+  assert.match(result.conflicts[0], /INV-1 mendapat 2 nomor berbeda .* tidak ada yang diusulkan/);
   assert.match(result.conflicts[1], /B0000002 dipakai 2 bukti potong/);
+});
+
+test('matchCoretaxNumbers holds back every slip touched by combined conflicts, whatever the row order', () => {
+  const rows = [
+    { line: 1, documentNumber: 'INV-1', coretaxNumber: '26000AAA1', identity: null, grossMicro: null },
+    { line: 2, documentNumber: 'INV-1', coretaxNumber: '26000AAA2', identity: null, grossMicro: null },
+    { line: 3, documentNumber: 'INV-2', coretaxNumber: '26000AAA1', identity: null, grossMicro: null },
+    { line: 4, documentNumber: 'INV-3', coretaxNumber: '26000AAA3', identity: null, grossMicro: null },
+  ];
+  for (const order of [rows, [...rows].reverse(), [rows[2], rows[0], rows[1], rows[3]]]) {
+    const result = matchCoretaxNumbers([slip(1), slip(2), slip(3)], order);
+    // INV-2's claim on 26000AAA1 collides with INV-1's first claim even though INV-1 is itself conflicted.
+    assert.deepEqual(result.assignments.map((row) => [row.slipId, row.coretaxNumber]), [[3, '26000AAA3']], `order ${order.map((row) => row.line).join(',')}`);
+    assert.deepEqual([...result.conflictedSlipIds].sort(), [1, 2]);
+    assert.equal(result.conflicts.length, 2);
+    assert.ok(result.conflicts.some((text) => /INV-1 mendapat 2 nomor berbeda/.test(text)));
+    assert.ok(result.conflicts.some((text) => /26000AAA1 dipakai 2 bukti potong sekaligus \((INV-1, INV-2|INV-2, INV-1)\)/.test(text)));
+  }
 });

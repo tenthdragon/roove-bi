@@ -253,11 +253,15 @@ export function matchCoretaxNumbers(slips: CoretaxMatchSlip[], rows: CoretaxInpu
   };
 
   const result: CoretaxMatchResult = { assignments: [], unmatched: [], ambiguous: [], conflicts: [], conflictedSlipIds: [] };
-  const numberBySlip = new Map<number, CoretaxAssignment>();
-  const conflicted = new Set<number>();
   const lookAlikes = (row: CoretaxInputRow) => (row.identity && row.grossMicro !== null
     ? slips.filter((slip) => digitsOf(slip.counterparty_identity_number) === row.identity && grossOf(slip) === row.grossMicro)
     : []);
+
+  // Pass 1: every row that identifies exactly one slip becomes a claim
+  // (slip, number). Conflicts are judged afterwards over all claims, so a slip
+  // dropped for one conflict still counts in the other check, whatever the row order.
+  type Claim = CoretaxAssignment & { slip: CoretaxMatchSlip };
+  const claims: Claim[] = [];
   for (const row of rows) {
     if (!row.coretaxNumber) {
       result.unmatched.push({ row, reason: 'Nomor bukti potong kosong.' });
@@ -297,31 +301,39 @@ export function matchCoretaxNumbers(slips: CoretaxMatchSlip[], rows: CoretaxInpu
       result.ambiguous.push({ row, slipIds: candidates.map((slip) => slip.id) });
       continue;
     }
-    const slip = candidates[0];
-    if (conflicted.has(slip.id)) continue;
-    const existing = numberBySlip.get(slip.id);
-    if (existing && existing.coretaxNumber !== row.coretaxNumber) {
-      // Neither number is proposed: the user resolves the slip by hand.
-      result.conflicts.push(`Dokumen ${xmlDocumentNumber(slip) || slip.invoice_number} mendapat dua nomor berbeda (${existing.coretaxNumber} baris ${existing.line}, ${row.coretaxNumber} baris ${row.line}); tidak ada yang diusulkan.`);
-      numberBySlip.delete(slip.id);
-      conflicted.add(slip.id);
-      continue;
-    }
-    if (!existing) numberBySlip.set(slip.id, { slipId: slip.id, coretaxNumber: row.coretaxNumber, matchedBy, line: row.line });
+    claims.push({ slipId: candidates[0].id, coretaxNumber: row.coretaxNumber, matchedBy, line: row.line, slip: candidates[0] });
   }
-  const slipsByNumber = new Map<string, number[]>();
-  for (const assignment of numberBySlip.values()) {
-    const list = slipsByNumber.get(assignment.coretaxNumber) ?? [];
-    list.push(assignment.slipId);
-    slipsByNumber.set(assignment.coretaxNumber, list);
+
+  // Pass 2: a slip claimed with two different numbers, or a number claimed for
+  // two different slips, leaves every slip involved without a proposal.
+  const numbersBySlip = new Map<number, Map<string, Claim>>();
+  const slipsByNumber = new Map<string, Map<number, Claim>>();
+  for (const claim of claims) {
+    const numbers = numbersBySlip.get(claim.slipId) ?? new Map<string, Claim>();
+    if (!numbers.has(claim.coretaxNumber)) numbers.set(claim.coretaxNumber, claim);
+    numbersBySlip.set(claim.slipId, numbers);
+    const owners = slipsByNumber.get(claim.coretaxNumber) ?? new Map<number, Claim>();
+    if (!owners.has(claim.slipId)) owners.set(claim.slipId, claim);
+    slipsByNumber.set(claim.coretaxNumber, owners);
   }
-  for (const [number, slipIds] of slipsByNumber) {
-    if (slipIds.length > 1) {
-      result.conflicts.push(`Nomor ${number} dipakai ${slipIds.length} bukti potong sekaligus; tidak ada yang diusulkan.`);
-      for (const slipId of slipIds) { numberBySlip.delete(slipId); conflicted.add(slipId); }
-    }
+  const conflicted = new Set<number>();
+  for (const [slipId, numbers] of numbersBySlip) {
+    if (numbers.size < 2) continue;
+    const first = [...numbers.values()][0];
+    const listed = [...numbers.values()].map((claim) => `${claim.coretaxNumber} baris ${claim.line}`).join(', ');
+    result.conflicts.push(`Dokumen ${xmlDocumentNumber(first.slip) || first.slip.invoice_number} mendapat ${numbers.size} nomor berbeda (${listed}); tidak ada yang diusulkan.`);
+    conflicted.add(slipId);
   }
-  result.assignments = [...numberBySlip.values()];
+  for (const [number, owners] of slipsByNumber) {
+    if (owners.size < 2) continue;
+    result.conflicts.push(`Nomor ${number} dipakai ${owners.size} bukti potong sekaligus (${[...owners.values()].map((claim) => xmlDocumentNumber(claim.slip) || claim.slip.invoice_number).join(', ')}); tidak ada yang diusulkan.`);
+    for (const slipId of owners.keys()) conflicted.add(slipId);
+  }
+  for (const [slipId, numbers] of numbersBySlip) {
+    if (conflicted.has(slipId)) continue;
+    const { slip: _slip, ...assignment } = [...numbers.values()][0];
+    result.assignments.push(assignment);
+  }
   result.conflictedSlipIds = [...conflicted];
   return result;
 }
