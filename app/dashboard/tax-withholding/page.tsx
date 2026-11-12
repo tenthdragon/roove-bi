@@ -36,6 +36,7 @@ import {
 import { useWorkspace } from '@/lib/WorkspaceContext';
 import { RekapanImportSection, SlipsSection } from '@/components/TaxWithholdingSlips';
 import { TaxRecapSection } from '@/components/TaxWithholdingRecap';
+import { listExpiringFacilities } from '@/lib/tax-withholding-payment';
 
 type SubTab = 'slips' | 'recap' | 'counterparties' | 'entities' | 'import';
 type PageMessage = { type: 'success' | 'error'; text: string };
@@ -208,6 +209,7 @@ export default function TaxWithholdingPage() {
   }, [message]);
 
   const today = todayIso();
+  const expiringFacilities = useMemo(() => listExpiringFacilities(data?.counterparties ?? [], today), [data, today]);
   const stats = useMemo(() => {
     const rows = data?.counterparties ?? [];
     const active = rows.filter((row) => row.is_active);
@@ -298,8 +300,18 @@ export default function TaxWithholdingPage() {
       ) : data ? (
         <>
           {!data.canManage ? <div className="tw-notice">Akun ini hanya dapat melihat data. Perubahan memerlukan role finance.</div> : null}
+          {expiringFacilities.length > 0 && (subTab === 'slips' || subTab === 'recap') ? (
+            <div className="tw-notice" role="status" style={{ borderColor: 'var(--yellow)', display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap', justifyContent: 'space-between' }}>
+              <div>
+                <strong style={{ color: 'var(--yellow)' }}>{expiringFacilities.length} fasilitas pajak habis ≤ 30 hari atau baru berakhir.</strong>{' '}
+                {expiringFacilities.slice(0, 4).map((row) => `${row.counterpartyName} (${row.facilityCode} s.d. ${row.validTo}${row.status === 'expired' ? ', sudah habis' : ''})`).join('; ')}{expiringFacilities.length > 4 ? '; …' : ''}.
+                {' '}Tarif kembali normal setelah masa berlaku lewat; perbarui dokumennya agar bukti potong berikutnya tidak salah potong.
+              </div>
+              <button type="button" className="tw-action-button" style={{ color: 'var(--accent)' }} onClick={() => setSubTab('counterparties')}>Buka Lawan Transaksi</button>
+            </div>
+          ) : null}
           {subTab === 'slips' ? <SlipsSection key={activeWorkspace.id} entities={data.entities} counterparties={data.counterparties} canManage={data.canManage} notify={setMessage} /> : null}
-          {subTab === 'recap' ? <TaxRecapSection key={`recap-${activeWorkspace.id}`} entities={data.entities} notify={setMessage} /> : null}
+          {subTab === 'recap' ? <TaxRecapSection key={`recap-${activeWorkspace.id}`} entities={data.entities} canManage={data.canManage} notify={setMessage} /> : null}
           {subTab === 'counterparties' ? (
             <>
               <div className="tw-summary-grid">

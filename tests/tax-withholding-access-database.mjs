@@ -4,7 +4,7 @@ import { randomBytes } from 'node:crypto';
 import { promisify } from 'node:util';
 import assert from 'node:assert/strict';
 
-// Migrations 247 to 253 run in a disposable database with the minimal
+// Migrations 247 to 254 run in a disposable database with the minimal
 // workspace foundation they depend on. Direct reads then run as `authenticated`
 // users with a JWT subject, exactly as PostgREST would issue them, and two
 // concurrent imports race on the facility identity constraint. The shared
@@ -40,6 +40,7 @@ const readOnlyGrantsMigration = read('../supabase/migrations/250_tax_master_read
 const slipsMigration = read('../supabase/migrations/251_tax_withholding_slips.sql');
 const exportMigration = read('../supabase/migrations/252_tax_export_batches.sql');
 const coretaxMigration = read('../supabase/migrations/253_tax_coretax_recording.sql');
+const paymentMigration = read('../supabase/migrations/254_tax_payment_records.sql');
 
 // Two imports insert the same certificate at the same time; the constraint must
 // leave exactly one row and neither side may fail.
@@ -132,6 +133,8 @@ ${readAccessMigration}
   psql(exportMigration);
   psql(coretaxMigration);
   psql(coretaxMigration);
+  psql(paymentMigration);
+  psql(paymentMigration);
   process.stdout.write(psql(`DO $$ DECLARE target regclass; BEGIN
     FOREACH target IN ARRAY ARRAY['public.tax_object_codes'::regclass,'public.tax_withholding_entities'::regclass,
       'public.tax_counterparties'::regclass,'public.tax_counterparty_facilities'::regclass] LOOP
@@ -155,6 +158,41 @@ ${readAccessMigration}
   process.stdout.write(psql(read('./tax-withholding-slips-db.sql')));
   process.stdout.write(psql(read('./tax-withholding-export-db.sql')));
   process.stdout.write(psql(read('./tax-withholding-coretax-db.sql')));
+  process.stdout.write(psql(read('./tax-withholding-payment-db.sql')));
+
+  // Two connections clear the NTPNs of two records of one payment group. The
+  // first holds its transaction open after clearing; the second must wait for
+  // the group lock, then see no NTPN left and return the slips to reported.
+  // Without the lock both would see the other's NTPN and leave the slips paid.
+  const paymentGroup = psql(`
+    INSERT INTO public.tax_payment_records (workspace_id, entity_id, period_month, period_year, pph_article, kap, kjs, billing_id, billing_amount, ntpn, paid_at, paid_amount)
+    SELECT workspace_id, entity_id, period_month, period_year, pph_article, kap, kjs, '012345678901236', 50, 'ABCDEFGH12345679', DATE '2026-11-11', 50
+    FROM public.tax_payment_records WHERE billing_id = '012345678901234';
+    SELECT json_build_object('a', (SELECT json_build_array(id, updated_at) FROM public.tax_payment_records WHERE billing_id = '012345678901234'),
+      'b', (SELECT json_build_array(id, updated_at) FROM public.tax_payment_records WHERE billing_id = '012345678901236'),
+      'paid', (SELECT count(*) FROM public.tax_withholding_slips WHERE invoice_number = 'INV-ALPHA-1' AND status = 'paid'));`);
+  const group = JSON.parse(paymentGroup);
+  assert.equal(group.paid, 1, 'fixture: the reported alpha slip is paid before the concurrent clears');
+  const alpha = '00000000-0000-4000-8000-000000000101';
+  const clearFirst = psqlAsync(`BEGIN;
+    SELECT public.tax_clear_payment_ntpn('${alpha}', ${group.a[0]}, '${group.a[1]}');
+    SELECT pg_sleep(4);
+    COMMIT;`);
+  await new Promise((resolve) => setTimeout(resolve, 1500));
+  const startedSecond = Date.now();
+  const clearSecond = await psqlAsync(`SELECT public.tax_clear_payment_ntpn('${alpha}', ${group.b[0]}, '${group.b[1]}');`);
+  assert.ok(Date.now() - startedSecond >= 1500, 'second clear must wait for the group lock held by the first transaction');
+  assert.equal(clearSecond.trim(), '1', 'the second clear finds no NTPN left and returns the slip to reported');
+  await clearFirst;
+  process.stdout.write(psql(`
+DO $$ BEGIN
+  IF (SELECT count(*) FROM public.tax_payment_records WHERE ntpn IS NOT NULL AND billing_id IN ('012345678901234', '012345678901236')) <> 0
+    OR (SELECT count(*) FROM public.tax_withholding_slips WHERE invoice_number = 'INV-ALPHA-1' AND status = 'paid') <> 0 THEN
+    RAISE EXCEPTION 'Concurrent NTPN clears left the group paid without an NTPN';
+  END IF;
+END $$;
+SELECT 'PASS: concurrent NTPN clears of one group are serialised by the group lock';
+`));
 
   await Promise.all([psqlAsync(concurrentFacilityInsert), psqlAsync(concurrentFacilityInsert)]);
   process.stdout.write(psql(`

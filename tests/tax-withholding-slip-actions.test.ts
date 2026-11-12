@@ -33,6 +33,7 @@ function from(table: string) {
       return query;
     },
     range(start: number, end: number) { bounds = [start, end]; return query; },
+    limit(count: number) { bounds = [0, count - 1]; return query; },
     insert(value: any) { operation = 'insert'; payload = value; return query; },
     update(value: any) { operation = 'update'; payload = value; return query; },
     delete() { operation = 'delete'; return query; },
@@ -80,8 +81,40 @@ function recordCoretaxRpc(args: Record<string, any>) {
   return { data: ids.length, error: null };
 }
 
+function paymentGroupSlips(record: any) {
+  const codes = (db.tax_object_codes ?? []).filter((code) => code.kap === record.kap && code.kjs === record.kjs).map((code) => code.code);
+  return (db.tax_withholding_slips ?? []).filter((row) => row.workspace_id === record.workspace_id && row.entity_id === record.entity_id
+    && row.period_year === record.period_year && row.period_month === record.period_month && row.pph_article === record.pph_article && codes.includes(row.object_code));
+}
+
+function paymentRpc(name: string, args: Record<string, any>) {
+  const records = db.tax_payment_records ??= [];
+  const record = records.find((row) => row.id === args.p_record_id && row.workspace_id === args.p_workspace_id);
+  if (!record) return { data: null, error: { message: 'Catatan setoran tidak ditemukan.' } };
+  if (record.updated_at !== args.p_version) return { data: null, error: { message: 'Catatan setoran berubah sejak dibaca; muat ulang.' } };
+  if (name === 'tax_record_payment_ntpn') {
+    if (!/^[0-9A-Z]{16}$/.test(args.p_ntpn)) return { data: null, error: { message: 'NTPN harus 16 huruf besar/angka.' } };
+    if (record.ntpn) return { data: null, error: { message: 'NTPN sudah tercatat untuk ID Billing ini; hapus dulu untuk mengganti.' } };
+    if (records.some((row) => row.entity_id === record.entity_id && row.ntpn === args.p_ntpn && row.id !== record.id)) return { data: null, error: { message: `NTPN ${args.p_ntpn} sudah dipakai catatan setoran lain.` } };
+    Object.assign(record, { ntpn: args.p_ntpn, paid_at: args.p_paid_at, paid_amount: args.p_paid_amount, paid_recorded_by: args.p_recorded_by, updated_at: stamp() });
+    const moved = paymentGroupSlips(record).filter((row) => row.status === 'reported');
+    for (const row of moved) Object.assign(row, { status: 'paid', updated_at: stamp() });
+    return { data: moved.length, error: null };
+  }
+  assert.equal(name, 'tax_clear_payment_ntpn');
+  if (!record.ntpn) return { data: null, error: { message: 'Catatan setoran ini belum punya NTPN.' } };
+  Object.assign(record, { ntpn: null, paid_at: null, paid_amount: null, paid_recorded_by: null, updated_at: stamp() });
+  const stillPaid = records.some((row) => row.id !== record.id && row.ntpn && row.entity_id === record.entity_id && row.period_year === record.period_year
+    && row.period_month === record.period_month && row.pph_article === record.pph_article && row.kap === record.kap && row.kjs === record.kjs);
+  if (stillPaid) return { data: 0, error: null };
+  const moved = paymentGroupSlips(record).filter((row) => row.status === 'paid');
+  for (const row of moved) Object.assign(row, { status: 'reported', updated_at: stamp() });
+  return { data: moved.length, error: null };
+}
+
 async function rpc(name: string, args: Record<string, any>) {
   if (name === 'tax_record_coretax_numbers') return recordCoretaxRpc(args);
+  if (name === 'tax_record_payment_ntpn' || name === 'tax_clear_payment_ntpn') return paymentRpc(name, args);
   assert.equal(name, 'tax_create_export_batch');
   const slips = db.tax_withholding_slips ??= [];
   const ids: number[] = [...new Set(args.p_slip_ids as number[])];
@@ -110,6 +143,7 @@ require.cache[require.resolve('../lib/dashboard-access')] = { exports: { require
 const slipActions = require('../lib/tax-withholding-slip-actions') as typeof import('../lib/tax-withholding-slip-actions');
 const exportActions = require('../lib/tax-withholding-export-actions') as typeof import('../lib/tax-withholding-export-actions');
 const coretaxActions = require('../lib/tax-withholding-coretax-actions') as typeof import('../lib/tax-withholding-coretax-actions');
+const paymentActions = require('../lib/tax-withholding-payment-actions') as typeof import('../lib/tax-withholding-payment-actions');
 
 const entity = { id: 1, workspace_id: A, business_id: 4, legal_name: 'PT. CONTOH SINTETIS INDONESIA', npwp: '0123456789012345', tku_id: '0123456789012345000000', is_active: true };
 const vendor = { id: 1, workspace_id: A, name: 'PT CONTOH MARKETPLACE', identity_type: 'npwp', identity_number: '0012345678901000', is_pkp: true, country_code: 'IDN', is_active: true };
@@ -135,6 +169,7 @@ beforeEach(() => {
     tax_object_codes: [structuredClone(software)],
     tax_withholding_slips: [],
     tax_export_batches: [],
+    tax_payment_records: [],
   };
 });
 
@@ -403,4 +438,59 @@ test('previewCoretaxRecording proposes nothing for a slip with conflicting sourc
   assert.deepEqual(combined.candidates.map((row) => [row.id, row.proposedNumber, row.action, row.problems.length]), [[1, null, 'none', 1], [2, null, 'none', 1]]);
   assert.equal(combined.totals.record, 0);
   await assert.rejects(coretaxActions.recordCoretaxNumbers({ entityId: 1, year: 2026, month: 1, assignments: [] }), /Tidak ada nomor/);
+});
+
+test('payment records validate the billing id and group, record NTPN to pay the group, and revert on clear', async () => {
+  db.tax_withholding_slips.push({ id: 1, ...readySlip({ status: 'reported', coretax_slip_number: '26000AAA1', export_batch_id: 1 }), updated_at: stamp() });
+  db.tax_withholding_slips.push({ id: 2, ...readySlip({ status: 'reported', coretax_slip_number: '26000AAA2', export_batch_id: 1, invoice_number: 'INV-B' }), updated_at: stamp() });
+  db.tax_withholding_slips.push({ id: 3, ...readySlip({ status: 'exported', export_batch_id: 1, invoice_number: 'INV-C' }), updated_at: stamp() });
+  db.tax_withholding_slips.push({ id: 4, ...readySlip({ status: 'reported', coretax_slip_number: '26000AAA4', export_batch_id: 1, invoice_number: 'INV-FEB', period_month: 2, invoice_date: '2026-02-05', document_date: '2026-02-05', withholding_date: '2026-02-05' }), updated_at: stamp() });
+  const base = { entityId: 1, year: 2026, month: 1, article: 'pph23' as const, kap: '411124', kjs: '104', billingCreatedAt: '2026-02-03' };
+
+  await assert.rejects(paymentActions.saveTaxPaymentRecord({ ...base, billingId: '12345', billingAmount: '40000' }), /15 digit/);
+  await assert.rejects(paymentActions.saveTaxPaymentRecord({ ...base, kjs: '999', billingId: '012345678901234', billingAmount: '40000' }), /Tidak ada kode objek/);
+  await assert.rejects(paymentActions.saveTaxPaymentRecord({ ...base, billingId: '012345678901234', billingAmount: '400.5' }), /rupiah bulat/);
+  await assert.rejects(paymentActions.saveTaxPaymentRecord({ ...base, billingId: '012345678901234', billingAmount: '40000', billingValidUntil: '2026-01-01' }), /sebelum tanggal pembuatannya/);
+
+  await assert.rejects(paymentActions.saveTaxPaymentRecord({ ...base, entityId: 99, billingId: '012345678901234', billingAmount: '40000' }), /Pemotong tidak ditemukan di workspace ini/);
+  await assert.rejects(paymentActions.listTaxPaymentRecords({ entityId: 99, year: 2026 }), /Pemotong tidak ditemukan di workspace ini/);
+
+  const record = await paymentActions.saveTaxPaymentRecord({ ...base, billingId: '0123 4567 8901 234', billingAmount: '40000', billingValidUntil: '2026-03-05' });
+  assert.equal(record.billing_id, '012345678901234');
+  assert.equal(record.groupKey, '1|pph23|411124|104');
+  assert.equal(record.ntpn, null);
+  const listed = await paymentActions.listTaxPaymentRecords({ entityId: 1, year: 2026 });
+  assert.equal(listed.length, 1);
+
+  await assert.rejects(paymentActions.recordTaxPaymentNtpn({ id: record.id, version: record.updated_at, ntpn: 'abc', paidAt: '2026-02-05', paidAmount: '40000' }), /16 huruf/);
+  await assert.rejects(paymentActions.recordTaxPaymentNtpn({ id: record.id, version: 'stale', ntpn: 'ABCDEFGH12345678', paidAt: '2026-02-05', paidAmount: '40000' }), /berubah sejak dibaca/);
+  const paid = await paymentActions.recordTaxPaymentNtpn({ id: record.id, version: record.updated_at, ntpn: 'abcdefgh12345678', paidAt: '2026-02-05', paidAmount: '40000' });
+  assert.deepEqual(paid, { slipsPaid: 2 }, 'both reported January pph23 slips are paid; the exported one and February are untouched');
+  assert.deepEqual(db.tax_withholding_slips.map((row) => row.status), ['paid', 'paid', 'exported', 'reported']);
+  const afterPay = (await paymentActions.listTaxPaymentRecords({ entityId: 1, year: 2026 }))[0];
+  assert.equal(afterPay.ntpn, 'ABCDEFGH12345678');
+
+  // A record with an NTPN can be neither edited nor deleted; clearing reverts the group.
+  await assert.rejects(paymentActions.saveTaxPaymentRecord({ ...base, id: record.id, version: afterPay.updated_at, billingId: '012345678901234', billingAmount: '41000' }), /berubah sejak dibuka/);
+  await assert.rejects(paymentActions.deleteTaxPaymentRecord({ id: record.id, version: afterPay.updated_at }), /sudah punya NTPN/);
+  const cleared = await paymentActions.clearTaxPaymentNtpn({ id: record.id, version: afterPay.updated_at });
+  assert.deepEqual(cleared, { slipsReverted: 2 });
+  assert.deepEqual(db.tax_withholding_slips.map((row) => row.status), ['reported', 'reported', 'exported', 'reported']);
+  const afterClear = (await paymentActions.listTaxPaymentRecords({ entityId: 1, year: 2026 }))[0];
+  await paymentActions.deleteTaxPaymentRecord({ id: record.id, version: afterClear.updated_at });
+  assert.equal((await paymentActions.listTaxPaymentRecords({ entityId: 1, year: 2026 })).length, 0);
+});
+
+test('listTaxPaymentRecords pages past the PostgREST row limit so yearly totals and late billings are not cut off', async () => {
+  const records = db.tax_payment_records ??= [];
+  for (let index = 0; index < DEFAULT_PAGE + 1; index += 1) {
+    records.push({
+      id: index + 1, workspace_id: A, entity_id: 1, period_month: 1 + (index % 12), period_year: 2026, pph_article: 'pph23', kap: '411124', kjs: '104',
+      billing_id: String(100000000000000 + index), billing_amount: '1000', billing_created_at: '2026-02-03', billing_valid_until: null,
+      ntpn: `NTPN${String(index).padStart(12, '0')}`, paid_at: '2026-02-05', paid_amount: '1000', notes: null, created_at: stamp(), updated_at: stamp(),
+    });
+  }
+  const listed = await paymentActions.listTaxPaymentRecords({ entityId: 1, year: 2026 });
+  assert.equal(listed.length, DEFAULT_PAGE + 1);
+  assert.equal(listed.reduce((sum, record) => sum + Number(record.paid_amount), 0), (DEFAULT_PAGE + 1) * 1000);
 });
