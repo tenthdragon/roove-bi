@@ -4,7 +4,7 @@ import { randomBytes } from 'node:crypto';
 import { promisify } from 'node:util';
 import assert from 'node:assert/strict';
 
-// Migrations 247 to 252 run in a disposable database with the minimal
+// Migrations 247 to 253 run in a disposable database with the minimal
 // workspace foundation they depend on. Direct reads then run as `authenticated`
 // users with a JWT subject, exactly as PostgREST would issue them, and two
 // concurrent imports race on the facility identity constraint. The shared
@@ -39,6 +39,7 @@ const facilityIdentityMigration = read('../supabase/migrations/249_tax_facility_
 const readOnlyGrantsMigration = read('../supabase/migrations/250_tax_master_read_only_grants.sql');
 const slipsMigration = read('../supabase/migrations/251_tax_withholding_slips.sql');
 const exportMigration = read('../supabase/migrations/252_tax_export_batches.sql');
+const coretaxMigration = read('../supabase/migrations/253_tax_coretax_recording.sql');
 
 // Two imports insert the same certificate at the same time; the constraint must
 // leave exactly one row and neither side may fail.
@@ -129,6 +130,8 @@ ${readAccessMigration}
   psql(slipsMigration);
   psql(exportMigration);
   psql(exportMigration);
+  psql(coretaxMigration);
+  psql(coretaxMigration);
   process.stdout.write(psql(`DO $$ DECLARE target regclass; BEGIN
     FOREACH target IN ARRAY ARRAY['public.tax_object_codes'::regclass,'public.tax_withholding_entities'::regclass,
       'public.tax_counterparties'::regclass,'public.tax_counterparty_facilities'::regclass] LOOP
@@ -151,6 +154,7 @@ ${readAccessMigration}
   process.stdout.write(psql(read('./tax-withholding-access-db.sql')));
   process.stdout.write(psql(read('./tax-withholding-slips-db.sql')));
   process.stdout.write(psql(read('./tax-withholding-export-db.sql')));
+  process.stdout.write(psql(read('./tax-withholding-coretax-db.sql')));
 
   await Promise.all([psqlAsync(concurrentFacilityInsert), psqlAsync(concurrentFacilityInsert)]);
   process.stdout.write(psql(`

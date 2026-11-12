@@ -63,7 +63,25 @@ function from(table: string) {
   return query;
 }
 
+function recordCoretaxRpc(args: Record<string, any>) {
+  const slips = db.tax_withholding_slips ??= [];
+  const ids: number[] = args.p_slip_ids;
+  const numbers: string[] = args.p_numbers;
+  if (numbers.length !== ids.length || args.p_versions.length !== ids.length) return { data: null, error: { message: 'Nomor dan versi harus dikirim untuk setiap bukti potong.' } };
+  if (numbers.some((n) => !/^(?=.*\d)[0-9A-Z]{6,20}$/.test(n))) return { data: null, error: { message: `Nomor bukti potong tidak valid: ${numbers.join(', ')}` } };
+  if (new Set(numbers).size !== numbers.length) return { data: null, error: { message: 'Nomor bukti potong yang sama diberikan ke beberapa bukti potong.' } };
+  const locked = slips.filter((row) => ids.includes(row.id) && row.workspace_id === args.p_workspace_id && row.entity_id === args.p_entity_id
+    && (row.status === 'exported' || (args.p_allow_replace && row.status === 'reported')));
+  if (locked.length !== ids.length) return { data: null, error: { message: `Sebagian bukti potong bukan status di-export (${locked.length} dari ${ids.length} cocok); muat ulang.` } };
+  if (locked.some((row) => row.updated_at !== args.p_versions[ids.indexOf(row.id)])) return { data: null, error: { message: 'Sebagian bukti potong berubah sejak dibaca' } };
+  const used = slips.filter((row) => row.entity_id === args.p_entity_id && !ids.includes(row.id) && numbers.includes(row.coretax_slip_number)).map((row) => row.coretax_slip_number);
+  if (used.length > 0) return { data: null, error: { message: `Nomor bukti potong sudah dipakai bukti potong lain: ${used.join(', ')}` } };
+  for (const row of locked) Object.assign(row, { coretax_slip_number: numbers[ids.indexOf(row.id)], status: 'reported', coretax_recorded_at: stamp(), coretax_recorded_by: args.p_recorded_by, updated_at: stamp() });
+  return { data: ids.length, error: null };
+}
+
 async function rpc(name: string, args: Record<string, any>) {
+  if (name === 'tax_record_coretax_numbers') return recordCoretaxRpc(args);
   assert.equal(name, 'tax_create_export_batch');
   const slips = db.tax_withholding_slips ??= [];
   const ids: number[] = [...new Set(args.p_slip_ids as number[])];
@@ -91,6 +109,7 @@ require.cache[require.resolve('../lib/supabase-server')] = { exports: { createSe
 require.cache[require.resolve('../lib/dashboard-access')] = { exports: { requireDashboardTabAccess: async () => ({ workspaceId: A, profile: { id: 'synthetic-user', role: 'staf_finance' } }) } } as any;
 const slipActions = require('../lib/tax-withholding-slip-actions') as typeof import('../lib/tax-withholding-slip-actions');
 const exportActions = require('../lib/tax-withholding-export-actions') as typeof import('../lib/tax-withholding-export-actions');
+const coretaxActions = require('../lib/tax-withholding-coretax-actions') as typeof import('../lib/tax-withholding-coretax-actions');
 
 const entity = { id: 1, workspace_id: A, business_id: 4, legal_name: 'PT. CONTOH SINTETIS INDONESIA', npwp: '0123456789012345', tku_id: '0123456789012345000000', is_active: true };
 const vendor = { id: 1, workspace_id: A, name: 'PT CONTOH MARKETPLACE', identity_type: 'npwp', identity_number: '0012345678901000', is_pkp: true, country_code: 'IDN', is_active: true };
@@ -245,4 +264,143 @@ test('preview totals and membership describe the first batch when more slips are
   const next = await exportActions.previewTaxExport({ entityId: 1, year: 2026, month: 1 });
   assert.deepEqual(next.batchIds, [2001]);
   assert.equal(next.totals.grossAmount, '1000');
+});
+
+function recordingForm(fields: Record<string, string | File>) {
+  const formData = new FormData();
+  for (const [key, value] of Object.entries({ entityId: '1', year: '2026', month: '1', ...fields })) formData.set(key, value);
+  return formData;
+}
+
+test('Coretax numbers pasted for a batch are matched by document number, recorded atomically and can be corrected or cleared', async () => {
+  for (let index = 0; index < 3; index += 1) {
+    db.tax_withholding_slips.push({ id: index + 1, ...readySlip({ invoice_number: `INV-${index + 1}` }), updated_at: stamp() });
+  }
+  // The faktur pajak number is what Coretax echoes for a TaxInvoice document.
+  db.tax_withholding_slips.push({ id: 4, ...readySlip({ invoice_number: 'INV-FP', document_type: 'TaxInvoice', tax_invoice_number: '010.000-26.12345678' }), updated_at: stamp() });
+  const preview = await exportActions.previewTaxExport({ entityId: 1, year: 2026, month: 1 });
+  await exportActions.createTaxExportBatch({ entityId: 1, year: 2026, month: 1, slipIds: preview.batchIds });
+
+  const empty = await coretaxActions.previewCoretaxRecording(recordingForm({}));
+  assert.equal(empty.totals.exported, 4);
+  assert.equal(empty.parsedRows, 0);
+  assert.equal(empty.batches.length, 1);
+  assert.equal(empty.batches[0].exported_count, 4);
+
+  const matched = await coretaxActions.previewCoretaxRecording(recordingForm({ text: 'INV-1\t26000AAA1\n010.000-26.12345678\t26000AAA4\nINV-9\t26000AAA9\nINV-2\tkosong' }));
+  assert.equal(matched.parsedRows, 4);
+  assert.deepEqual(matched.candidates.map((row) => [row.id, row.proposedNumber, row.action]), [[1, '26000AAA1', 'record'], [2, 'KOSONG', 'none'], [3, null, 'none'], [4, '26000AAA4', 'record']]);
+  assert.match(matched.candidates[1].problems[0], /memuat angka/);
+  assert.equal(matched.candidates[3].document_number, '010.000-26.12345678');
+  assert.equal(matched.unmatched.length, 1, 'INV-9 is unknown');
+  assert.equal(matched.totals.record, 2);
+  assert.equal(matched.totals.blocked, 1);
+
+  const recorded = await coretaxActions.recordCoretaxNumbers({
+    entityId: 1, year: 2026, month: 1,
+    assignments: matched.candidates.filter((row) => row.action === 'record').map((row) => ({ slipId: row.id, coretaxNumber: row.proposedNumber!, version: row.updated_at })),
+  });
+  assert.deepEqual(recorded, { recorded: 2, replaced: 0 });
+  assert.equal(db.tax_withholding_slips.find((row) => row.id === 1).status, 'reported');
+  assert.equal(db.tax_withholding_slips.find((row) => row.id === 4).coretax_slip_number, '26000AAA4');
+  assert.equal(db.tax_withholding_slips.find((row) => row.id === 2).status, 'exported');
+
+  // A stale version (the slip was recorded by someone else meanwhile) aborts the call.
+  await assert.rejects(coretaxActions.recordCoretaxNumbers({
+    entityId: 1, year: 2026, month: 1, allowReplace: true,
+    assignments: [{ slipId: 1, coretaxNumber: '26000AAA7', version: matched.candidates[0].updated_at }],
+  }), /berubah sejak pratinjau/);
+  // Replacing needs explicit permission; a number held by another slip is refused.
+  const after = await coretaxActions.previewCoretaxRecording(recordingForm({}));
+  const first = after.candidates.find((row) => row.id === 1)!;
+  await assert.rejects(coretaxActions.recordCoretaxNumbers({ entityId: 1, year: 2026, month: 1, assignments: [{ slipId: 1, coretaxNumber: '26000AAA7', version: first.updated_at }] }), /izin ganti nomor/);
+  await assert.rejects(coretaxActions.recordCoretaxNumbers({ entityId: 1, year: 2026, month: 1, allowReplace: true, assignments: [{ slipId: 1, coretaxNumber: '26000AAA4', version: first.updated_at }] }), /sudah dipakai bukti potong lain/);
+  const replaced = await coretaxActions.recordCoretaxNumbers({ entityId: 1, year: 2026, month: 1, allowReplace: true, assignments: [{ slipId: 1, coretaxNumber: '26000aaa7', version: first.updated_at }] });
+  assert.deepEqual(replaced, { recorded: 1, replaced: 1 });
+  assert.equal(db.tax_withholding_slips.find((row) => row.id === 1).coretax_slip_number, '26000AAA7');
+  // Malformed input never reaches the database.
+  await assert.rejects(coretaxActions.recordCoretaxNumbers({ entityId: 1, year: 2026, month: 1, assignments: [{ slipId: 2, coretaxNumber: 'SUDAH DIUPLOAD', version: 'x' }] }), /tanpa spasi/);
+  await assert.rejects(coretaxActions.recordCoretaxNumbers({ entityId: 1, year: 2026, month: 1, assignments: [{ slipId: 2, coretaxNumber: '26000AAA2', version: 'x' }, { slipId: 3, coretaxNumber: '26000AAA2', version: 'y' }] }), /sama diberikan/);
+
+  // Clearing needs the version the dialog showed: a number corrected meanwhile survives.
+  const shown = after.candidates.find((row) => row.id === 4)!;
+  await coretaxActions.recordCoretaxNumbers({ entityId: 1, year: 2026, month: 1, allowReplace: true, assignments: [{ slipId: 4, coretaxNumber: '26000AAA5', version: shown.updated_at }] });
+  await assert.rejects(coretaxActions.clearCoretaxNumber({ slipId: 4, version: shown.updated_at }), /berubah sejak dibuka/);
+  assert.equal(db.tax_withholding_slips.find((row) => row.id === 4).coretax_slip_number, '26000AAA5');
+  const latest = (await coretaxActions.previewCoretaxRecording(recordingForm({}))).candidates.find((row) => row.id === 4)!;
+  await coretaxActions.clearCoretaxNumber({ slipId: 4, version: latest.updated_at });
+  const cleared = db.tax_withholding_slips.find((row) => row.id === 4);
+  assert.equal(cleared.status, 'exported');
+  assert.equal(cleared.coretax_slip_number, null);
+  await assert.rejects(coretaxActions.clearCoretaxNumber({ slipId: 4, version: cleared.updated_at }), /berstatus dilaporkan/);
+});
+
+test('clearCoretaxNumber refuses an imported reported slip that has no batch to return to', async () => {
+  db.tax_withholding_slips.push({ id: 1, ...readySlip({ status: 'reported', coretax_slip_number: '26000AAA1', source: 'import_rekapan' }), updated_at: stamp() });
+  await assert.rejects(coretaxActions.clearCoretaxNumber({ slipId: 1, version: db.tax_withholding_slips[0].updated_at }), /tanpa batch export/);
+  assert.equal(db.tax_withholding_slips[0].status, 'reported');
+});
+
+test('getTaxYearSummary groups the year per masa and pasal + KAP + KJS with pending PPh', async () => {
+  db.tax_object_codes.push({ code: '28-409-01', name: 'Sewa tanah/bangunan', pph_article: 'pph4_2', rate_percent: 10, is_active: true, kap: '411128', kjs: '409' });
+  db.tax_object_codes.push({ code: '24-104-34', name: 'Jasa iklan', pph_article: 'pph23', rate_percent: 2, is_active: true, kap: '411124', kjs: '104' });
+  let id = 0;
+  const add = (overrides: Record<string, unknown>) => db.tax_withholding_slips.push({ id: ++id, ...readySlip(overrides), updated_at: stamp() });
+  add({ period_month: 1, gross_amount: '1000000', withholding_amount: '20000', status: 'reported', coretax_slip_number: '26000AAA1' });
+  add({ period_month: 1, object_code: '24-104-34', gross_amount: '500000', withholding_amount: '10000' });
+  add({ period_month: 1, object_code: '28-409-01', pph_article: 'pph4_2', gross_amount: '2000000', withholding_amount: '200000', status: 'draft' });
+  add({ period_month: 3, gross_amount: '1500000', withholding_amount: '30000', status: 'exported', export_batch_id: 1 });
+  add({ period_month: 3, period_year: 2025, gross_amount: '9', withholding_amount: '9' });
+
+  const summary = await coretaxActions.getTaxYearSummary({ entityId: 1, year: 2026 });
+  assert.equal(summary.count, 4);
+  assert.equal(summary.withholdingAmount, '260000');
+  assert.deepEqual(summary.months.map((month) => [month.month, month.count, month.withholdingAmount]), [[1, 3, '230000'], [3, 1, '30000']]);
+  assert.deepEqual(summary.months[0].groups.map((group) => [group.article, group.kap, group.kjs, group.objectCodes, group.count, group.withholdingAmount, group.pendingWithholdingAmount]), [
+    ['pph23', '411124', '104', ['24-104-24', '24-104-34'], 2, '30000', '10000'],
+    ['pph4_2', '411128', '409', ['28-409-01'], 1, '200000', '200000'],
+  ]);
+  assert.deepEqual(summary.groups.map((group) => [group.article, group.count, group.withholdingAmount, group.pendingWithholdingAmount, group.byStatus.reported, group.byStatus.exported]), [
+    ['pph23', 3, '60000', '40000', 1, 1],
+    ['pph4_2', 1, '200000', '200000', 0, 0],
+  ]);
+});
+
+test('a multi-column CSV download with quoted fields is parsed as a sheet and matched', async () => {
+  db.tax_withholding_slips.push({ id: 1, ...readySlip({ invoice_number: 'INV, 1', status: 'exported', export_batch_id: 1 }), updated_at: stamp() });
+  db.tax_withholding_slips.push({ id: 2, ...readySlip({ invoice_number: 'INV-2', status: 'exported', export_batch_id: 1 }), updated_at: stamp() });
+  const csv = 'Nomor Dokumen,NPWP,DPP,Nomor Bukti Potong\n"INV, 1",0012345678901000,1000000,26000CSV01\nINV-2,0012345678901000,1000000,26000CSV02\n';
+  const file = new File([csv], 'daftar-bpu.csv', { type: 'text/csv' });
+  const preview = await coretaxActions.previewCoretaxRecording(recordingForm({ file }));
+  assert.deepEqual(preview.issues, []);
+  assert.equal(preview.parsedRows, 2);
+  assert.deepEqual(preview.candidates.map((row) => [row.id, row.proposedNumber, row.action]), [[1, '26000CSV01', 'record'], [2, '26000CSV02', 'record']]);
+  const semicolon = new File(['Nomor Dokumen;Nomor Bukti Potong\nINV-2;26000CSV09\n'], 'daftar.txt', { type: 'text/plain' });
+  const second = await coretaxActions.previewCoretaxRecording(recordingForm({ file: semicolon }));
+  assert.equal(second.candidates.find((row) => row.id === 2)?.proposedNumber, '26000CSV09');
+});
+
+test('previewCoretaxRecording proposes nothing for a slip with conflicting source numbers or a document from another masa', async () => {
+  db.tax_withholding_slips.push({ id: 1, ...readySlip({ invoice_number: 'INV-ONE', status: 'exported', export_batch_id: 1 }), updated_at: stamp() });
+  db.tax_withholding_slips.push({ id: 2, ...readySlip({ invoice_number: 'INV-JAN', status: 'exported', export_batch_id: 1 }), updated_at: stamp() });
+  const preview = await coretaxActions.previewCoretaxRecording(recordingForm({
+    text: 'Nomor Dokumen\tNPWP\tDPP\tNomor Bukti Potong\nINV-ONE\t\t\t26000REV3\nINV-ONE\t\t\t26000REV4\nINV-DEC\t0012345678901000\t1000000\t26000REV2',
+  }));
+  const one = preview.candidates.find((row) => row.id === 1)!;
+  assert.equal(one.proposedNumber, null);
+  assert.equal(one.action, 'none');
+  assert.match(one.problems[0], /bertentangan/);
+  const jan = preview.candidates.find((row) => row.id === 2)!;
+  assert.equal(jan.proposedNumber, null, 'INV-DEC is not tied to INV-JAN by NPWP + DPP');
+  assert.equal(preview.unmatched.length, 1);
+  assert.match(preview.unmatched[0].reason, /INV-DEC tidak ada .* sama dengan INV-ONE, INV-JAN; ketik/);
+  assert.equal(preview.conflicts.length, 1);
+  assert.equal(preview.totals.record, 0);
+  assert.equal(preview.totals.blocked, 1);
+
+  // Combined conflicts: INV-JAN claiming the number INV-ONE also claimed gets no proposal either.
+  const combined = await coretaxActions.previewCoretaxRecording(recordingForm({ text: 'INV-ONE\t26000AAA1\nINV-ONE\t26000AAA2\nINV-JAN\t26000AAA1' }));
+  assert.deepEqual(combined.candidates.map((row) => [row.id, row.proposedNumber, row.action, row.problems.length]), [[1, null, 'none', 1], [2, null, 'none', 1]]);
+  assert.equal(combined.totals.record, 0);
+  await assert.rejects(coretaxActions.recordCoretaxNumbers({ entityId: 1, year: 2026, month: 1, assignments: [] }), /Tidak ada nomor/);
 });

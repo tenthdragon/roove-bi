@@ -197,7 +197,8 @@ Tiga enum lain (fasilitas, jenis dokumen, opsi IP) cukup sebagai konstanta TypeS
 | withholding_date | DATE | default = invoice_date |
 | status | TEXT | `draft` → `ready` → `exported` → `reported` → `paid`, lihat §7 |
 | export_batch_id | BIGINT FK tax_export_batches | NULL sampai di-export |
-| coretax_slip_number | TEXT | nomor bupot dari Coretax (`26000UK7L`) |
+| coretax_slip_number | TEXT | nomor bupot dari Coretax (`26000UK7L`); unik per pemotong untuk nilai berpola `^[0-9A-Z]+$` (migration 253) |
+| coretax_recorded_at, coretax_recorded_by | TIMESTAMPTZ, UUID | kapan dan oleh siapa nomor dicatat (fase 4) |
 | account_code, account_name | TEXT | `NO AKUN` + nama akun (`(6-60221) Administrasi`) |
 | trello_url | TEXT | |
 | notes | TEXT | |
@@ -322,8 +323,10 @@ exported ──(void dari batch, alasan wajib)──> draft   // kembali ke antr
 | `previewTaxExport({ entityId, year, month })` | daftar bupot `ready` + hasil validasi + total; tidak menulis |
 | `createTaxExportBatch({ entityId, year, month, slipIds })` | validasi ulang, buat batch, set status `exported`, kembalikan `{ batchId, fileName, xml }` |
 | `getTaxExportBatchXml(batchId)` | unduh ulang |
-| `recordCoretaxSlipNumbers(batchId, pairs[])` | set `coretax_slip_number`, status `reported` |
-| `getTaxMonthlySummary({ entityId, year })` | DPP & PPh per pasal per bulan, dasar ID Billing |
+| `previewCoretaxRecording(formData)` | bupot `exported`/`reported` satu masa (opsional satu batch) + usulan nomor dari tempelan/unduhan Coretax; tidak menulis |
+| `recordCoretaxNumbers({ entityId, year, month, assignments[], allowReplace })` | fungsi DB `tax_record_coretax_numbers()`: set `coretax_slip_number`, status `reported`, cek versi dan keunikan |
+| `clearCoretaxNumber({ slipId })` | hapus nomor, kembali ke `exported` (hanya bupot yang punya batch) |
+| `getTaxYearSummary({ entityId, year })` | DPP & PPh per masa dan per pasal + KAP + KJS, dasar ID Billing |
 | `importRekapanWorkbook(file)` | impor awal, lihat §10 |
 
 Unduhan: action mengembalikan string XML; klien membuat `Blob` dan memicu
@@ -344,7 +347,10 @@ Satu halaman dengan sub-tab, memakai konvensi tema `--tone-*`/`toneText`:
    PPN, total dihitung langsung dan ditampilkan; tarif bisa dioverride dengan alasan.
 3. **Export XML**. Pratinjau daftar `ready` + validasi, lalu tombol buat batch
    dan unduh. Riwayat batch masa tersebut dengan tombol unduh ulang dan void.
-4. **Pencatatan Coretax**. Tempel nomor bupot per batch; status berubah `reported`.
+4. **Pencatatan Coretax** (dialog di tab Bukti Potong). Tempel dua kolom atau unggah unduhan Coretax,
+   atau ketik per baris; status berubah `reported`. Per bupot: catat / ubah / hapus nomor.
+4b. **Rekap Setor** (sub-tab). Per masa dan total tahun: pasal, KAP, KJS, jumlah bupot, DPP, PPh,
+   PPh yang belum dilaporkan, status; unduh CSV.
 5. **Lawan Transaksi**. CRUD master + fasilitas dengan masa berlaku; penanda
    fasilitas yang akan habis dalam 30 hari.
 6. **Pemotong** (owner). NPWP, TKU, penandatangan per PT.
@@ -459,6 +465,28 @@ Dua workbook per PT (RTI dan PT lain) diimpor terpisah; `entity` dipilih di UI.
   hanya menyentuh baris yang masih draft/ready tanpa batch dan memeriksa jumlah baris; satu batch
   maksimal 2.000 bupot (sisanya menunggu batch berikutnya); hitungan bupot per batch dipaginasi.
 
+## 10d. Keputusan implementasi Fase 4
+
+- Nomor Coretax disimpan apa adanya setelah trim + huruf besar; validasi `^(?=.*\d)[0-9A-Z]{6,20}$`
+  (longgar terhadap perubahan format), peringatan non-blokir bila bukan 9 karakter. Nilai lama hasil impor
+  (`SUDAH DIUPLOAD`, dua nomor dalam satu sel) tetap tersimpan tetapi berada di luar indeks unik dan harus
+  dikoreksi lewat "Ubah nomor".
+- Pencatatan lewat fungsi DB `tax_record_coretax_numbers()` (service role): mengunci pemotong aktif,
+  memverifikasi status `exported` (atau `reported` bila `p_allow_replace`), `updated_at` setiap bupot, dan
+  nomor belum dipakai bupot lain di pemotong yang sama; penulisan dua tahap (placeholder `~nomor`) agar dua
+  nomor bisa ditukar dalam satu panggilan. Maksimal 2.000 bupot per pencatatan.
+- Pencocokan sumber Coretax: kunci utama nomor dokumen yang ditulis di XML (`xmlDocumentNumber`: faktur
+  pajak untuk `TaxInvoice`, selain itu nomor invoice), lalu nomor invoice polos, dipersempit dengan NPWP dan
+  DPP bila sumber memuatnya; cadangan NPWP + DPP tanpa nomor dokumen. Baris ambigu/tidak cocok dilaporkan
+  dan nomornya bisa diketik langsung di baris yang benar. Format unduhan Coretax dideteksi dari judul kolom
+  (sinonim "Nomor Bukti Potong", "Nomor Dokumen", "NPWP", "DPP"); tanpa judul, kolom yang nilainya berpola
+  nomor Coretax dianggap kolom nomor.
+- Hapus nomor mengembalikan status ke `exported` dan hanya untuk bupot yang punya `export_batch_id`
+  (CHECK `exported` ⇔ ada batch); bupot impor yang `reported` tanpa batch hanya bisa diubah nomornya.
+- Rekap Setor dihitung di server dari seluruh bupot satu tahun per pemotong (dipaginasi), dikelompokkan per
+  masa dan per `(pph_article, kap, kjs)` dari `tax_object_codes`; kolom "belum dilaporkan" = PPh bupot
+  `draft`/`ready`/`exported`. CSV dipisah `;` dibuat di klien.
+
 ## 11. Pertanyaan terbuka (perlu jawaban sebelum fase terkait)
 
 1. **ID Billing dan NTPN**: di workbook 2026 kolom ini kosong di semua baris.
@@ -480,7 +508,7 @@ Dua workbook per PT (RTI dan PT lain) diimpor terpisah; `entity` dipilih di UI.
 | 1 ✅ | Migration `247_tax_withholding.sql` (4 tabel master + seed 210 kode objek), tab & permission `tab:tax-withholding`, halaman `app/dashboard/tax-withholding`, CRUD pemotong dan lawan transaksi, impor master (`lib/tax-withholding-import.ts`), unit test `npm run test:tax-withholding` | Master 500 vendor terimpor, NPWP tervalidasi |
 | 2 ✅ | Migration `251_tax_withholding_slips.sql`, rule engine `lib/tax-withholding-rules.ts` (BigInt mikro-rupiah, unit test), parser `lib/tax-withholding-rekapan-import.ts`, server action `lib/tax-withholding-slip-actions.ts`, UI `components/TaxWithholdingSlips.tsx` (daftar per pemotong/masa, form dengan perhitungan langsung, impor REKAPAN dengan laporan selisih engine vs workbook) | PPh hasil engine = PPh workbook untuk 830 baris 2026 (diverifikasi saat impor di produksi) |
 | 3 ✅ | Migration `252_tax_export_batches.sql`, generator XML `lib/tax-withholding-xml.ts`, action `lib/tax-withholding-export-actions.ts` (pratinjau, buat batch, unduh ulang, void), dialog Export XML di tab Bukti Potong, unit test generator dan DB test batch | Elemen XML sama dengan template Excel; `TaxBase` memakai presisi 6 desimal yang tersimpan |
-| 4 | Pencatatan nomor bupot, rekap bulanan per pasal (KAP/KJS) | Rekap 2026 cocok dengan `SUBTOTAL` di REKAPAN |
+| 4 ✅ | Migration `253_tax_coretax_recording.sql` (fungsi `tax_record_coretax_numbers()`, indeks unik nomor per pemotong, kolom audit), parser/pencocok `lib/tax-withholding-coretax.ts`, action `lib/tax-withholding-coretax-actions.ts` (pratinjau, catat, hapus, rekap tahunan), dialog `components/TaxWithholdingCoretax.tsx`, tab Rekap Setor `components/TaxWithholdingRecap.tsx` | Total PPh per masa di Rekap Setor = jumlah kolom PPh REKAPAN per masa (2026 di produksi) |
 | 5 | ID Billing/NTPN, PPh 26, pengingat fasilitas kedaluwarsa | sesuai jawaban §11 |
 
 Setiap fase: `npm run typecheck:app`, `npm run lint`, `npm run build`, dan unit
