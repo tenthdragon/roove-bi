@@ -17,6 +17,13 @@ import {
   type TaxSlip,
   type TaxSlipTotals,
 } from '@/lib/tax-withholding-slip-actions';
+import {
+  createTaxExportBatch,
+  getTaxExportBatchXml,
+  previewTaxExport,
+  voidExportedTaxSlip,
+  type TaxExportPreview,
+} from '@/lib/tax-withholding-export-actions';
 import type { TaxCounterparty, TaxWithholdingEntity } from '@/lib/tax-withholding-actions';
 import { DOCUMENT_TYPES, IDENTITY_LABELS, TAX_ARTICLE_LABELS, formatIdentity, type TaxArticle } from '@/lib/tax-withholding-domain';
 import type { GrossInputMode } from '@/lib/tax-withholding-rules';
@@ -53,6 +60,17 @@ const formatDate = (date: string | null) => {
 };
 const errorText = (error: unknown) => (error instanceof Error ? error.message : 'Terjadi kesalahan.');
 const todayIso = () => new Date().toISOString().slice(0, 10);
+const formatDateTime = (value: string) => new Date(value).toLocaleString('id-ID', { dateStyle: 'medium', timeStyle: 'short' });
+function downloadXml(fileName: string, xml: string) {
+  const url = URL.createObjectURL(new Blob([xml], { type: 'application/xml;charset=utf-8' }));
+  const anchor = document.createElement('a');
+  anchor.href = url;
+  anchor.download = fileName;
+  document.body.appendChild(anchor);
+  anchor.click();
+  anchor.remove();
+  window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
 
 const inputStyle = {
   width: '100%', border: '1px solid var(--border)', borderRadius: 8,
@@ -158,6 +176,8 @@ export function SlipsSection({ entities, counterparties, canManage, notify }: {
   const [loading, setLoading] = useState(false);
   const [editing, setEditing] = useState<TaxSlip | 'new' | null>(null);
   const [deleting, setDeleting] = useState<TaxSlip | null>(null);
+  const [exporting, setExporting] = useState(false);
+  const [voiding, setVoiding] = useState<TaxSlip | null>(null);
   const loadSequence = useRef(0);
   const selectedEntity = entities.find((entity) => entity.id === entityId);
   const canEdit = canManage && Boolean(selectedEntity?.is_active);
@@ -242,6 +262,7 @@ export function SlipsSection({ entities, counterparties, canManage, notify }: {
               <option value="all">Semua status</option>
               {(Object.keys(STATUS_LABELS) as SlipStatus[]).map((status) => <option key={status} value={status}>{STATUS_LABELS[status]}</option>)}
             </select>
+            {canManage ? <button type="button" style={secondaryButtonStyle} disabled={!canEdit} onClick={() => setExporting(true)}>Export XML</button> : null}
             {canManage ? <button type="button" style={primaryButtonStyle} disabled={!canEdit} onClick={() => setEditing('new')}>+ Tambah</button> : null}
           </div>
         </div>
@@ -296,6 +317,8 @@ export function SlipsSection({ entities, counterparties, canManage, notify }: {
                     <td style={cellStyle}>
                       <StatusPill tone={STATUS_TONE[slip.status]}>{STATUS_LABELS[slip.status]}</StatusPill>
                       {slip.coretax_slip_number ? <div className="tw-mono" style={{ marginTop: 4 }}>{slip.coretax_slip_number}</div> : null}
+                      {slip.export_batch_id ? <div style={{ color: 'var(--dim)', fontSize: 11, marginTop: 4 }}>Batch #{slip.export_batch_id}</div> : null}
+                      {slip.status === 'draft' && slip.voided_from_batch_id ? <div style={{ color: 'var(--yellow)', fontSize: 11, marginTop: 4 }}>Dibatalkan dari batch #{slip.voided_from_batch_id}</div> : null}
                     </td>
                     {canManage ? (
                       <td style={{ ...cellStyle, whiteSpace: 'nowrap', textAlign: 'right' }}>
@@ -305,7 +328,10 @@ export function SlipsSection({ entities, counterparties, canManage, notify }: {
                             <button type="button" className="tw-action-button" style={{ color: 'var(--red)' }} onClick={() => setDeleting(slip)}>Hapus</button>
                           </>
                         ) : (
-                          <button type="button" className="tw-action-button" style={{ color: 'var(--accent)' }} onClick={() => setEditing(slip)}>Lihat</button>
+                          <>
+                            <button type="button" className="tw-action-button" style={{ color: 'var(--accent)' }} onClick={() => setEditing(slip)}>Lihat</button>
+                            {canEdit && slip.status === 'exported' ? <button type="button" className="tw-action-button" style={{ color: 'var(--yellow)' }} onClick={() => setVoiding(slip)}>Batalkan export</button> : null}
+                          </>
                         )}
                       </td>
                     ) : null}
@@ -330,6 +356,25 @@ export function SlipsSection({ entities, counterparties, canManage, notify }: {
         />
       ) : null}
 
+      {exporting && selectedEntity ? (
+        <ExportModal
+          entity={selectedEntity}
+          year={year}
+          month={month}
+          onClose={() => setExporting(false)}
+          onChanged={load}
+          notify={notify}
+        />
+      ) : null}
+
+      {voiding ? (
+        <VoidModal
+          slip={voiding}
+          onClose={() => setVoiding(null)}
+          onDone={async () => { notify({ type: 'success', text: 'Bukti potong dikembalikan ke draft dan keluar dari batch.' }); setVoiding(null); await load(); }}
+        />
+      ) : null}
+
       {deleting ? (
         <ModalShell title="Hapus bukti potong?" subtitle={`${deleting.invoice_number} · ${deleting.counterparty_name}`} onClose={() => setDeleting(null)} maxWidth={460}>
           <div className="tw-modal-body"><div style={{ fontSize: 13, color: 'var(--text-secondary)' }}>Bukti potong draft/siap akan dihapus permanen. Bukti potong yang sudah di-export tidak bisa dihapus dari sini.</div></div>
@@ -340,6 +385,206 @@ export function SlipsSection({ entities, counterparties, canManage, notify }: {
         </ModalShell>
       ) : null}
     </>
+  );
+}
+
+function ExportModal({ entity, year, month, onClose, onChanged, notify }: {
+  entity: TaxWithholdingEntity; year: number; month: number; onClose: () => void; onChanged: () => Promise<void>; notify: Notify;
+}) {
+  const [preview, setPreview] = useState<TaxExportPreview | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState<'create' | number | null>(null);
+  const [onlyBlocked, setOnlyBlocked] = useState(false);
+
+  const refresh = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      setPreview(await previewTaxExport({ entityId: entity.id, year, month }));
+    } catch (err) {
+      setError(errorText(err));
+    } finally {
+      setLoading(false);
+    }
+  }, [entity.id, year, month]);
+
+  useEffect(() => { void refresh(); }, [refresh]);
+
+  // The server decides which eligible slips fit this batch; totals and labels follow that subset.
+  const batchIds = preview ? preview.batchIds : [];
+  const deferredCount = preview ? preview.deferredCount : 0;
+
+  const create = async () => {
+    if (!preview || batchIds.length === 0) return;
+    setBusy('create');
+    setError(null);
+    try {
+      const result = await createTaxExportBatch({ entityId: entity.id, year, month, slipIds: batchIds });
+      downloadXml(result.fileName, result.xml);
+      notify({ type: 'success', text: `Batch ${result.fileName} dibuat: ${result.slipCount} bukti potong berstatus di-export.` });
+      await Promise.all([refresh(), onChanged()]);
+    } catch (err) {
+      setError(errorText(err));
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const redownload = async (batchId: number) => {
+    setBusy(batchId);
+    try {
+      const result = await getTaxExportBatchXml(batchId);
+      downloadXml(result.fileName, result.xml);
+    } catch (err) {
+      notify({ type: 'error', text: errorText(err) });
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const rows = preview ? preview.rows.filter((row) => !onlyBlocked || row.errors.length > 0) : [];
+  const canCreate = batchIds.length > 0 && Boolean(preview && preview.entityErrors.length === 0) && busy === null;
+
+  return (
+    <ModalShell title="Export XML BPPU" subtitle={`${entity.legal_name} · ${MONTHS[month - 1]} ${year}`} onClose={onClose} maxWidth={980}>
+      <div className="tw-modal-body" style={{ display: 'grid', gap: 14 }}>
+        {error ? <div className="tw-notice" style={{ color: 'var(--red)' }}>{error}</div> : null}
+        {loading && !preview ? <div style={{ color: 'var(--text-secondary)', fontSize: 13 }}>Memuat pratinjau…</div> : null}
+        {preview ? (
+          <>
+            {preview.entityErrors.length > 0 ? <div className="tw-notice" style={{ color: 'var(--red)' }}>Pemotong belum siap: {preview.entityErrors.join(' ')}</div> : null}
+            <div className="tw-summary-grid">
+              <SummaryCard label="Siap masuk XML" value={batchIds.length} hint={`${deferredCount > 0 ? `${deferredCount} lagi ke batch berikutnya · ` : ''}${preview.totals.blockedCount} terblokir · ${preview.statusCounts.exported} sudah di-export · ${preview.statusCounts.reported + preview.statusCounts.paid} dilaporkan`} />
+              <SummaryCard label="Total DPP batch" value={formatMoney(preview.totals.grossAmount)} />
+              <SummaryCard label="Total PPh batch" value={formatMoney(preview.totals.withholdingAmount)} />
+              <SummaryCard label="Nama file berikutnya" value={preview.nextFileName} hint={`TIN ${preview.entity.npwp}`} />
+            </div>
+            <div style={{ fontSize: 12, color: 'var(--text-secondary)' }}>
+              Semua bukti potong berstatus siap yang lolos validasi masuk ke satu file. Baris terblokir tetap di luar batch; perbaiki lalu buat batch berikutnya. Vendor non-residen (TIN asing) tidak dilaporkan lewat BPPU.
+            </div>
+            {deferredCount > 0 ? <div className="tw-notice">Satu file memuat maksimal {preview.maxBatchSlips} bukti potong. Batch ini mengambil {batchIds.length} bukti potong pertama; {deferredCount} sisanya tetap berstatus siap untuk batch berikutnya.</div> : null}
+            <label style={{ display: 'flex', gap: 8, alignItems: 'center', fontSize: 12, color: 'var(--text-secondary)' }}>
+              <input type="checkbox" checked={onlyBlocked} onChange={(event) => setOnlyBlocked(event.target.checked)} />
+              Tampilkan hanya yang terblokir
+            </label>
+            {rows.length === 0 ? (
+              <div style={{ padding: 18, textAlign: 'center', color: 'var(--text-secondary)', fontSize: 13 }}>
+                {preview.rows.length === 0 ? 'Tidak ada bukti potong draft atau siap di masa ini.' : 'Tidak ada baris terblokir.'}
+              </div>
+            ) : (
+              <div className="table-scroll" style={{ maxHeight: 360 }}>
+                <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 840, fontSize: 13 }}>
+                  <thead>
+                    <tr>
+                      <th style={headCellStyle}>Tanggal</th>
+                      <th style={headCellStyle}>Invoice</th>
+                      <th style={headCellStyle}>Lawan transaksi</th>
+                      <th style={headCellStyle}>Objek</th>
+                      <th style={{ ...headCellStyle, textAlign: 'right' }}>DPP</th>
+                      <th style={{ ...headCellStyle, textAlign: 'right' }}>PPh</th>
+                      <th style={headCellStyle}>Validasi</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {rows.map((row) => (
+                      <tr key={row.id}>
+                        <td style={{ ...cellStyle, whiteSpace: 'nowrap' }}>{formatDate(row.invoice_date)}</td>
+                        <td style={cellStyle}><div style={{ fontWeight: 600, overflowWrap: 'anywhere' }}>{row.invoice_number}</div></td>
+                        <td style={cellStyle}>{row.counterparty_name}<div style={{ color: 'var(--dim)', fontSize: 11 }}>{IDENTITY_LABELS[row.counterparty_identity_type]}</div></td>
+                        <td style={cellStyle}><span className="tw-mono">{row.object_code}</span>{row.facility_code !== 'N/A' ? <div style={{ color: 'var(--dim)', fontSize: 11 }}>{row.facility_code}</div> : null}</td>
+                        <td style={numberCellStyle}>{formatMoney(row.gross_amount, 2)}</td>
+                        <td style={numberCellStyle}>{formatMoney(row.withholding_amount)}</td>
+                        <td style={cellStyle}>
+                          {row.errors.length > 0
+                            ? <><StatusPill tone="red">Terblokir</StatusPill><div style={{ color: 'var(--red)', fontSize: 11, marginTop: 4 }}>{row.errors.join(' ')}</div></>
+                            : row.inBatch
+                              ? <StatusPill tone="green">Masuk batch</StatusPill>
+                              : <StatusPill tone="muted">Batch berikutnya</StatusPill>}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+            <div>
+              <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-secondary)', marginBottom: 6 }}>Riwayat batch masa ini</div>
+              {preview.batches.length === 0 ? (
+                <div style={{ fontSize: 12, color: 'var(--dim)' }}>Belum ada batch.</div>
+              ) : (
+                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+                  <thead>
+                    <tr>
+                      <th style={headCellStyle}>File</th>
+                      <th style={headCellStyle}>Dibuat</th>
+                      <th style={{ ...headCellStyle, textAlign: 'right' }}>Bupot</th>
+                      <th style={{ ...headCellStyle, textAlign: 'right' }}>PPh</th>
+                      <th style={headCellStyle}></th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {preview.batches.map((batch) => (
+                      <tr key={batch.id}>
+                        <td style={cellStyle}><div className="tw-mono" style={{ overflowWrap: 'anywhere' }}>{batch.file_name}</div><div style={{ color: 'var(--dim)', fontSize: 11 }}>sha256 {batch.xml_sha256.slice(0, 12)}…</div></td>
+                        <td style={{ ...cellStyle, whiteSpace: 'nowrap' }}>{formatDateTime(batch.created_at)}</td>
+                        <td style={numberCellStyle}>{batch.current_slip_count}{batch.current_slip_count !== batch.slip_count ? <div style={{ color: 'var(--yellow)', fontSize: 11 }}>dari {batch.slip_count}, sisanya dibatalkan</div> : null}</td>
+                        <td style={numberCellStyle}>{formatMoney(batch.total_withholding)}</td>
+                        <td style={{ ...cellStyle, textAlign: 'right', whiteSpace: 'nowrap' }}>
+                          <button type="button" className="tw-action-button" style={{ color: 'var(--accent)' }} disabled={busy !== null} onClick={() => void redownload(batch.id)}>Unduh ulang</button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+            </div>
+          </>
+        ) : null}
+      </div>
+      <div className="tw-modal-actions">
+        <button type="button" style={secondaryButtonStyle} onClick={onClose}>Tutup</button>
+        <button type="button" style={secondaryButtonStyle} disabled={loading || busy !== null} onClick={() => void refresh()}>Muat ulang</button>
+        <button type="button" style={primaryButtonStyle} disabled={!canCreate} onClick={() => void create()}>
+          {busy === 'create' ? 'Membuat batch…' : `Buat batch & unduh XML${preview ? ` (${batchIds.length})` : ''}`}
+        </button>
+      </div>
+    </ModalShell>
+  );
+}
+
+function VoidModal({ slip, onClose, onDone }: { slip: TaxSlip; onClose: () => void; onDone: () => Promise<void> }) {
+  const [reason, setReason] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const submit = async () => {
+    setBusy(true);
+    setError(null);
+    try {
+      await voidExportedTaxSlip({ slipId: slip.id, reason });
+      await onDone();
+    } catch (err) {
+      setError(errorText(err));
+      setBusy(false);
+    }
+  };
+  return (
+    <ModalShell title="Batalkan dari batch export?" subtitle={`${slip.invoice_number} · ${slip.counterparty_name} · batch #${slip.export_batch_id ?? '-'}`} onClose={onClose} maxWidth={520}>
+      <div className="tw-modal-body" style={{ display: 'grid', gap: 12 }}>
+        <div style={{ fontSize: 13, color: 'var(--text-secondary)' }}>
+          Bukti potong kembali ke status draft agar bisa diperbaiki dan masuk batch berikutnya. File XML batch yang sudah dibuat tidak berubah; pastikan bukti potong ini juga dibatalkan atau tidak diunggah di Coretax.
+        </div>
+        <label style={labelStyle}>
+          Alasan pembatalan
+          <textarea value={reason} onChange={(event) => setReason(event.target.value)} rows={3} style={{ ...inputStyle, resize: 'vertical' }} placeholder="Contoh: DPP salah, invoice direvisi vendor" />
+        </label>
+        {error ? <div style={{ color: 'var(--red)', fontSize: 12 }}>{error}</div> : null}
+      </div>
+      <div className="tw-modal-actions">
+        <button type="button" style={secondaryButtonStyle} onClick={onClose} disabled={busy}>Batal</button>
+        <button type="button" style={{ ...primaryButtonStyle, background: 'var(--yellow-solid)' }} disabled={busy || reason.trim().length < 5} onClick={() => void submit()}>Kembalikan ke draft</button>
+      </div>
+    </ModalShell>
   );
 }
 
@@ -358,6 +603,7 @@ type SlipFormState = {
   rateOverridePercent: string;
   rateOverrideReason: string;
   documentType: DocumentType;
+  taxInvoiceNumber: string;
   documentDate: string;
   withholdingDate: string;
   accountCode: string;
@@ -376,12 +622,12 @@ function SlipForm({ slip, entityId, entities, counterparties, objectCodes, readO
     objectCode: slip.object_code, objectQuery: slip.object_code, grossInputMode: slip.gross_input_mode, grossInputAmount: slip.gross_input_amount,
     additionalCost: slip.additional_cost === '0' ? '' : slip.additional_cost,
     rateOverridePercent: slip.rate_source === 'override' ? slip.rate_percent : '', rateOverrideReason: slip.rate_override_reason ?? '',
-    documentType: slip.document_type, documentDate: slip.document_date, withholdingDate: slip.withholding_date,
+    documentType: slip.document_type, taxInvoiceNumber: slip.tax_invoice_number ?? '', documentDate: slip.document_date, withholdingDate: slip.withholding_date,
     accountCode: slip.account_code ?? '', accountName: slip.account_name ?? '', trelloUrl: slip.trello_url ?? '', notes: slip.notes ?? '',
   } : {
     entityId, counterpartyId: null, counterpartyQuery: '', invoiceDate: todayIso(), invoiceNumber: '', description: '',
     objectCode: '', objectQuery: '', grossInputMode: 'total_incl_vat', grossInputAmount: '', additionalCost: '',
-    rateOverridePercent: '', rateOverrideReason: '', documentType: 'CommercialInvoice', documentDate: '', withholdingDate: '',
+    rateOverridePercent: '', rateOverrideReason: '', documentType: 'CommercialInvoice', taxInvoiceNumber: '', documentDate: '', withholdingDate: '',
     accountCode: '', accountName: '', trelloUrl: '', notes: '',
   });
   const [preview, setPreview] = useState<Awaited<ReturnType<typeof previewTaxSlip>> | null>(null);
@@ -436,7 +682,8 @@ function SlipForm({ slip, entityId, entities, counterparties, objectCodes, readO
         invoiceNumber: form.invoiceNumber, description: form.description, objectCode: form.objectCode,
         grossInputMode: form.grossInputMode, grossInputAmount: form.grossInputAmount, additionalCost: form.additionalCost || null,
         rateOverridePercent: form.rateOverridePercent || null, rateOverrideReason: form.rateOverrideReason || null,
-        documentType: form.documentType, documentDate: form.documentDate || null, withholdingDate: form.withholdingDate || null,
+        documentType: form.documentType, taxInvoiceNumber: form.documentType === 'TaxInvoice' ? form.taxInvoiceNumber : null,
+        documentDate: form.documentDate || null, withholdingDate: form.withholdingDate || null,
         periodMonth: slip?.period_month ?? null, periodYear: slip?.period_year ?? null,
         accountCode: form.accountCode, accountName: form.accountName, trelloUrl: form.trelloUrl, notes: form.notes,
       });
@@ -530,6 +777,11 @@ function SlipForm({ slip, entityId, entities, counterparties, objectCodes, readO
               {DOCUMENT_TYPES.map((type) => <option key={type} value={type}>{DOCUMENT_LABELS[type]}</option>)}
             </select>
           </label>
+          {form.documentType === 'TaxInvoice' ? (
+            <label style={labelStyle}>Nomor faktur pajak (16 digit, menjadi nomor dokumen di XML)
+              <input style={inputStyle} value={form.taxInvoiceNumber} onChange={(event) => update('taxInvoiceNumber', event.target.value)} placeholder="010.000-26.12345678" inputMode="numeric" disabled={disabled} />
+            </label>
+          ) : null}
           <label style={labelStyle}>Tarif manual (%) — kosongkan untuk otomatis
             <input style={inputStyle} value={form.rateOverridePercent} onChange={(event) => update('rateOverridePercent', event.target.value)} placeholder="otomatis" inputMode="decimal" disabled={disabled} />
           </label>

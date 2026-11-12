@@ -274,7 +274,7 @@ export default function TaxWithholdingPage() {
           <div style={{ fontSize: 12, color: 'var(--accent)', fontWeight: 700, marginBottom: 5 }}>{activeWorkspace.name}</div>
           <h1 style={{ margin: 0, fontSize: 24 }}>Bukti Potong (PPh)</h1>
           <p style={{ margin: '6px 0 0', color: 'var(--text-secondary)', fontSize: 13, maxWidth: 640 }}>
-            Bukti potong PPh unifikasi Coretax: input per transaksi dengan tarif otomatis, master pemotong dan lawan transaksi, serta impor dari workbook REKAP. Export XML menyusul di tahap berikutnya.
+            Bukti potong PPh unifikasi Coretax: input per transaksi dengan tarif otomatis, master pemotong dan lawan transaksi, impor dari workbook REKAP, dan export XML BPPU per masa untuk diunggah ke Coretax.
           </p>
         </div>
         <div role="tablist" aria-label="Bagian" className="tw-tabs">

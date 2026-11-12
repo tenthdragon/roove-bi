@@ -432,6 +432,33 @@ Dua workbook per PT (RTI dan PT lain) diimpor terpisah; `entity` dipilih di UI.
   vendornya belum ada di master diblokir, bukan dibuat diam-diam.
 - Idempoten lewat indeks unik `(workspace, pemotong, vendor, kode objek, invoice, tanggal, DPP)`.
 
+## 10c. Keputusan implementasi Fase 3
+
+- Generator XML murni di `lib/tax-withholding-xml.ts` (`buildBpuBulkXml`, `validateSlipForXml`,
+  `validateEntityForXml`, `exportFileNamePrefix`); urutan elemen, enum dan `xsi:nil` pada
+  `SP2DNumber` mengikuti §3. `TaxBase` ditulis dari `gross_amount` tersimpan (6 desimal, tanpa nol
+  di belakang), bukan 15 digit float Excel; `Rate` dari `rate_percent` (3 desimal).
+- Hanya bupot `ready` dengan identitas `npwp`/`nik` 16 digit yang masuk BpuBulk. `foreign_tin` dan
+  `unknown` ditolak validasi dengan pesan jelas; bupot non-residen menunggu Fase 5 (§11 no. 5).
+  Fasilitas `SKD` bukan enum BPPU dan ikut ditolak. `TaxInvoice` mewajibkan nomor 16 digit.
+- Satu batch = semua bupot siap yang lolos validasi di satu masa; baris terblokir tetap di luar dan
+  bisa masuk batch berikutnya setelah diperbaiki. Nama file `BPPU - EBUPOT - {kode PT} - {MM} {YYYY} - {seq}.xml`;
+  kode PT = inisial nama badan tanpa PT/CV (`PT. ROOVE TIJARA INTERNASIONAL` → `RTI`).
+- Migration `252_tax_export_batches.sql`: tabel `tax_export_batches` (menyimpan `xml_content` dan
+  `xml_sha256`), kolom `export_batch_id`, `voided_from_batch_id`, `void_reason` pada bupot, CHECK
+  `exported` ⇔ ada batch. Fungsi `tax_create_export_batch()` (service role saja) mengunci pemotong,
+  memverifikasi ulang bupot masih `ready` dan belum masuk batch, menomori batch per masa, menyimpan
+  XML dan mengubah status dalam satu transaksi.
+- Void mengembalikan bupot ke `draft`, memindahkan penunjuk ke `voided_from_batch_id` dan menyimpan
+  alasan; file batch tidak berubah (immutable), pengguna diingatkan untuk membatalkan di Coretax.
+- Unduhan dilakukan di klien dari string XML yang dikembalikan action (Blob), tanpa route API baru.
+- Kolom `tax_invoice_number` menyimpan nomor faktur pajak terpisah dari `invoice_number` (identitas
+  impor). Untuk `document_type = TaxInvoice`, nomor faktur itulah `<DocumentNumber>` dan wajib 16 digit;
+  impor REKAPAN mengisinya dari kolom FAKTUR PAJAK, baris lama di-backfill dari `notes` oleh migration 252.
+- Hasil review: fungsi batch memverifikasi `updated_at` setiap bupot di bawah lock; UPDATE/DELETE bupot
+  hanya menyentuh baris yang masih draft/ready tanpa batch dan memeriksa jumlah baris; satu batch
+  maksimal 2.000 bupot (sisanya menunggu batch berikutnya); hitungan bupot per batch dipaginasi.
+
 ## 11. Pertanyaan terbuka (perlu jawaban sebelum fase terkait)
 
 1. **ID Billing dan NTPN**: di workbook 2026 kolom ini kosong di semua baris.
@@ -452,7 +479,7 @@ Dua workbook per PT (RTI dan PT lain) diimpor terpisah; `entity` dipilih di UI.
 | --- | --- | --- |
 | 1 ✅ | Migration `247_tax_withholding.sql` (4 tabel master + seed 210 kode objek), tab & permission `tab:tax-withholding`, halaman `app/dashboard/tax-withholding`, CRUD pemotong dan lawan transaksi, impor master (`lib/tax-withholding-import.ts`), unit test `npm run test:tax-withholding` | Master 500 vendor terimpor, NPWP tervalidasi |
 | 2 ✅ | Migration `251_tax_withholding_slips.sql`, rule engine `lib/tax-withholding-rules.ts` (BigInt mikro-rupiah, unit test), parser `lib/tax-withholding-rekapan-import.ts`, server action `lib/tax-withholding-slip-actions.ts`, UI `components/TaxWithholdingSlips.tsx` (daftar per pemotong/masa, form dengan perhitungan langsung, impor REKAPAN dengan laporan selisih engine vs workbook) | PPh hasil engine = PPh workbook untuk 830 baris 2026 (diverifikasi saat impor di produksi) |
-| 3 | Validasi pra-export, generator XML, batch, unduh ulang, void | XML identik elemen demi elemen dengan hasil Excel untuk masa 10/2026 |
+| 3 ✅ | Migration `252_tax_export_batches.sql`, generator XML `lib/tax-withholding-xml.ts`, action `lib/tax-withholding-export-actions.ts` (pratinjau, buat batch, unduh ulang, void), dialog Export XML di tab Bukti Potong, unit test generator dan DB test batch | Elemen XML sama dengan template Excel; `TaxBase` memakai presisi 6 desimal yang tersimpan |
 | 4 | Pencatatan nomor bupot, rekap bulanan per pasal (KAP/KJS) | Rekap 2026 cocok dengan `SUBTOTAL` di REKAPAN |
 | 5 | ID Billing/NTPN, PPh 26, pengingat fasilitas kedaluwarsa | sesuai jawaban §11 |
 

@@ -9,6 +9,7 @@ import {
   UNIQUE_IDENTITY_TYPES,
   checkImportWorkspace,
   cleanOptional,
+  digitsOnly,
   normalizeIsoDate,
   type DocumentType,
   type FacilityCode,
@@ -90,6 +91,7 @@ export type TaxSlip = {
   period_year: number;
   invoice_date: string;
   invoice_number: string;
+  tax_invoice_number: string | null;
   description: string | null;
   object_code: string;
   pph_article: TaxArticle;
@@ -117,10 +119,13 @@ export type TaxSlip = {
   notes: string | null;
   source: 'manual' | 'import_rekapan';
   workbook_withholding_amount: string | null;
+  export_batch_id: number | null;
+  voided_from_batch_id: number | null;
+  void_reason: string | null;
   updated_at: string;
 };
 
-const SLIP_COLUMNS = 'id, entity_id, counterparty_id, counterparty_name, counterparty_identity_type, counterparty_identity_number, period_month, period_year, invoice_date, invoice_number, description, object_code, pph_article, gross_input_mode, gross_input_amount, gross_amount, rate_percent, rate_source, rate_override_reason, facility_code, facility_document_number, withholding_amount, vat_rate_percent, vat_amount, additional_cost, total_amount, document_type, document_date, withholding_date, status, coretax_slip_number, account_code, account_name, trello_url, notes, source, workbook_withholding_amount, updated_at';
+const SLIP_COLUMNS = 'id, entity_id, counterparty_id, counterparty_name, counterparty_identity_type, counterparty_identity_number, period_month, period_year, invoice_date, invoice_number, tax_invoice_number, description, object_code, pph_article, gross_input_mode, gross_input_amount, gross_amount, rate_percent, rate_source, rate_override_reason, facility_code, facility_document_number, withholding_amount, vat_rate_percent, vat_amount, additional_cost, total_amount, document_type, document_date, withholding_date, status, coretax_slip_number, account_code, account_name, trello_url, notes, source, workbook_withholding_amount, export_batch_id, voided_from_batch_id, void_reason, updated_at';
 
 function normalizeSlipRow(row: Record<string, unknown>): TaxSlip {
   const text = (key: string) => (row[key] === null || row[key] === undefined ? null : String(row[key]));
@@ -238,6 +243,8 @@ export type TaxSlipInput = {
   rateOverridePercent?: string | number | null;
   rateOverrideReason?: string | null;
   documentType?: DocumentType;
+  /** Faktur pajak number, required when documentType is TaxInvoice. */
+  taxInvoiceNumber?: string | null;
   documentDate?: string | null;
   withholdingDate?: string | null;
   periodMonth?: number | null;
@@ -301,6 +308,9 @@ export async function saveTaxSlip(input: TaxSlipInput): Promise<TaxSlip> {
   if (input.grossInputMode !== 'dpp' && input.grossInputMode !== 'total_incl_vat') errors.push('Mode nominal tidak valid.');
   const documentType: DocumentType = input.documentType ?? 'CommercialInvoice';
   if (!DOCUMENT_TYPES.includes(documentType)) errors.push('Jenis dokumen tidak valid.');
+  const taxInvoiceNumber = documentType === 'TaxInvoice' ? cleanOptional(input.taxInvoiceNumber) : null;
+  if (documentType === 'TaxInvoice' && !taxInvoiceNumber) errors.push('Nomor faktur pajak wajib diisi untuk dokumen TaxInvoice.');
+  if (taxInvoiceNumber && digitsOnly(taxInvoiceNumber).length !== 16) errors.push('Nomor faktur pajak harus 16 digit.');
   const hasOverride = input.rateOverridePercent !== null && input.rateOverridePercent !== undefined && String(input.rateOverridePercent).trim() !== '';
   const overrideReason = cleanOptional(input.rateOverrideReason);
   if (hasOverride && !overrideReason) errors.push('Alasan wajib diisi jika tarif diubah manual.');
@@ -385,6 +395,7 @@ export async function saveTaxSlip(input: TaxSlipInput): Promise<TaxSlip> {
     additional_cost: computed.additionalCost,
     total_amount: computed.totalAmount,
     document_type: documentType,
+    tax_invoice_number: taxInvoiceNumber,
     document_date: documentDate,
     withholding_date: withholdingDate,
     status: slipReadiness(counterparty),
@@ -395,9 +406,15 @@ export async function saveTaxSlip(input: TaxSlipInput): Promise<TaxSlip> {
   };
 
   if (input.id) {
-    const result = await svc.from('tax_withholding_slips').update(payload).eq('workspace_id', workspaceId).eq('id', input.id).select(SLIP_COLUMNS).single();
+    // The status check above is advisory; the UPDATE itself only touches a
+    // slip that is still editable, so an export that lands in between leaves
+    // the exported row untouched.
+    const result = await svc.from('tax_withholding_slips').update(payload)
+      .eq('workspace_id', workspaceId).eq('id', input.id).in('status', EDITABLE_STATUSES).is('export_batch_id', null)
+      .select(SLIP_COLUMNS);
     if (result.error) throw translateSlipError(result.error);
-    return normalizeSlipRow(result.data);
+    if (!result.data || result.data.length !== 1) throw new Error('Bukti potong berubah status saat disimpan (mungkin baru di-export); muat ulang.');
+    return normalizeSlipRow(result.data[0]);
   }
   const result = await svc.from('tax_withholding_slips').insert({ ...payload, source: 'manual', created_by: profile.id }).select(SLIP_COLUMNS).single();
   if (result.error) throw translateSlipError(result.error);
@@ -411,8 +428,13 @@ export async function deleteTaxSlip(id: number): Promise<void> {
   if (existing.error) throw existing.error;
   if (!existing.data) throw new Error('Bukti potong tidak ditemukan.');
   if (!EDITABLE_STATUSES.includes(existing.data.status)) throw new Error(`Bukti potong berstatus ${existing.data.status} tidak bisa dihapus.`);
-  const result = await svc.from('tax_withholding_slips').delete().eq('workspace_id', workspaceId).eq('id', id);
+  // Delete only while still editable: an export committed between the read
+  // above and this statement must keep its slip.
+  const result = await svc.from('tax_withholding_slips').delete()
+    .eq('workspace_id', workspaceId).eq('id', id).in('status', EDITABLE_STATUSES).is('export_batch_id', null)
+    .select('id');
   if (result.error) throw result.error;
+  if (!result.data || result.data.length !== 1) throw new Error('Bukti potong berubah status saat dihapus (mungkin baru di-export); muat ulang.');
 }
 
 export async function previewTaxSlip(input: Omit<TaxSlipInput, 'id'>): Promise<{
@@ -726,6 +748,7 @@ export async function commitRekapanImport(formData: FormData): Promise<RekapanIm
       additional_cost: computed.additionalCost,
       total_amount: computed.totalAmount,
       document_type: row.taxInvoiceNumber ? 'TaxInvoice' : 'CommercialInvoice',
+      tax_invoice_number: row.taxInvoiceNumber,
       document_date: row.invoiceDate,
       withholding_date: row.invoiceDate < periodStartIso(row.periodYear, row.periodMonth) ? periodStartIso(row.periodYear, row.periodMonth) : row.invoiceDate,
       status,
