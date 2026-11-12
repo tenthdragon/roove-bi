@@ -226,14 +226,19 @@ CHECK: `gross_amount > 0`, `rate_percent >= 0`, `period_month BETWEEN 1 AND 12`,
 Batch bersifat immutable. Jika ada koreksi setelah export, bupot di-"void"
 dari batch (lihat §7) dan diikutkan ke batch berikutnya.
 
-### 5.7 `tax_payment_records` — ID Billing & NTPN (fase 2)
+### 5.7 `tax_payment_records` — ID Billing & NTPN (fase 5, migration 254)
 
 Satu ID Billing menutup seluruh PPh satu pasal (KAP+KJS) dalam satu masa, bukan
-per bupot. Karena itu tabel terpisah: `(workspace_id, entity_id, period_month,
-period_year, pph_article, kap, kjs, billing_id, ntpn, amount, paid_at,
-reported_at, billing_file_url, ntpn_file_url)`. Catatan: di workbook 2026
-kolom ID Billing dan NTPN kosong untuk seluruh 830 baris, jadi praktik aktual
-perlu dikonfirmasi sebelum tabel ini dibangun (lihat §11).
+per bupot. Tabel terpisah dengan kolom `(workspace_id, entity_id, period_month,
+period_year, pph_article, kap, kjs, billing_id ^\d{15}$, billing_amount,
+billing_created_at, billing_valid_until, ntpn ^[0-9A-Z]{16}$, paid_at, paid_amount,
+notes, created_by, paid_recorded_by, created_at, updated_at)`. `billing_id` unik per
+pemotong, `ntpn` unik per pemotong (indeks parsial); CHECK `ntpn`, `paid_at`,
+`paid_amount` terisi bersama. Boleh lebih dari satu catatan per kelompok (setoran
+dipecah/pembetulan). Fungsi `tax_record_payment_ntpn()` menyimpan NTPN dan mengubah bupot
+`reported` kelompok itu menjadi `paid`; `tax_clear_payment_ntpn()` membalikkannya bila tidak
+ada catatan lain yang masih ber-NTPN. Catatan: di workbook 2026 kolom ID Billing dan NTPN
+kosong untuk seluruh baris, jadi tabel ini mulai kosong dan diisi dari Rekap Setor.
 
 ## 6. Rule engine (`lib/tax-withholding-rules.ts`)
 
@@ -327,6 +332,8 @@ exported ──(void dari batch, alasan wajib)──> draft   // kembali ke antr
 | `recordCoretaxNumbers({ entityId, year, month, assignments[], allowReplace })` | fungsi DB `tax_record_coretax_numbers()`: set `coretax_slip_number`, status `reported`, cek versi dan keunikan |
 | `clearCoretaxNumber({ slipId })` | hapus nomor, kembali ke `exported` (hanya bupot yang punya batch) |
 | `getTaxYearSummary({ entityId, year })` | DPP & PPh per masa dan per pasal + KAP + KJS, dasar ID Billing |
+| `listTaxPaymentRecords({ entityId, year })`, `saveTaxPaymentRecord(input)`, `deleteTaxPaymentRecord` | catatan ID Billing per kelompok rekap (edit/hapus hanya tanpa NTPN, cek versi) |
+| `recordTaxPaymentNtpn({ id, version, ntpn, paidAt, paidAmount })`, `clearTaxPaymentNtpn` | fungsi DB: NTPN + status `paid`/`reported` bupot kelompok |
 | `importRekapanWorkbook(file)` | impor awal, lihat §10 |
 
 Unduhan: action mengembalikan string XML; klien membuat `Blob` dan memicu
@@ -350,7 +357,10 @@ Satu halaman dengan sub-tab, memakai konvensi tema `--tone-*`/`toneText`:
 4. **Pencatatan Coretax** (dialog di tab Bukti Potong). Tempel dua kolom atau unggah unduhan Coretax,
    atau ketik per baris; status berubah `reported`. Per bupot: catat / ubah / hapus nomor.
 4b. **Rekap Setor** (sub-tab). Per masa dan total tahun: pasal, KAP, KJS, jumlah bupot, DPP, PPh,
-   PPh yang belum dilaporkan, status; unduh CSV.
+   PPh yang belum dilaporkan, status, dan kolom Setoran (ID Billing, NTPN, tanggal/jumlah setor;
+   buat/ubah/hapus ID Billing, catat/hapus NTPN); unduh CSV.
+4c. **Pengingat fasilitas**. Banner di Bukti Potong dan Rekap Setor bila ada fasilitas aktif yang habis
+   ≤ 30 hari atau baru berakhir ≤ 30 hari, dengan tombol ke Lawan Transaksi.
 5. **Lawan Transaksi**. CRUD master + fasilitas dengan masa berlaku; penanda
    fasilitas yang akan habis dalam 30 hari.
 6. **Pemotong** (owner). NPWP, TKU, penandatangan per PT.
@@ -487,10 +497,29 @@ Dua workbook per PT (RTI dan PT lain) diimpor terpisah; `entity` dipilih di UI.
   masa dan per `(pph_article, kap, kjs)` dari `tax_object_codes`; kolom "belum dilaporkan" = PPh bupot
   `draft`/`ready`/`exported`. CSV dipisah `;` dibuat di klien.
 
+## 10e. Keputusan implementasi Fase 5 (bagian 1: setoran dan pengingat)
+
+- Setoran dicatat per kelompok rekap (pemotong, masa, pasal, KAP, KJS) di `tax_payment_records`; jumlah
+  ID Billing diisi dari PPh terutang kelompok dan boleh diubah (setoran dipecah/pembetulan). Validasi
+  kode billing 15 digit, NTPN 16 huruf besar/angka, jumlah rupiah bulat; KAP/KJS harus ada di
+  `tax_object_codes` untuk pasal itu.
+- NTPN dicatat lewat fungsi DB dengan cek versi (`updated_at` catatan) dan keunikan per pemotong; bupot
+  `reported` kelompok itu menjadi `paid` dalam transaksi yang sama. Menghapus NTPN mengembalikan bupot ke
+  `reported` hanya bila tidak ada catatan lain di kelompok yang masih ber-NTPN. Catatan ber-NTPN tidak bisa
+  diedit/dihapus; hapus NTPN dulu.
+- Kolom "PPh disetor (NTPN)" dan status kelompok (belum ada billing / belum disetor / disetor / kurang)
+  dihitung di klien dari catatan tahun berjalan; CSV rekap memuat ID Billing, NTPN, tanggal dan jumlah setor.
+- Pengingat fasilitas (`listExpiringFacilities`): fasilitas vendor aktif dengan `valid_to` ≤ 30 hari ke
+  depan atau berakhir ≤ 30 hari lalu, diurutkan dari yang paling dekat; engine sudah memakai tarif normal
+  setelah `valid_to`, banner hanya mengingatkan untuk memperbarui dokumen.
+- Bupot non-residen (PPh 26, `foreign_tin`) menunggu template XML Coretax untuk bukti potong non-residen
+  (BPNR); skema elemennya berbeda dari BpuBulk dan belum ada di `~/Documents/File Pajak/`.
+
 ## 11. Pertanyaan terbuka (perlu jawaban sebelum fase terkait)
 
-1. **ID Billing dan NTPN**: di workbook 2026 kolom ini kosong di semua baris.
-   Apakah dicatat di tempat lain? Menentukan apakah `tax_payment_records` dibangun.
+1. **ID Billing dan NTPN**: di workbook 2026 kolom ini kosong di semua baris. Fase 5a membangun
+   `tax_payment_records` per kelompok KAP/KJS (praktik DJP); bila tim finance ternyata mencatatnya per
+   bupot di tempat lain, catatan lama bisa diimpor per kelompok.
 2. **PT lain**: apakah RLB, RLT, JHN, RLBPP juga memotong PPh dan punya workbook
    serupa? Mempengaruhi prioritas multi-entity di UI.
 3. **Presisi DPP**: tetap desimal panjang (perilaku sekarang) atau dibulatkan 2 desimal?
@@ -509,7 +538,8 @@ Dua workbook per PT (RTI dan PT lain) diimpor terpisah; `entity` dipilih di UI.
 | 2 ✅ | Migration `251_tax_withholding_slips.sql`, rule engine `lib/tax-withholding-rules.ts` (BigInt mikro-rupiah, unit test), parser `lib/tax-withholding-rekapan-import.ts`, server action `lib/tax-withholding-slip-actions.ts`, UI `components/TaxWithholdingSlips.tsx` (daftar per pemotong/masa, form dengan perhitungan langsung, impor REKAPAN dengan laporan selisih engine vs workbook) | PPh hasil engine = PPh workbook untuk 830 baris 2026 (diverifikasi saat impor di produksi) |
 | 3 ✅ | Migration `252_tax_export_batches.sql`, generator XML `lib/tax-withholding-xml.ts`, action `lib/tax-withholding-export-actions.ts` (pratinjau, buat batch, unduh ulang, void), dialog Export XML di tab Bukti Potong, unit test generator dan DB test batch | Elemen XML sama dengan template Excel; `TaxBase` memakai presisi 6 desimal yang tersimpan |
 | 4 ✅ | Migration `253_tax_coretax_recording.sql` (fungsi `tax_record_coretax_numbers()`, indeks unik nomor per pemotong, kolom audit), parser/pencocok `lib/tax-withholding-coretax.ts`, action `lib/tax-withholding-coretax-actions.ts` (pratinjau, catat, hapus, rekap tahunan), dialog `components/TaxWithholdingCoretax.tsx`, tab Rekap Setor `components/TaxWithholdingRecap.tsx` | Total PPh per masa di Rekap Setor = jumlah kolom PPh REKAPAN per masa (2026 di produksi) |
-| 5 | ID Billing/NTPN, PPh 26, pengingat fasilitas kedaluwarsa | sesuai jawaban §11 |
+| 5a ✅ | Migration `254_tax_payment_records.sql` (tabel + fungsi NTPN), helper `lib/tax-withholding-payment.ts`, action `lib/tax-withholding-payment-actions.ts`, kolom Setoran di Rekap Setor (`components/TaxWithholdingPayment.tsx`), banner fasilitas kedaluwarsa | NTPN tercatat → bupot kelompok `paid`; hapus NTPN → kembali `reported`; DB test |
+| 5b | Export bukti potong non-residen (PPh 26) | menunggu template XML BPNR Coretax |
 
 Setiap fase: `npm run typecheck:app`, `npm run lint`, `npm run build`, dan unit
 test rule engine/generator XML. Migration hanya dijalankan di lokal sampai
