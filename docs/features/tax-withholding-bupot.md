@@ -506,7 +506,12 @@ Dua workbook per PT (RTI dan PT lain) diimpor terpisah; `entity` dipilih di UI.
 - NTPN dicatat lewat fungsi DB dengan cek versi (`updated_at` catatan) dan keunikan per pemotong; bupot
   `reported` kelompok itu menjadi `paid` dalam transaksi yang sama. Menghapus NTPN mengembalikan bupot ke
   `reported` hanya bila tidak ada catatan lain di kelompok yang masih ber-NTPN. Catatan ber-NTPN tidak bisa
-  diedit/dihapus; hapus NTPN dulu.
+  diedit/dihapus; hapus NTPN dulu. Kedua fungsi mengambil advisory lock transaksi per kelompok
+  (`tax_payment_group_lock_key()`) sebelum mengunci barisnya, sehingga dua pengguna yang mencatat/menghapus
+  NTPN pada catatan berbeda di kelompok yang sama tidak saling melewati pemeriksaan "masih ada NTPN lain".
+- Catatan billing yang kelompok bupotnya sudah tidak ada (bupot dihapus atau dipindah masa/kode objek
+  setelah billing dibuat) tetap muncul sebagai baris rekap kosong (`withPaymentOnlyGroups`) dengan
+  peringatan, agar masih bisa diubah, dihapus, atau diberi NTPN.
 - Kolom "PPh disetor (NTPN)" dan status kelompok (belum ada billing / belum disetor / disetor / kurang)
   dihitung di klien dari catatan tahun berjalan; CSV rekap memuat ID Billing, NTPN, tanggal dan jumlah setor.
 - Pengingat fasilitas (`listExpiringFacilities`): fasilitas vendor aktif dengan `valid_to` ≤ 30 hari ke

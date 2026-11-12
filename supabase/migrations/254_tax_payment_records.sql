@@ -61,6 +61,21 @@ CREATE POLICY tax_payment_records_read ON public.tax_payment_records
   FOR SELECT TO authenticated
   USING (public.workspace_has_tax_access(workspace_id));
 
+-- Advisory-lock key of a payment group (workspace, entity, masa, pasal, KAP,
+-- KJS). tax_record_payment_ntpn and tax_clear_payment_ntpn take it so the
+-- "does another record still pay this group" check and the slip status
+-- updates of one group never interleave. A hash collision only serialises
+-- two unrelated groups.
+CREATE OR REPLACE FUNCTION public.tax_payment_group_lock_key(p_record public.tax_payment_records)
+RETURNS BIGINT
+LANGUAGE sql
+IMMUTABLE
+SET search_path = public, pg_temp
+AS $$
+  SELECT hashtextextended(concat_ws(':', 'tax_payment_group', p_record.workspace_id, p_record.entity_id,
+    p_record.period_year, p_record.period_month, p_record.pph_article, p_record.kap, p_record.kjs), 0);
+$$;
+
 -- Records the NTPN of a billing and marks the reported slips of its group
 -- (entity, masa, pasal, KAP, KJS) paid, in one transaction. p_version is the
 -- record's updated_at the caller saw. Returns the number of slips moved.
@@ -88,6 +103,16 @@ BEGIN
     RAISE EXCEPTION 'Tanggal dan jumlah setoran wajib diisi.' USING ERRCODE = '22023';
   END IF;
 
+  -- Serialise every NTPN change of the group (entity, masa, pasal, KAP, KJS):
+  -- two records of one group changed concurrently would each see the other's
+  -- committed NTPN and leave the slips' status inconsistent. The version check
+  -- below catches a record that moved to another group between the two reads.
+  SELECT * INTO v_record FROM public.tax_payment_records
+    WHERE id = p_record_id AND workspace_id = p_workspace_id;
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'Catatan setoran tidak ditemukan.' USING ERRCODE = 'P0002';
+  END IF;
+  PERFORM pg_advisory_xact_lock(public.tax_payment_group_lock_key(v_record));
   SELECT * INTO v_record FROM public.tax_payment_records
     WHERE id = p_record_id AND workspace_id = p_workspace_id
     FOR UPDATE;
@@ -143,6 +168,12 @@ DECLARE
   v_moved INT := 0;
 BEGIN
   SELECT * INTO v_record FROM public.tax_payment_records
+    WHERE id = p_record_id AND workspace_id = p_workspace_id;
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'Catatan setoran tidak ditemukan.' USING ERRCODE = 'P0002';
+  END IF;
+  PERFORM pg_advisory_xact_lock(public.tax_payment_group_lock_key(v_record));
+  SELECT * INTO v_record FROM public.tax_payment_records
     WHERE id = p_record_id AND workspace_id = p_workspace_id
     FOR UPDATE;
   IF NOT FOUND THEN
@@ -183,6 +214,8 @@ BEGIN
   RETURN v_moved;
 END $$;
 
+REVOKE ALL ON FUNCTION public.tax_payment_group_lock_key(public.tax_payment_records) FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.tax_payment_group_lock_key(public.tax_payment_records) TO service_role;
 REVOKE ALL ON FUNCTION public.tax_record_payment_ntpn(UUID, BIGINT, TEXT, DATE, NUMERIC, TIMESTAMPTZ, UUID) FROM PUBLIC, anon, authenticated;
 GRANT EXECUTE ON FUNCTION public.tax_record_payment_ntpn(UUID, BIGINT, TEXT, DATE, NUMERIC, TIMESTAMPTZ, UUID) TO service_role;
 REVOKE ALL ON FUNCTION public.tax_clear_payment_ntpn(UUID, BIGINT, TIMESTAMPTZ) FROM PUBLIC, anon, authenticated;

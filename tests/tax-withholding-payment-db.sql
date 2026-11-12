@@ -15,6 +15,7 @@ DECLARE
   v_b bigint;
   v_version timestamptz;
   v_moved int;
+  v_lock_key bigint;
 BEGIN
   IF v_reported IS NULL OR v_exported IS NULL THEN RAISE EXCEPTION 'Fixture expects one reported and one exported alpha slip'; END IF;
   IF (SELECT kap || '/' || kjs FROM public.tax_object_codes WHERE code = '24-104-24') <> '411124/104' THEN
@@ -67,6 +68,18 @@ BEGIN
 
   v_moved := public.tax_record_payment_ntpn(v_alpha, v_a, 'ABCDEFGH12345678', DATE '2026-11-10', 137, v_version, v_user);
   IF v_moved <> 1 THEN RAISE EXCEPTION 'Expected 1 slip paid, got %', v_moved; END IF;
+  -- The call serialises the whole group through a transaction-level advisory lock.
+  SELECT public.tax_payment_group_lock_key(r) INTO v_lock_key FROM public.tax_payment_records r WHERE id = v_a;
+  IF v_lock_key <> public.tax_payment_group_lock_key((SELECT r FROM public.tax_payment_records r WHERE id = v_b)) THEN
+    RAISE EXCEPTION 'Records of one group must share a lock key';
+  END IF;
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_locks
+    WHERE locktype = 'advisory' AND pid = pg_backend_pid() AND objsubid = 1 AND granted
+      AND classid = ((v_lock_key >> 32) & 4294967295)::oid AND objid = (v_lock_key & 4294967295)::oid
+  ) THEN
+    RAISE EXCEPTION 'tax_record_payment_ntpn must hold the group advisory lock';
+  END IF;
   IF (SELECT status FROM public.tax_withholding_slips WHERE id = v_reported) <> 'paid'
     OR (SELECT status FROM public.tax_withholding_slips WHERE id = v_exported) <> 'exported' THEN
     RAISE EXCEPTION 'Only reported slips of the group move to paid';
@@ -124,7 +137,8 @@ DO $$ BEGIN
     OR NOT has_sequence_privilege('service_role', 'public.tax_payment_records_id_seq', 'USAGE') THEN
     RAISE EXCEPTION 'Unexpected payment table grants';
   END IF;
-  IF has_function_privilege('authenticated', 'public.tax_record_payment_ntpn(uuid, bigint, text, date, numeric, timestamptz, uuid)', 'EXECUTE')
+  IF has_function_privilege('authenticated', 'public.tax_payment_group_lock_key(public.tax_payment_records)', 'EXECUTE')
+    OR has_function_privilege('authenticated', 'public.tax_record_payment_ntpn(uuid, bigint, text, date, numeric, timestamptz, uuid)', 'EXECUTE')
     OR NOT has_function_privilege('service_role', 'public.tax_record_payment_ntpn(uuid, bigint, text, date, numeric, timestamptz, uuid)', 'EXECUTE')
     OR has_function_privilege('authenticated', 'public.tax_clear_payment_ntpn(uuid, bigint, timestamptz)', 'EXECUTE')
     OR NOT has_function_privilege('service_role', 'public.tax_clear_payment_ntpn(uuid, bigint, timestamptz)', 'EXECUTE') THEN

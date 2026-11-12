@@ -8,7 +8,7 @@ import type { TaxWithholdingEntity } from '@/lib/tax-withholding-actions';
 import { getTaxYearSummary, type TaxSummaryGroup, type TaxYearSummary } from '@/lib/tax-withholding-coretax-actions';
 import { TAX_ARTICLE_LABELS } from '@/lib/tax-withholding-domain';
 import { listTaxPaymentRecords, type TaxPaymentRecord } from '@/lib/tax-withholding-payment-actions';
-import { paymentGroupKey } from '@/lib/tax-withholding-payment';
+import { paymentGroupKey, withPaymentOnlyGroups } from '@/lib/tax-withholding-payment';
 import { PaymentCell, PaymentModal, type PaymentTarget } from '@/components/TaxWithholdingPayment';
 import {
   MONTHS,
@@ -53,7 +53,9 @@ function GroupRows({ groups, showMonth, month, payments, canManage, onOpen }: {
           <td style={cellStyle}>{TAX_ARTICLE_LABELS[group.article]}</td>
           <td style={cellStyle}><span className="tw-mono">{group.kap ?? '—'}</span></td>
           <td style={cellStyle}><span className="tw-mono">{group.kjs ?? '—'}</span></td>
-          <td style={{ ...cellStyle, color: 'var(--dim)', fontSize: 12 }}>{group.objectCodes.join(', ')}</td>
+          <td style={{ ...cellStyle, color: group.count === 0 ? 'var(--yellow)' : 'var(--dim)', fontSize: 12 }}>
+            {group.count === 0 ? 'Tidak ada bukti potong di kelompok ini; periksa ID Billing-nya' : group.objectCodes.join(', ')}
+          </td>
           <td style={numberCellStyle}>{group.count}</td>
           <td style={numberCellStyle}>{formatMoney(group.grossAmount, 2)}</td>
           <td style={numberCellStyle}>{formatMoney(group.withholdingAmount)}</td>
@@ -110,7 +112,8 @@ export function TaxRecapSection({ entities, canManage, notify }: { entities: Tax
     try {
       const [result, payments] = await Promise.all([getTaxYearSummary({ entityId, year }), listTaxPaymentRecords({ entityId, year })]);
       if (sequence !== loadSequence.current) return;
-      setSummary(result);
+      // Billings whose slips were deleted or moved still need a row to be managed from.
+      setSummary(withPaymentOnlyGroups(result, payments));
       setRecords(payments);
     } catch (error) {
       if (sequence === loadSequence.current) notify({ type: 'error', text: errorText(error) });

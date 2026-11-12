@@ -1,7 +1,8 @@
 // Phase 5 pure helpers: billing/NTPN formats, group keys shared by the recap
 // and payment records, and the facility expiry reminder list.
 
-import { facilityExpiryStatus, type FacilityWindow, type TaxArticle } from './tax-withholding-domain';
+import { facilityExpiryStatus, type FacilityWindow, type SlipStatus, type TaxArticle } from './tax-withholding-domain';
+import type { TaxMonthlySummary, TaxSummaryGroup, TaxYearSummary } from './tax-withholding-coretax-actions';
 
 /** Kode billing DJP: 15 digits. */
 export const BILLING_ID_PATTERN = /^\d{15}$/;
@@ -31,6 +32,48 @@ export function paymentGroupStatus(dueAmount: string, records: Array<{ ntpn: str
   const paid = records.filter((record) => record.ntpn).reduce((sum, record) => sum + BigInt(record.paid_amount ?? '0'), 0n);
   if (paid === 0n) return 'billed';
   return paid >= BigInt(dueAmount) ? 'paid' : 'partial';
+}
+
+const groupSortKey = (group: { article: TaxArticle; kap: string | null; kjs: string | null }) => `${group.article}|${group.kap ?? ''}|${group.kjs ?? ''}`;
+const compareGroups = (a: TaxSummaryGroup, b: TaxSummaryGroup) => groupSortKey(a).localeCompare(groupSortKey(b));
+
+/** A recap row for a group that has payment records but no slips any more. */
+function paymentOnlyGroup(ref: PaymentGroupRef): TaxSummaryGroup {
+  const byStatus: Record<SlipStatus, number> = { draft: 0, ready: 0, exported: 0, reported: 0, paid: 0 };
+  return { article: ref.pph_article, kap: ref.kap, kjs: ref.kjs, objectCodes: [], count: 0, grossAmount: '0', withholdingAmount: '0', byStatus, pendingWithholdingAmount: '0' };
+}
+
+/**
+ * Adds the groups only payment records refer to (their slips were deleted or
+ * moved to another masa/object code after the billing was made) to the monthly
+ * and yearly rows, so those billings stay visible and can be edited, deleted or
+ * given their NTPN. Returns the same summary when nothing is missing.
+ */
+export function withPaymentOnlyGroups(summary: TaxYearSummary, records: PaymentGroupRef[]): TaxYearSummary {
+  const months = new Map<number, TaxMonthlySummary>(summary.months.map((month) => [month.month, month]));
+  const yearKeys = new Set(summary.groups.map(groupSortKey));
+  const extraYear: TaxSummaryGroup[] = [];
+  let changed = false;
+  for (const record of records) {
+    const group = paymentOnlyGroup(record);
+    const key = groupSortKey(group);
+    const month = months.get(record.period_month)
+      ?? { month: record.period_month, count: 0, grossAmount: '0', withholdingAmount: '0', byStatus: { ...group.byStatus }, groups: [] };
+    if (!month.groups.some((existing) => groupSortKey(existing) === key)) {
+      months.set(record.period_month, { ...month, groups: [...month.groups, group].sort(compareGroups) });
+      changed = true;
+    }
+    if (!yearKeys.has(key)) {
+      yearKeys.add(key);
+      extraYear.push(group);
+    }
+  }
+  if (!changed && extraYear.length === 0) return summary;
+  return {
+    ...summary,
+    months: [...months.values()].sort((a, b) => a.month - b.month),
+    groups: [...summary.groups, ...extraYear].sort(compareGroups),
+  };
 }
 
 export type ExpiringFacility = {
