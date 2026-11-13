@@ -48,8 +48,10 @@ CREATE INDEX IF NOT EXISTS idx_tax_export_batches_form_period
 
 -- Same contract as before plus p_form. Under the lock a slip only counts when
 -- its pasal matches the form, so a mismatched id fails the batch with P0003
--- like any other slip that is no longer eligible.
-DROP FUNCTION IF EXISTS public.tax_create_export_batch(UUID, BIGINT, INT, INT, BIGINT[], TIMESTAMPTZ[], TEXT, TEXT, TEXT, TEXT, UUID);
+-- like any other slip that is no longer eligible. The previous 11-argument
+-- signature stays as a wrapper (below) so the application release that still
+-- calls it keeps exporting BPPU while this migration is applied first, and an
+-- application rollback does not lose exports.
 CREATE OR REPLACE FUNCTION public.tax_create_export_batch(
   p_workspace_id UUID,
   p_entity_id BIGINT,
@@ -150,5 +152,33 @@ END $$;
 
 REVOKE ALL ON FUNCTION public.tax_create_export_batch(UUID, BIGINT, TEXT, INT, INT, BIGINT[], TIMESTAMPTZ[], TEXT, TEXT, TEXT, TEXT, UUID) FROM PUBLIC, anon, authenticated;
 GRANT EXECUTE ON FUNCTION public.tax_create_export_batch(UUID, BIGINT, TEXT, INT, INT, BIGINT[], TIMESTAMPTZ[], TEXT, TEXT, TEXT, TEXT, UUID) TO service_role;
+
+-- Compatibility wrapper: the pre-255 signature (no p_form) creates a BPPU
+-- batch. PostgREST tells the overloads apart by the named arguments the
+-- application sends, so both releases of the app resolve to the right one.
+CREATE OR REPLACE FUNCTION public.tax_create_export_batch(
+  p_workspace_id UUID,
+  p_entity_id BIGINT,
+  p_period_year INT,
+  p_period_month INT,
+  p_slip_ids BIGINT[],
+  p_slip_versions TIMESTAMPTZ[],
+  p_file_name_prefix TEXT,
+  p_schema_version TEXT,
+  p_xml_content TEXT,
+  p_xml_sha256 TEXT,
+  p_created_by UUID
+)
+RETURNS TABLE (batch_id BIGINT, sequence SMALLINT, file_name TEXT)
+LANGUAGE sql
+SET search_path = public, pg_temp
+AS $$
+  SELECT * FROM public.tax_create_export_batch(
+    p_workspace_id, p_entity_id, 'BPPU', p_period_year, p_period_month, p_slip_ids, p_slip_versions,
+    p_file_name_prefix, p_schema_version, p_xml_content, p_xml_sha256, p_created_by);
+$$;
+
+REVOKE ALL ON FUNCTION public.tax_create_export_batch(UUID, BIGINT, INT, INT, BIGINT[], TIMESTAMPTZ[], TEXT, TEXT, TEXT, TEXT, UUID) FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.tax_create_export_batch(UUID, BIGINT, INT, INT, BIGINT[], TIMESTAMPTZ[], TEXT, TEXT, TEXT, TEXT, UUID) TO service_role;
 
 COMMIT;

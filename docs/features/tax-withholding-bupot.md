@@ -596,6 +596,10 @@ Dua workbook per PT (RTI dan PT lain) diimpor terpisah; `entity` dipilih di UI.
   penerima non-residen orang pribadi belum didukung.
 - Penomoran batch per entity+masa+**form** (`BPNR - EBUPOT - RTI - 09 2026 - 01.xml`), riwayat batch
   di dialog difilter per formulir, `schema_version` `BPNRBulk-v1`.
+- Kompatibilitas rilis: signature lama `tax_create_export_batch` (11 argumen, tanpa `p_form`) dipertahankan
+  sebagai wrapper ke `'BPPU'`, karena runbook memasang migrasi sebelum aplikasi baru aktif dan rollback
+  aplikasi tidak mencabut migrasi. PostgREST membedakan overload dari argumen bernama yang dikirim.
+  Test DB menjalankan signature lama sesudah migrasi 255 (batch BPPU 03, PPh 26 tetap ditolak).
 
 ## 11. Pertanyaan terbuka (perlu jawaban sebelum fase terkait)
 

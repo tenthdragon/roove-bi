@@ -15,6 +15,7 @@ DECLARE
   v_batch record;
   v_second record;
   v_bpnr bigint;
+  v_legacy bigint;
   v_stale timestamptz := now() - interval '1 day';
 BEGIN
   IF v_ready IS NULL OR v_draft IS NULL THEN RAISE EXCEPTION 'Fixture slips missing'; END IF;
@@ -176,6 +177,34 @@ BEGIN
     RAISE EXCEPTION 'unknown form value must be rejected';
   EXCEPTION WHEN check_violation THEN NULL;
   END;
+
+  -- Upgrade compatibility: the application release before migration 255 still
+  -- calls the 11-argument signature; after the migration it must keep creating
+  -- BPPU batches, numbered in the BPPU sequence, beside the new BPNR calls.
+  INSERT INTO public.tax_withholding_slips (
+    workspace_id, entity_id, counterparty_id, counterparty_name, counterparty_identity_type, counterparty_identity_number,
+    period_month, period_year, invoice_date, invoice_number, object_code, pph_article,
+    gross_input_mode, gross_input_amount, gross_amount, rate_percent, rate_source,
+    withholding_amount, total_amount, document_date, withholding_date, status
+  ) VALUES (v_alpha, v_entity, 1, 'VENDOR ALPHA SATU', 'npwp', '0011223344556677',
+    10, 2026, DATE '2026-10-22', 'INV-ALPHA-LEGACY', '24-104-24', 'pph23',
+    'dpp', 100000, 100000, 2, 'object_code', 2000, 100000, DATE '2026-10-22', DATE '2026-10-22', 'ready')
+  RETURNING id INTO v_legacy;
+  SELECT * INTO v_second FROM public.tax_create_export_batch(v_alpha, v_entity, 2026, 10, ARRAY[v_legacy], (SELECT array_agg(updated_at) FROM public.tax_withholding_slips WHERE id = v_legacy),
+    'BPPU - EBUPOT - ALPHA - 10 2026 - ', 'BpuBulk-v3', '<BpuBulk>3</BpuBulk>', repeat('9', 64), NULL);
+  IF v_second.sequence <> 3 OR v_second.file_name <> 'BPPU - EBUPOT - ALPHA - 10 2026 - 03.xml' THEN
+    RAISE EXCEPTION 'Legacy signature must create BPPU batch 03: % %', v_second.sequence, v_second.file_name;
+  END IF;
+  IF (SELECT form FROM public.tax_export_batches WHERE id = v_second.batch_id) <> 'BPPU'::text
+    OR (SELECT status FROM public.tax_withholding_slips WHERE id = v_legacy) <> 'exported' THEN
+    RAISE EXCEPTION 'Legacy signature must behave as a BPPU export';
+  END IF;
+  BEGIN
+    PERFORM * FROM public.tax_create_export_batch(v_alpha, v_entity, 2026, 10, ARRAY[v_bpnr], (SELECT array_agg(updated_at) FROM public.tax_withholding_slips WHERE id = v_bpnr),
+      'BPPU - EBUPOT - ALPHA - 10 2026 - ', 'BpuBulk-v3', '<BpuBulk/>', repeat('8', 64), NULL);
+    RAISE EXCEPTION 'legacy signature must still refuse PPh 26 slips';
+  EXCEPTION WHEN SQLSTATE 'P0003' THEN NULL;
+  END;
 END $$;
 
 -- Grants: batches readable by finance scope only, writable by service role; the
@@ -189,7 +218,9 @@ DO $$ BEGIN
     OR NOT has_sequence_privilege('service_role', 'public.tax_export_batches_id_seq', 'USAGE') THEN
     RAISE EXCEPTION 'Unexpected batch grants';
   END IF;
-  IF has_function_privilege('authenticated', 'public.tax_create_export_batch(uuid, bigint, text, int, int, bigint[], timestamptz[], text, text, text, text, uuid)', 'EXECUTE')
+  IF has_function_privilege('authenticated', 'public.tax_create_export_batch(uuid, bigint, int, int, bigint[], timestamptz[], text, text, text, text, uuid)', 'EXECUTE')
+    OR NOT has_function_privilege('service_role', 'public.tax_create_export_batch(uuid, bigint, int, int, bigint[], timestamptz[], text, text, text, text, uuid)', 'EXECUTE')
+    OR has_function_privilege('authenticated', 'public.tax_create_export_batch(uuid, bigint, text, int, int, bigint[], timestamptz[], text, text, text, text, uuid)', 'EXECUTE')
     OR has_function_privilege('anon', 'public.tax_create_export_batch(uuid, bigint, text, int, int, bigint[], timestamptz[], text, text, text, text, uuid)', 'EXECUTE')
     OR NOT has_function_privilege('service_role', 'public.tax_create_export_batch(uuid, bigint, text, int, int, bigint[], timestamptz[], text, text, text, text, uuid)', 'EXECUTE') THEN
     RAISE EXCEPTION 'Unexpected batch function grants';
@@ -208,8 +239,8 @@ GRANT EXECUTE ON FUNCTION public.tax_batches_visible(uuid) TO authenticated;
 
 SET ROLE authenticated;
 DO $$ BEGIN
-  IF public.tax_batches_visible('00000000-0000-4000-8000-000000000001') <> 3 THEN RAISE EXCEPTION 'platform owner must see alpha batches'; END IF;
-  IF public.tax_batches_visible('00000000-0000-4000-8000-000000000002') <> 3 THEN RAISE EXCEPTION 'workspace owner of alpha must see alpha batches'; END IF;
+  IF public.tax_batches_visible('00000000-0000-4000-8000-000000000001') <> 4 THEN RAISE EXCEPTION 'platform owner must see alpha batches'; END IF;
+  IF public.tax_batches_visible('00000000-0000-4000-8000-000000000002') <> 4 THEN RAISE EXCEPTION 'workspace owner of alpha must see alpha batches'; END IF;
   IF public.tax_batches_visible('00000000-0000-4000-8000-000000000005') <> 0 THEN RAISE EXCEPTION 'staf_finance of beta must see no alpha batches'; END IF;
   IF public.tax_batches_visible('00000000-0000-4000-8000-000000000004') <> 0 THEN RAISE EXCEPTION 'staf_ops must see no batches'; END IF;
 END $$;
