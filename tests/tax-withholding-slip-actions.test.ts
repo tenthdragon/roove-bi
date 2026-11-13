@@ -116,17 +116,19 @@ async function rpc(name: string, args: Record<string, any>) {
   if (name === 'tax_record_coretax_numbers') return recordCoretaxRpc(args);
   if (name === 'tax_record_payment_ntpn' || name === 'tax_clear_payment_ntpn') return paymentRpc(name, args);
   assert.equal(name, 'tax_create_export_batch');
+  if (args.p_form !== 'BPPU' && args.p_form !== 'BPNR') return { data: null, error: { message: 'Formulir export harus BPPU atau BPNR.' } };
   const slips = db.tax_withholding_slips ??= [];
   const ids: number[] = [...new Set(args.p_slip_ids as number[])];
   const versions = new Map((args.p_slip_ids as number[]).map((id, index) => [id, args.p_slip_versions[index]]));
   const locked = slips.filter((row) => ids.includes(row.id) && row.workspace_id === args.p_workspace_id && row.entity_id === args.p_entity_id
-    && row.period_year === args.p_period_year && row.period_month === args.p_period_month && row.status === 'ready' && (row.export_batch_id ?? null) === null);
+    && row.period_year === args.p_period_year && row.period_month === args.p_period_month && row.status === 'ready' && (row.export_batch_id ?? null) === null
+    && ((row.pph_article === 'pph26') === (args.p_form === 'BPNR')));
   if (locked.length !== ids.length) return { data: null, error: { message: 'Sebagian bukti potong sudah berubah atau bukan status siap' } };
   if (locked.some((row) => row.updated_at !== versions.get(row.id))) return { data: null, error: { message: 'Sebagian bukti potong diubah setelah pratinjau' } };
   const batches = db.tax_export_batches ??= [];
-  const sequence = batches.filter((b) => b.entity_id === args.p_entity_id && b.period_year === args.p_period_year && b.period_month === args.p_period_month).length + 1;
+  const sequence = batches.filter((b) => b.entity_id === args.p_entity_id && b.form === args.p_form && b.period_year === args.p_period_year && b.period_month === args.p_period_month).length + 1;
   const batch = {
-    id: batches.length + 1, workspace_id: args.p_workspace_id, entity_id: args.p_entity_id, period_year: args.p_period_year, period_month: args.p_period_month,
+    id: batches.length + 1, workspace_id: args.p_workspace_id, entity_id: args.p_entity_id, form: args.p_form, period_year: args.p_period_year, period_month: args.p_period_month,
     sequence, file_name: `${args.p_file_name_prefix}${String(sequence).padStart(2, '0')}.xml`, schema_version: args.p_schema_version,
     slip_count: locked.length,
     total_gross: String(locked.reduce((sum, row) => sum + Number(row.gross_amount), 0)),
@@ -146,7 +148,13 @@ const coretaxActions = require('../lib/tax-withholding-coretax-actions') as type
 const paymentActions = require('../lib/tax-withholding-payment-actions') as typeof import('../lib/tax-withholding-payment-actions');
 
 const entity = { id: 1, workspace_id: A, business_id: 4, legal_name: 'PT. CONTOH SINTETIS INDONESIA', npwp: '0123456789012345', tku_id: '0123456789012345000000', is_active: true };
-const vendor = { id: 1, workspace_id: A, name: 'PT CONTOH MARKETPLACE', identity_type: 'npwp', identity_number: '0012345678901000', is_pkp: true, country_code: 'IDN', is_active: true };
+const vendor = { id: 1, workspace_id: A, name: 'PT CONTOH MARKETPLACE', identity_type: 'npwp', identity_number: '0012345678901000', is_pkp: true, country_code: 'IDN', address: null, is_active: true };
+const foreignVendor = { id: 2, workspace_id: A, name: 'CONTOH PLATFORMS LIMITED', identity_type: 'foreign_tin', identity_number: 'IE-1234567X', is_pkp: false, country_code: 'IRL', address: 'SAMPLE ROAD, DUBLIN 4, IRELAND', is_active: true };
+const services26 = { code: '27-104-01', name: 'Imbalan jasa (PPh 26)', pph_article: 'pph26', rate_percent: 20, is_active: true, kap: '411127', kjs: '104' };
+const slip26 = (overrides: Record<string, unknown> = {}) => readySlip({
+  counterparty_id: 2, counterparty_name: foreignVendor.name, counterparty_identity_type: 'foreign_tin', counterparty_identity_number: foreignVendor.identity_number,
+  invoice_number: 'INV-26', object_code: '27-104-01', pph_article: 'pph26', rate_percent: '20', withholding_amount: '200000', vat_rate_percent: '0', vat_amount: '0', total_amount: '1000000', ...overrides,
+});
 const software = { code: '24-104-24', name: 'Jasa software', pph_article: 'pph23', rate_percent: 2, is_active: true, kap: '411124', kjs: '104' };
 const readySlip = (overrides: Record<string, unknown> = {}) => ({
   workspace_id: A, entity_id: 1, counterparty_id: 1, counterparty_name: vendor.name, counterparty_identity_type: 'npwp', counterparty_identity_number: vendor.identity_number,
@@ -164,9 +172,9 @@ beforeEach(() => {
   onRead = null;
   db = {
     tax_withholding_entities: [structuredClone(entity)],
-    tax_counterparties: [structuredClone(vendor)],
+    tax_counterparties: [structuredClone(vendor), structuredClone(foreignVendor)],
     tax_counterparty_facilities: [],
-    tax_object_codes: [structuredClone(software)],
+    tax_object_codes: [structuredClone(software), structuredClone(services26)],
     tax_withholding_slips: [],
     tax_export_batches: [],
     tax_payment_records: [],
@@ -263,7 +271,7 @@ test('a REKAPAN row with a faktur pajak exports its faktur number as the XML Doc
 test('previewTaxExport counts every attached slip of a batch beyond one PostgREST page', async () => {
   db.tax_export_batches.push({
     id: 1, workspace_id: A, entity_id: 1, period_year: 2026, period_month: 1, sequence: 1, file_name: 'BPPU - EBUPOT - CSI - 01 2026 - 01.xml',
-    schema_version: 'BpuBulk-v3', slip_count: 1001, total_gross: '1001000000', total_withholding: '20020000', xml_sha256: 'a'.repeat(64), created_at: stamp(),
+    form: 'BPPU', schema_version: 'BpuBulk-v3', slip_count: 1001, total_gross: '1001000000', total_withholding: '20020000', xml_sha256: 'a'.repeat(64), created_at: stamp(),
   });
   for (let index = 0; index < 1001; index += 1) {
     db.tax_withholding_slips.push({ id: index + 1, ...readySlip({ invoice_number: `INV-${index}`, status: 'exported', export_batch_id: 1 }), updated_at: stamp() });
@@ -493,4 +501,47 @@ test('listTaxPaymentRecords pages past the PostgREST row limit so yearly totals 
   const listed = await paymentActions.listTaxPaymentRecords({ entityId: 1, year: 2026 });
   assert.equal(listed.length, DEFAULT_PAGE + 1);
   assert.equal(listed.reduce((sum, record) => sum + Number(record.paid_amount), 0), (DEFAULT_PAGE + 1) * 1000);
+});
+
+test('BPNR export takes the masa\'s PPh 26 slips with country and address from the master, numbered apart from BPPU', async () => {
+  db.tax_withholding_slips.push({ id: 1, ...readySlip(), updated_at: stamp() });
+  db.tax_withholding_slips.push({ id: 2, ...slip26(), updated_at: stamp() });
+  db.tax_withholding_slips.push({ id: 3, ...slip26({ invoice_number: 'INV-26-NPWP', counterparty_id: 1, counterparty_name: vendor.name, counterparty_identity_type: 'npwp', counterparty_identity_number: vendor.identity_number }), updated_at: stamp() });
+
+  // BPPU sees only the PPh 23 slip and tells how many PPh 26 slips wait for BPNR.
+  const bppu = await exportActions.previewTaxExport({ entityId: 1, year: 2026, month: 1 });
+  assert.equal(bppu.form, 'BPPU');
+  assert.deepEqual(bppu.rows.map((row) => [row.id, row.errors]), [[1, []]]);
+  assert.equal(bppu.otherFormPending, 2);
+  await assert.rejects(exportActions.createTaxExportBatch({ entityId: 1, year: 2026, month: 1, slipIds: [1, 2] }), /INV-26 bukan formulir BPPU/);
+  const bppuBatch = await exportActions.createTaxExportBatch({ entityId: 1, year: 2026, month: 1, slipIds: bppu.batchIds });
+  assert.equal(bppuBatch.fileName, 'BPPU - EBUPOT - CSI - 01 2026 - 01.xml');
+
+  // BPNR: the foreign vendor passes; the NPWP vendor of PPh 26 is blocked by its resident country and missing address.
+  const bpnr = await exportActions.previewTaxExport({ entityId: 1, year: 2026, month: 1, form: 'BPNR' });
+  assert.equal(bpnr.form, 'BPNR');
+  assert.equal(bpnr.otherFormPending, 0, 'the PPh 23 slip is exported by now');
+  assert.deepEqual(bpnr.rows.map((row) => [row.id, row.counterparty_country_code, row.errors.length]), [[2, 'IRL', 0], [3, 'IDN', 2]]);
+  assert.match(bpnr.rows[1].errors.join(' '), /Negara lawan transaksi IDN/);
+  assert.match(bpnr.rows[1].errors.join(' '), /Alamat lawan transaksi wajib/);
+  assert.deepEqual(bpnr.batchIds, [2]);
+  assert.equal(bpnr.nextFileName, 'BPNR - EBUPOT - CSI - 01 2026 - 01.xml');
+  assert.deepEqual(bpnr.batches, []);
+  await assert.rejects(exportActions.createTaxExportBatch({ entityId: 1, year: 2026, month: 1, form: 'BPNR', slipIds: [2, 3] }), /1 bukti potong tidak valid/);
+
+  const batch = await exportActions.createTaxExportBatch({ entityId: 1, year: 2026, month: 1, form: 'BPNR', slipIds: bpnr.batchIds });
+  assert.equal(batch.form, 'BPNR');
+  assert.equal(batch.fileName, 'BPNR - EBUPOT - CSI - 01 2026 - 01.xml', 'BPNR numbering starts at 01 although a BPPU batch exists');
+  assert.match(batch.xml, /^<\?xml[^]*<BPNRBulk xmlns:xsi/);
+  assert.match(batch.xml, /<CounterpartTin>IE-1234567X<\/CounterpartTin>\n\s+<CounterpartReceiptNumber>N\/A<\/CounterpartReceiptNumber>\n\s+<CounterpartName>CONTOH PLATFORMS LIMITED<\/CounterpartName>\n\s+<CounterpartCountry>IRL<\/CounterpartCountry>\n\s+<CounterpartAddress>SAMPLE ROAD, DUBLIN 4, IRELAND<\/CounterpartAddress>/);
+  assert.match(batch.xml, /<GrossIncome>1000000<\/GrossIncome>\n\s+<Deemed>100<\/Deemed>\n\s+<Rate>20<\/Rate>/);
+  assert.doesNotMatch(batch.xml, /INV-26-NPWP|INV-READY/);
+  assert.equal(db.tax_withholding_slips[1].status, 'exported');
+  assert.equal(db.tax_export_batches.at(-1).schema_version, 'BPNRBulk-v1');
+
+  const after = await exportActions.previewTaxExport({ entityId: 1, year: 2026, month: 1, form: 'BPNR' });
+  assert.deepEqual(after.batches.map((row) => [row.form, row.sequence, row.current_slip_count]), [['BPNR', 1, 1]]);
+  assert.equal(after.nextFileName, 'BPNR - EBUPOT - CSI - 01 2026 - 02.xml');
+  assert.equal((await exportActions.previewTaxExport({ entityId: 1, year: 2026, month: 1 })).batches.length, 1, 'BPPU history lists only BPPU batches');
+  await assert.rejects(exportActions.previewTaxExport({ entityId: 1, year: 2026, month: 1, form: 'SPT' as never }), /Formulir export harus BPPU atau BPNR/);
 });

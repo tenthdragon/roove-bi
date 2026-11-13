@@ -22,6 +22,7 @@ import {
   getTaxExportBatchXml,
   previewTaxExport,
   voidExportedTaxSlip,
+  type TaxExportForm,
   type TaxExportPreview,
 } from '@/lib/tax-withholding-export-actions';
 import type { TaxCounterparty, TaxWithholdingEntity } from '@/lib/tax-withholding-actions';
@@ -323,26 +324,35 @@ export function SlipsSection({ entities, counterparties, canManage, notify }: {
   );
 }
 
+const EXPORT_FORM_OPTIONS: ReadonlyArray<{ value: TaxExportForm; label: string }> = [
+  { value: 'BPPU', label: 'BPPU · residen (NPWP/NIK)' },
+  { value: 'BPNR', label: 'BPNR · non-residen (PPh 26)' },
+];
+
 function ExportModal({ entity, year, month, onClose, onChanged, notify }: {
   entity: TaxWithholdingEntity; year: number; month: number; onClose: () => void; onChanged: () => Promise<void>; notify: Notify;
 }) {
+  const [form, setForm] = useState<TaxExportForm>('BPPU');
   const [preview, setPreview] = useState<TaxExportPreview | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState<'create' | number | null>(null);
   const [onlyBlocked, setOnlyBlocked] = useState(false);
+  const requestSequence = useRef(0);
 
   const refresh = useCallback(async () => {
+    const sequence = ++requestSequence.current;
     setLoading(true);
     setError(null);
     try {
-      setPreview(await previewTaxExport({ entityId: entity.id, year, month }));
+      const next = await previewTaxExport({ entityId: entity.id, year, month, form });
+      if (sequence === requestSequence.current) setPreview(next);
     } catch (err) {
-      setError(errorText(err));
+      if (sequence === requestSequence.current) setError(errorText(err));
     } finally {
-      setLoading(false);
+      if (sequence === requestSequence.current) setLoading(false);
     }
-  }, [entity.id, year, month]);
+  }, [entity.id, year, month, form]);
 
   useEffect(() => { void refresh(); }, [refresh]);
 
@@ -355,7 +365,7 @@ function ExportModal({ entity, year, month, onClose, onChanged, notify }: {
     setBusy('create');
     setError(null);
     try {
-      const result = await createTaxExportBatch({ entityId: entity.id, year, month, slipIds: batchIds });
+      const result = await createTaxExportBatch({ entityId: entity.id, year, month, form, slipIds: batchIds });
       downloadTextFile(result.fileName, result.xml);
       notify({ type: 'success', text: `Batch ${result.fileName} dibuat: ${result.slipCount} bukti potong berstatus di-export.` });
       await Promise.all([refresh(), onChanged()]);
@@ -379,14 +389,33 @@ function ExportModal({ entity, year, month, onClose, onChanged, notify }: {
   };
 
   const rows = preview ? preview.rows.filter((row) => !onlyBlocked || row.errors.length > 0) : [];
-  const canCreate = batchIds.length > 0 && Boolean(preview && preview.entityErrors.length === 0) && busy === null;
+  // The preview shown must be the form selected; a stale preview of the other form never drives the button.
+  const previewMatches = Boolean(preview && preview.form === form);
+  const canCreate = previewMatches && batchIds.length > 0 && Boolean(preview && preview.entityErrors.length === 0) && busy === null;
+  const isBpnr = form === 'BPNR';
 
   return (
-    <ModalShell title="Export XML BPPU" subtitle={`${entity.legal_name} · ${MONTHS[month - 1]} ${year}`} onClose={onClose} maxWidth={980}>
+    <ModalShell title={isBpnr ? 'Export XML BPNR (PPh 26)' : 'Export XML BPPU'} subtitle={`${entity.legal_name} · ${MONTHS[month - 1]} ${year}`} onClose={onClose} maxWidth={980}>
       <div className="tw-modal-body" style={{ display: 'grid', gap: 14 }}>
+        <div role="radiogroup" aria-label="Formulir export" style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+          {EXPORT_FORM_OPTIONS.map((option) => (
+            <button
+              key={option.value}
+              type="button"
+              role="radio"
+              aria-checked={form === option.value}
+              className="tw-filter"
+              style={{ cursor: 'pointer', fontWeight: form === option.value ? 700 : 400, borderColor: form === option.value ? 'var(--accent)' : undefined }}
+              disabled={busy !== null}
+              onClick={() => { if (form !== option.value) { setForm(option.value); setOnlyBlocked(false); } }}
+            >
+              {option.label}
+            </button>
+          ))}
+        </div>
         {error ? <div className="tw-notice" style={{ color: 'var(--red)' }}>{error}</div> : null}
-        {loading && !preview ? <div style={{ color: 'var(--text-secondary)', fontSize: 13 }}>Memuat pratinjau…</div> : null}
-        {preview ? (
+        {loading && !previewMatches ? <div style={{ color: 'var(--text-secondary)', fontSize: 13 }}>Memuat pratinjau…</div> : null}
+        {preview && previewMatches ? (
           <>
             {preview.entityErrors.length > 0 ? <div className="tw-notice" style={{ color: 'var(--red)' }}>Pemotong belum siap: {preview.entityErrors.join(' ')}</div> : null}
             <div className="tw-summary-grid">
@@ -396,7 +425,10 @@ function ExportModal({ entity, year, month, onClose, onChanged, notify }: {
               <SummaryCard label="Nama file berikutnya" value={preview.nextFileName} hint={`TIN ${preview.entity.npwp}`} />
             </div>
             <div style={{ fontSize: 12, color: 'var(--text-secondary)' }}>
-              Semua bukti potong berstatus siap yang lolos validasi masuk ke satu file. Baris terblokir tetap di luar batch; perbaiki lalu buat batch berikutnya. Vendor non-residen (TIN asing) tidak dilaporkan lewat BPPU.
+              {isBpnr
+                ? 'Bukti potong PPh 26 berstatus siap yang lolos validasi masuk ke satu file BPNR (bukti potong non-residen). Negara dan alamat diambil dari master lawan transaksi; fasilitas SKD menjadi COD dengan nomor SKD WPLN.'
+                : 'Semua bukti potong berstatus siap yang lolos validasi masuk ke satu file. Baris terblokir tetap di luar batch; perbaiki lalu buat batch berikutnya. Bukti potong PPh 26 dilaporkan lewat formulir BPNR.'}
+              {preview.otherFormPending > 0 ? ` ${preview.otherFormPending} bukti potong draft/siap di masa ini milik formulir ${isBpnr ? 'BPPU' : 'BPNR'}.` : ''}
             </div>
             {deferredCount > 0 ? <div className="tw-notice">Satu file memuat maksimal {preview.maxBatchSlips} bukti potong. Batch ini mengambil {batchIds.length} bukti potong pertama; {deferredCount} sisanya tetap berstatus siap untuk batch berikutnya.</div> : null}
             <label style={{ display: 'flex', gap: 8, alignItems: 'center', fontSize: 12, color: 'var(--text-secondary)' }}>
@@ -405,7 +437,7 @@ function ExportModal({ entity, year, month, onClose, onChanged, notify }: {
             </label>
             {rows.length === 0 ? (
               <div style={{ padding: 18, textAlign: 'center', color: 'var(--text-secondary)', fontSize: 13 }}>
-                {preview.rows.length === 0 ? 'Tidak ada bukti potong draft atau siap di masa ini.' : 'Tidak ada baris terblokir.'}
+                {preview.rows.length === 0 ? (isBpnr ? 'Tidak ada bukti potong PPh 26 draft atau siap di masa ini.' : 'Tidak ada bukti potong draft atau siap di masa ini.') : 'Tidak ada baris terblokir.'}
               </div>
             ) : (
               <div className="table-scroll" style={{ maxHeight: 360 }}>
@@ -426,7 +458,7 @@ function ExportModal({ entity, year, month, onClose, onChanged, notify }: {
                       <tr key={row.id}>
                         <td style={{ ...cellStyle, whiteSpace: 'nowrap' }}>{formatDate(row.invoice_date)}</td>
                         <td style={cellStyle}><div style={{ fontWeight: 600, overflowWrap: 'anywhere' }}>{row.invoice_number}</div></td>
-                        <td style={cellStyle}>{row.counterparty_name}<div style={{ color: 'var(--dim)', fontSize: 11 }}>{IDENTITY_LABELS[row.counterparty_identity_type]}</div></td>
+                        <td style={cellStyle}>{row.counterparty_name}<div style={{ color: 'var(--dim)', fontSize: 11 }}>{IDENTITY_LABELS[row.counterparty_identity_type]}{row.counterparty_country_code ? ` · ${row.counterparty_country_code}` : ''}</div></td>
                         <td style={cellStyle}><span className="tw-mono">{row.object_code}</span>{row.facility_code !== 'N/A' ? <div style={{ color: 'var(--dim)', fontSize: 11 }}>{row.facility_code}</div> : null}</td>
                         <td style={numberCellStyle}>{formatMoney(row.gross_amount, 2)}</td>
                         <td style={numberCellStyle}>{formatMoney(row.withholding_amount)}</td>
@@ -444,7 +476,7 @@ function ExportModal({ entity, year, month, onClose, onChanged, notify }: {
               </div>
             )}
             <div>
-              <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-secondary)', marginBottom: 6 }}>Riwayat batch masa ini</div>
+              <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-secondary)', marginBottom: 6 }}>Riwayat batch {form} masa ini</div>
               {preview.batches.length === 0 ? (
                 <div style={{ fontSize: 12, color: 'var(--dim)' }}>Belum ada batch.</div>
               ) : (
@@ -481,7 +513,7 @@ function ExportModal({ entity, year, month, onClose, onChanged, notify }: {
         <button type="button" style={secondaryButtonStyle} onClick={onClose}>Tutup</button>
         <button type="button" style={secondaryButtonStyle} disabled={loading || busy !== null} onClick={() => void refresh()}>Muat ulang</button>
         <button type="button" style={primaryButtonStyle} disabled={!canCreate} onClick={() => void create()}>
-          {busy === 'create' ? 'Membuat batch…' : `Buat batch & unduh XML${preview ? ` (${batchIds.length})` : ''}`}
+          {busy === 'create' ? 'Membuat batch…' : `Buat batch ${form} & unduh XML${previewMatches ? ` (${batchIds.length})` : ''}`}
         </button>
       </div>
     </ModalShell>
