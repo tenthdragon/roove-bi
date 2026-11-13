@@ -41,6 +41,7 @@ const slipsMigration = read('../supabase/migrations/251_tax_withholding_slips.sq
 const exportMigration = read('../supabase/migrations/252_tax_export_batches.sql');
 const coretaxMigration = read('../supabase/migrations/253_tax_coretax_recording.sql');
 const paymentMigration = read('../supabase/migrations/254_tax_payment_records.sql');
+const formsMigration = read('../supabase/migrations/255_tax_export_forms.sql');
 
 // Two imports insert the same certificate at the same time; the constraint must
 // leave exactly one row and neither side may fail.
@@ -135,6 +136,8 @@ ${readAccessMigration}
   psql(coretaxMigration);
   psql(paymentMigration);
   psql(paymentMigration);
+  psql(formsMigration);
+  psql(formsMigration);
   process.stdout.write(psql(`DO $$ DECLARE target regclass; BEGIN
     FOREACH target IN ARRAY ARRAY['public.tax_object_codes'::regclass,'public.tax_withholding_entities'::regclass,
       'public.tax_counterparties'::regclass,'public.tax_counterparty_facilities'::regclass] LOOP

@@ -4,15 +4,19 @@
 // generator mirrors that template so a Roove BI batch can replace the Excel
 // step without changing what Coretax receives.
 
-import { digitsOnly, type DocumentType, type FacilityCode, type IdentityType } from './tax-withholding-domain';
+import { digitsOnly, type DocumentType, type FacilityCode, type IdentityType, type TaxArticle } from './tax-withholding-domain';
 import { fromMicro, periodStartIso, toMicro } from './tax-withholding-rules';
 
 export const BPU_BULK_SCHEMA_VERSION = 'BpuBulk-v3';
 
+/** BPPU: bukti potong unifikasi for resident recipients (NPWP/NIK). BPNR: PPh 26 to non-residents (lib/tax-withholding-bpnr.ts). */
+export const TAX_EXPORT_FORMS = ['BPPU', 'BPNR'] as const;
+export type TaxExportForm = (typeof TAX_EXPORT_FORMS)[number];
+
 /** TaxCertificate values accepted by the BPPU schema. SKD (non-resident) is not one of them. */
 export const XML_FACILITY_CODES = ['N/A', 'TaxExAr22', 'TaxExAr23', 'TaxExIntDep', 'TaxExIntPhtb', 'DTP', 'PP23', 'ETC'] as const;
 export const XML_DOCUMENT_TYPES = ['TaxInvoice', 'CommercialInvoice', 'Announchment', 'Contract', 'PaymentProof', 'DeedofEngangement', 'DeedofGeneralMeetingStakeholder', 'StatementLetter', 'BankAccountNumber'] as const;
-/** Only recipients with an Indonesian NPWP or NIK can be reported through BPPU; non-residents use a different form. */
+/** Only recipients with an Indonesian NPWP or NIK can be reported through BPPU; non-residents use BPNR. */
 export const XML_IDENTITY_TYPES: readonly IdentityType[] = ['npwp', 'nik'];
 
 export type ExportEntity = {
@@ -25,6 +29,8 @@ export type ExportEntity = {
 export type ExportSlip = {
   id: number;
   status: string;
+  /** PPh 26 slips are reported through BPNR (lib/tax-withholding-bpnr.ts), never through BPPU. */
+  pph_article?: TaxArticle;
   period_month: number;
   period_year: number;
   counterparty_name: string;
@@ -69,6 +75,7 @@ export function validateSlipForXml(slip: ExportSlip, period: ExportPeriod, activ
   const errors: string[] = [];
   if (slip.status !== 'ready') errors.push(`Status ${slip.status}; hanya bukti potong siap yang di-export.`);
   if (slip.period_year !== period.year || slip.period_month !== period.month) errors.push('Masa pajak bukti potong berbeda dari masa batch.');
+  if (slip.pph_article === 'pph26') errors.push('PPh 26 dilaporkan lewat BPNR (bukti potong non-residen), bukan BPPU.');
   if (!XML_IDENTITY_TYPES.includes(slip.counterparty_identity_type)) {
     errors.push(slip.counterparty_identity_type === 'foreign_tin'
       ? 'Lawan transaksi non-residen (TIN asing) tidak masuk BPPU; laporkan lewat bukti potong non-residen.'

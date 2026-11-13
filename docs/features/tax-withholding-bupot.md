@@ -87,6 +87,50 @@ Validasi tambahan dari sheet BPPU (bukan dari XSD, tetapi ditegakkan Coretax):
 - `WithholdingDate` tidak boleh lebih awal dari masa/tahun pajak.
 - `GovTreasurerOpt` selain `N/A` dan `SP2DNumber` hanya untuk instansi pemerintah; untuk Roove selalu `N/A` dan nil.
 
+### 3b. Skema BPNR — bukti potong non-residen (PPh 26, fase 5b)
+
+Diambil dari template "BPNR Excel to XML" (sheet DATA/BPNR/REF) dan XML yang pernah
+diunggah tim finance. Penerima disebut lewat TIN (NPWP atau nomor pajak asing), nama,
+negara ISO alpha-3 dan alamat; penghasilan dilaporkan sebagai `GrossIncome × Deemed × Rate`.
+
+```xml
+<BPNRBulk xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+  <TIN>1234567890123456</TIN>
+  <ListOfBPNR>
+    <BPNR>
+      <TaxPeriodMonth>9</TaxPeriodMonth>
+      <TaxPeriodYear>2026</TaxPeriodYear>
+      <CounterpartTin>0021628946053000</CounterpartTin>   <!-- NPWP atau TIN asing, teks bebas -->
+      <CounterpartReceiptNumber>N/A</CounterpartReceiptNumber> <!-- nomor SKD WPLN bila TaxCertificate = COD -->
+      <CounterpartName>NAMA PENERIMA</CounterpartName>
+      <CounterpartCountry>IRL</CounterpartCountry>          <!-- ISO 3166-1 alpha-3 dari sheet REF (249 negara) -->
+      <CounterpartAddress>ALAMAT</CounterpartAddress>
+      <CounterpartDob xsi:nil="true"/>                      <!-- orang pribadi: tanggal/tempat lahir, paspor, KITAS -->
+      <CounterpartBirthCity xsi:nil="true"/>
+      <CounterpartPassport xsi:nil="true"/>
+      <CounterpartKitas xsi:nil="true"/>
+      <TaxCertificate>N/A</TaxCertificate>                  <!-- enum: N/A COD (SKD) ETC -->
+      <TaxObjectCode>27-104-01</TaxObjectCode>              <!-- 40 kode di sheet REF (27-xxx + beberapa 28-xxx) -->
+      <GrossIncome>570709445</GrossIncome>
+      <Deemed>100</Deemed>                                  <!-- norma penghasilan bruto per kode objek -->
+      <Rate>20</Rate>
+      <Document>CommercialInvoice</Document>                <!-- enum BPNR: ejaan berbeda dari BPPU (Announcement, DeedOfEngagement, DeedOfGeneral, …) -->
+      <DocumentNumber>255001216</DocumentNumber>
+      <DocumentDate>2026-09-01</DocumentDate>
+      <GovTreasurerOpt>N/A</GovTreasurerOpt>
+      <SP2DNumber xsi:nil="true"/>
+      <WithholdingDate>2026-09-01</WithholdingDate>
+      <IDPlaceOfBusinessActivity>1234567890123456000000</IDPlaceOfBusinessActivity> <!-- TKU pemotong, elemen terakhir -->
+    </BPNR>
+  </ListOfBPNR>
+</BPNRBulk>
+```
+
+Catatan sheet BPNR: bila memakai fasilitas SKD, TIN, nama dan negara harus sama dengan yang
+terdaftar pada SKD; `Deemed` dan `Rate` boleh menyimpang dari referensi hanya bila ada fasilitas.
+Referensi kode objek, norma dan negara tersimpan di `lib/tax-withholding-bpnr-ref.ts`
+(dibangkitkan dari template).
+
 ## 4. Penempatan di aplikasi
 
 - **Tab**: `tax-withholding`, label **Bukti Potong (PPh)**, anak dari `financial-report`
@@ -216,8 +260,9 @@ CHECK: `gross_amount > 0`, `rate_percent >= 0`, `period_month BETWEEN 1 AND 12`,
 | Kolom | Catatan |
 | --- | --- |
 | id, workspace_id, entity_id, period_month, period_year | |
-| sequence SMALLINT | `01`, `02` per entity+masa, dihitung server |
-| file_name TEXT | `BPPU - EBUPOT - {kode PT} - {MM} {YYYY} - {seq}.xml` |
+| form TEXT | `BPPU` (residen) atau `BPNR` (PPh 26 non-residen), migration 255 |
+| sequence SMALLINT | `01`, `02` per entity+masa+form, dihitung server |
+| file_name TEXT | `BPPU - EBUPOT - {kode PT} - {MM} {YYYY} - {seq}.xml`, atau `BPNR - EBUPOT - …` |
 | slip_count INT, total_gross NUMERIC, total_withholding NUMERIC | |
 | xml_sha256 TEXT | |
 | xml_content TEXT | disimpan untuk unduh ulang; ukuran puluhan KB per batch |
@@ -325,8 +370,8 @@ exported ──(void dari batch, alasan wajib)──> draft   // kembali ke antr
 | `voidTaxSlipFromBatch(id, reason)` | kembali ke `draft` |
 | `listCounterparties`, `saveCounterparty`, `saveCounterpartyFacility`, `deactivateCounterparty` | master |
 | `saveWithholdingEntity(input)` | identitas pemotong per business |
-| `previewTaxExport({ entityId, year, month })` | daftar bupot `ready` + hasil validasi + total; tidak menulis |
-| `createTaxExportBatch({ entityId, year, month, slipIds })` | validasi ulang, buat batch, set status `exported`, kembalikan `{ batchId, fileName, xml }` |
+| `previewTaxExport({ entityId, year, month, form? })` | daftar bupot `ready` formulir itu (BPPU: non-PPh 26, BPNR: PPh 26) + hasil validasi + total; tidak menulis |
+| `createTaxExportBatch({ entityId, year, month, form?, slipIds })` | validasi ulang per formulir, buat batch (`form`, penomoran per formulir), set status `exported`, kembalikan `{ batchId, form, fileName, xml }` |
 | `getTaxExportBatchXml(batchId)` | unduh ulang |
 | `previewCoretaxRecording(formData)` | bupot `exported`/`reported` satu masa (opsional satu batch) + usulan nomor dari tempelan/unduhan Coretax; tidak menulis |
 | `recordCoretaxNumbers({ entityId, year, month, assignments[], allowReplace })` | fungsi DB `tax_record_coretax_numbers()`: set `coretax_slip_number`, status `reported`, cek versi dan keunikan |
@@ -523,8 +568,32 @@ Dua workbook per PT (RTI dan PT lain) diimpor terpisah; `entity` dipilih di UI.
 - Pengingat fasilitas (`listExpiringFacilities`): fasilitas vendor aktif dengan `valid_to` ≤ 30 hari ke
   depan atau berakhir ≤ 30 hari lalu, diurutkan dari yang paling dekat; engine sudah memakai tarif normal
   setelah `valid_to`, banner hanya mengingatkan untuk memperbarui dokumen.
-- Bupot non-residen (PPh 26, `foreign_tin`) menunggu template XML Coretax untuk bukti potong non-residen
-  (BPNR); skema elemennya berbeda dari BpuBulk dan belum ada di `~/Documents/File Pajak/`.
+- Bupot non-residen (PPh 26) dikerjakan di fase 5b (§10f) setelah template BPNR diterima.
+
+## 10f. Keputusan implementasi Fase 5 (bagian 2: export BPNR untuk PPh 26)
+
+- Pemisah formulir adalah **pasal**, bukan jenis identitas: semua bupot `pph26` masuk BPNR (termasuk
+  vendor asing yang punya NPWP, seperti PMSE), semua pasal lain masuk BPPU. `validateSlipForXml`
+  menolak PPh 26 dan fungsi DB `tax_create_export_batch(p_form)` menolak campuran di bawah lock.
+- Satu BPNR per bupot (per invoice), sama seperti BPPU, karena data produksi menunjukkan satu nomor
+  Coretax per invoice; agregasi per vendor per bulan (seperti contoh XML Meta) tidak ditiru agar nomor
+  Coretax tetap unik per bupot.
+- Negara dan alamat penerima diambil dari master lawan transaksi saat export (bukan snapshot di bupot).
+  Negara wajib ada di referensi Coretax dan bukan `IDN`; alamat wajib terisi. Semua vendor PPh 26 2026
+  di produksi sudah beralamat; satu vendor berkode `IDN` perlu diperbaiki di master sebelum export.
+- Fasilitas: `N/A` → `N/A`; `SKD` → `COD` dengan `CounterpartReceiptNumber` = nomor dokumen fasilitas
+  bupot (wajib); `ETC` → `ETC`; fasilitas SKB/PP23/DTP ditolak. Jenis dokumen dipetakan ke ejaan BPNR;
+  `BankAccountNumber` tidak punya padanan dan ditolak.
+- `Deemed`/`Rate`: bupot menyimpan tarif efektif; `resolveBpnrRate` membagi dengan norma kode objek
+  (satu norma → tarif nominal; 27-100-06 punya tiga norma → dipilih yang mereproduksi tarif efektif,
+  selain itu diblokir dengan pesan). Untuk 27-104-01 (semua data produksi) norma 100 dan tarif apa adanya.
+- `GrossIncome` ditulis dengan presisi tersimpan (tanpa nol di belakang), konsisten dengan `TaxBase` BPPU;
+  143 dari 304 bupot PPh 26 2026 punya DPP berdesimal. Unggahan BPNR pertama ke Coretax yang memastikan
+  desimal diterima; bila ditolak, pembulatan ke rupiah menjadi keputusan lanjutan.
+- Field orang pribadi (tanggal/tempat lahir, paspor, KITAS) tidak dilacak Roove dan ditulis `xsi:nil`;
+  penerima non-residen orang pribadi belum didukung.
+- Penomoran batch per entity+masa+**form** (`BPNR - EBUPOT - RTI - 09 2026 - 01.xml`), riwayat batch
+  di dialog difilter per formulir, `schema_version` `BPNRBulk-v1`.
 
 ## 11. Pertanyaan terbuka (perlu jawaban sebelum fase terkait)
 
@@ -535,8 +604,9 @@ Dua workbook per PT (RTI dan PT lain) diimpor terpisah; `entity` dipilih di UI.
    serupa? Mempengaruhi prioritas multi-entity di UI.
 3. **Presisi DPP**: tetap desimal panjang (perilaku sekarang) atau dibulatkan 2 desimal?
 4. **NPWP 15 digit lama** di master: konfirmasi aturan konversi ke 16 digit.
-5. **PPh 26 di BPPU**: bagaimana vendor asing (TIN non-NPWP) diisi di Coretax
-   unifikasi saat ini? Menentukan apakah `foreign_tin` ikut XML atau tetap manual.
+5. **PPh 26 di BPPU** — terjawab (fase 5b): Coretax memakai formulir terpisah BPNR; vendor asing
+   ber-NPWP (PMSE seperti Meta Ireland) pun dilaporkan lewat BPNR dengan `CounterpartTin` = NPWP.
+   Semua bupot PPh 26 kini keluar lewat BPNR, BPPU menolaknya.
 6. **Jenis dokumen**: apakah selalu `CommercialInvoice`, atau `TaxInvoice` dipakai
    bila vendor menerbitkan faktur pajak?
 7. **Trello**: cukup tautan teks, atau perlu integrasi?
@@ -550,7 +620,7 @@ Dua workbook per PT (RTI dan PT lain) diimpor terpisah; `entity` dipilih di UI.
 | 3 ✅ | Migration `252_tax_export_batches.sql`, generator XML `lib/tax-withholding-xml.ts`, action `lib/tax-withholding-export-actions.ts` (pratinjau, buat batch, unduh ulang, void), dialog Export XML di tab Bukti Potong, unit test generator dan DB test batch | Elemen XML sama dengan template Excel; `TaxBase` memakai presisi 6 desimal yang tersimpan |
 | 4 ✅ | Migration `253_tax_coretax_recording.sql` (fungsi `tax_record_coretax_numbers()`, indeks unik nomor per pemotong, kolom audit), parser/pencocok `lib/tax-withholding-coretax.ts`, action `lib/tax-withholding-coretax-actions.ts` (pratinjau, catat, hapus, rekap tahunan), dialog `components/TaxWithholdingCoretax.tsx`, tab Rekap Setor `components/TaxWithholdingRecap.tsx` | Total PPh per masa di Rekap Setor = jumlah kolom PPh REKAPAN per masa (2026 di produksi) |
 | 5a ✅ | Migration `254_tax_payment_records.sql` (tabel + fungsi NTPN), helper `lib/tax-withholding-payment.ts`, action `lib/tax-withholding-payment-actions.ts`, kolom Setoran di Rekap Setor (`components/TaxWithholdingPayment.tsx`), banner fasilitas kedaluwarsa | NTPN tercatat → bupot kelompok `paid`; hapus NTPN → kembali `reported`; DB test |
-| 5b | Export bukti potong non-residen (PPh 26) | menunggu template XML BPNR Coretax |
+| 5b ✅ | Migration `255_tax_export_forms.sql` (kolom `form`, penomoran per formulir, guard pasal di `tax_create_export_batch`), generator `lib/tax-withholding-bpnr.ts` + referensi `lib/tax-withholding-bpnr-ref.ts`, action export berparameter `form`, pilihan BPPU/BPNR di dialog Export XML | XML BPNR identik dengan elemen template Coretax (unit test); batch BPNR bernomor 01 terpisah dari BPPU (DB test) |
 
 Setiap fase: `npm run typecheck:app`, `npm run lint`, `npm run build`, dan unit
 test rule engine/generator XML. Migration hanya dijalankan di lokal sampai
