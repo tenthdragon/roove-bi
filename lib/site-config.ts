@@ -1,5 +1,5 @@
 const DEFAULT_LOCAL_SITE_URL = 'http://localhost:3000';
-const DEFAULT_ALLOWED_EMAIL_DOMAINS = ['roove.co.id'];
+const DEFAULT_ALLOWED_EMAIL_DOMAINS = ['roove.co.id', 'gmail.com'];
 const DEFAULT_SUPPORT_EMAIL = 'hello@roove.info';
 
 function stripTrailingSlash(value: string) {
