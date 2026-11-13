@@ -8,6 +8,7 @@ import {
   buildBpnrBulkXml,
   isBpnrCountry,
   isBpnrObjectCode,
+  isBpnrReferenceRate,
   resolveBpnrRate,
   validateSlipForBpnr,
   type BpnrSlip,
@@ -153,6 +154,15 @@ test('validateSlipForBpnr accepts a ready PPh 26 slip of a foreign recipient and
   assert.match(validateSlipForBpnr(slip({ counterparty_identity_type: 'unknown' }), period, codes).join(' '), /belum punya NPWP\/TIN/);
   assert.match(validateSlipForBpnr(slip({ facility_code: 'SKD', facility_document_number: ' ' }), period, codes).join(' '), /memerlukan nomor SKD WPLN/);
   assert.match(validateSlipForBpnr(slip({ object_code: '27-100-06', rate_percent: '3' }), period, codes).join(' '), /Norma kode 27-100-06/);
+  // Without a facility the pair must be a reference pair: the seeded 20% on a norma-25% code resolves to 25 × 80 and is blocked;
+  // the same slip with SKD or another facility may deviate (treaty rates), and 5% (= 25 × 20) passes on its own.
+  assert.match(validateSlipForBpnr(slip({ object_code: '27-100-05', rate_percent: '20' }), period, codes).join(' '), /Tarif 20% \(norma 25% × tarif 80%\) menyimpang dari referensi kode 27-100-05 \(25% × 20%\)/);
+  assert.deepEqual(validateSlipForBpnr(slip({ object_code: '27-100-05', rate_percent: '5' }), period, codes), []);
+  assert.deepEqual(validateSlipForBpnr(slip({ object_code: '27-100-05', rate_percent: '20', facility_code: 'SKD', facility_document_number: 'SKD-1' }), period, codes), []);
+  assert.deepEqual(validateSlipForBpnr(slip({ rate_percent: '10', facility_code: 'ETC' }), period, codes), []);
+  assert.match(validateSlipForBpnr(slip({ rate_percent: '10' }), period, codes).join(' '), /Tarif 10% \(norma 100% × tarif 10%\) menyimpang dari referensi kode 27-104-01 \(100% × 20%\)/);
+  assert.match(validateSlipForBpnr(slip({ rate_percent: '0' }), period, codes).join(' '), /menyimpang dari referensi/, 'a 0% rate needs the SKD that justifies it');
+  assert.ok(isBpnrReferenceRate('27-100-06', 10, '20') && !isBpnrReferenceRate('27-100-06', 10, '2') && !isBpnrReferenceRate('24-104-24', 100, '2'));
   assert.match(validateSlipForBpnr(slip({ document_type: 'TaxInvoice', tax_invoice_number: '123' }), period, codes).join(' '), /faktur pajak 16 digit/);
   assert.match(validateSlipForBpnr(slip({ object_code: '27-103-01' }), period, codes).join(' '), /27-103-01 tidak aktif di referensi/);
 });

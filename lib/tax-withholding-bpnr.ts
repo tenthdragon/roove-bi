@@ -100,6 +100,13 @@ export function resolveBpnrRate(objectCode: string, ratePercent: string): BpnrRa
   };
 }
 
+/** True when Deemed × Rate is exactly one of the object code's reference pairs (what Coretax expects without a facility). */
+export function isBpnrReferenceRate(objectCode: string, deemed: number, ratePercent: string): boolean {
+  const options = OBJECT_CODE_OPTIONS.get(objectCode) ?? [];
+  const rate = toMicro(ratePercent);
+  return options.some((option) => option.deemed === deemed && toMicro(option.rate) === rate);
+}
+
 export type BpnrSlip = ExportSlip & {
   pph_article: TaxArticle;
   /** Nomor SKD WPLN when facility_code is SKD. */
@@ -145,7 +152,13 @@ export function validateSlipForBpnr(slip: BpnrSlip, period: ExportPeriod, active
   if (grossMicro <= 0n) errors.push('DPP harus lebih dari 0.');
   if (isBpnrObjectCode(slip.object_code)) {
     const resolution = resolveBpnrRate(slip.object_code, slip.rate_percent);
-    if (resolution.error) errors.push(resolution.error);
+    if (resolution.error !== null) errors.push(resolution.error);
+    // The template allows Deemed/Rate off the reference only with a facility (SKD or other):
+    // without one, Coretax validates the pair against the object code.
+    else if (certificate === 'N/A' && !isBpnrReferenceRate(slip.object_code, resolution.deemed, resolution.rate)) {
+      const reference = OBJECT_CODE_OPTIONS.get(slip.object_code) ?? [];
+      errors.push(`Tarif ${slip.rate_percent}% (norma ${resolution.deemed}% × tarif ${resolution.rate}%) menyimpang dari referensi kode ${slip.object_code} (${reference.map((option) => `${option.deemed}% × ${option.rate}%`).join(', ')}) dan bukti potong tidak memakai fasilitas SKD/lainnya.`);
+    }
   }
   const documentNumber = xmlDocumentNumber(slip);
   if (slip.document_type === 'TaxInvoice') {

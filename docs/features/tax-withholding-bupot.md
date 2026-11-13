@@ -586,7 +586,9 @@ Dua workbook per PT (RTI dan PT lain) diimpor terpisah; `entity` dipilih di UI.
   `BankAccountNumber` tidak punya padanan dan ditolak.
 - `Deemed`/`Rate`: bupot menyimpan tarif efektif; `resolveBpnrRate` membagi dengan norma kode objek
   (satu norma → tarif nominal; 27-100-06 punya tiga norma → dipilih yang mereproduksi tarif efektif,
-  selain itu diblokir dengan pesan). Untuk 27-104-01 (semua data produksi) norma 100 dan tarif apa adanya.
+  selain itu diblokir dengan pesan). Tanpa fasilitas, pasangan norma × tarif hasil resolusi harus sama
+  persis dengan referensi kode objek (Coretax memvalidasinya); tarif menyimpang (termasuk 0%) hanya lolos
+  bila bupot memakai fasilitas SKD/lainnya. Untuk 27-104-01 (semua data produksi) norma 100 dan tarif 20.
 - `GrossIncome` ditulis dengan presisi tersimpan (tanpa nol di belakang), konsisten dengan `TaxBase` BPPU;
   143 dari 304 bupot PPh 26 2026 punya DPP berdesimal. Unggahan BPNR pertama ke Coretax yang memastikan
   desimal diterima; bila ditolak, pembulatan ke rupiah menjadi keputusan lanjutan.
