@@ -1,5 +1,6 @@
 import { COURIER_SERVICE_OPTIONS, validateParserConfig } from './config';
 import { centsText } from './money';
+import { orderAddress } from './address';
 import { resolveStore } from './routing';
 import { CSV_HEADERS, type Catalog, type CsvRow, type Edits, type ParsedFile, type ParserConfig, type PreviewLine, type PreviewOrder, type Projection } from './types';
 
@@ -97,13 +98,14 @@ export function projectMarketplace(input: { file: ParsedFile; account: string; d
     if (!courier || !service) errors.push(`Mapping kurir belum tersedia: ${source.provider || 'kosong'}.`);
     else if (!COURIER_SERVICE_OPTIONS.some(c => c.courier === courier && c.service === service)) errors.push('Pasangan kurir dan layanan tidak tersedia di daftar Scalev.');
     const username = source.username;
+    const destination = orderAddress(source);
     if (!username.trim()) errors.push('Nama/username pembeli belum tersedia.');
     if (!source.tracking.trim()) errors.push('Resi kosong. Lengkapi file sumber.');
-    for (const value of [source.externalId,source.tracking,username,store?.name || '',warehouse?.name || '',courier,service,...lines.map(l => l.sku)]) if (/^[\s]*[=+@-]|[\u0000\t]/.test(value)) errors.push('Teks mengandung awalan formula/karakter kontrol. Periksa sumber sebelum ekspor CSV.');
+    for (const value of [source.externalId,source.tracking,username,...Object.values(destination),store?.name || '',warehouse?.name || '',courier,service,...lines.map(l => l.sku)]) if (/^[\s]*[=+@-]|[\u0000\t]/.test(value)) errors.push('Teks mengandung awalan formula/karakter kontrol. Periksa sumber sebelum ekspor CSV.');
     const rows: CsvRow[] = lines.map((line,index) => {
       const row = Object.fromEntries(CSV_HEADERS.map(h => [h,''])) as CsvRow;
       Object.assign(row,{ id: source.key, item_type: 'bundle', sku: line.sku, price: line.unitCents === null ? '' : centsText(line.unitCents), quantity: line.quantity === null ? '' : String(line.quantity), shipping_cost: '0', other_income: '0', weight_bump: '0' });
-      if (index === 0) Object.assign(row,{ external_id: source.externalId, platform: source.platform, timestamp: date, store: store?.name || '', name: username, username, payment_method: 'marketplace', bank: source.platform, courier, courier_service: service, warehouse: warehouse?.exportName || '', shipment_receipt: source.tracking });
+      if (index === 0) Object.assign(row,{ external_id: source.externalId, platform: source.platform, timestamp: date, store: store?.name || '', name: username, username, ...destination, payment_method: 'marketplace', bank: source.platform, courier, courier_service: service, warehouse: warehouse?.exportName || '', shipment_receipt: source.tracking });
       return row;
     });
     const totalCents = lines.reduce((sum,l) => sum + (l.totalCents ?? 0),0);
