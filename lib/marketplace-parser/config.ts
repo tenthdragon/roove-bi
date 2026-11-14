@@ -38,6 +38,7 @@ const filled = (value: unknown): value is string => text(value) && !!value.trim(
 const id = (value: unknown): value is number => Number.isSafeInteger(value) && Number(value) > 0;
 const list = (value: unknown): value is unknown[] => Array.isArray(value) && value.length <= 2000;
 const unique = (values: unknown[]) => new Set(values).size === values.length;
+export const normalizeCourierText = (value: string) => value.trim().replace(/\s+/g, ' ').toLocaleLowerCase('id');
 export function validateParserConfig(input: unknown, options: { allowIncomplete?: boolean } = {}): asserts input is ParserConfig {
   const c = input as ParserConfig;
   if ([1,2].includes(Number((input as { schemaVersion?: number })?.schemaVersion))) fail('Aturan parsing telah diperbarui. Muat ulang halaman sebelum menyimpan.');
@@ -56,6 +57,9 @@ export function validateParserConfig(input: unknown, options: { allowIncomplete?
   if (!unique(c.routes.map((r: any) => r.account + ':' + r.productId))) fail('Satu akun + Produk hanya boleh memiliki satu routing Store.');
   if (c.combinations.some(r => !accounts.has(r.account) || !products(r.productIds) || !['contains','exact'].includes(r.match) || !Number.isSafeInteger(r.priority) || r.priority < 0 || r.priority > 9999 || !stores.has(r.storeId))) fail('Lengkapi akun, kondisi Produk, prioritas, dan Store pada aturan kombinasi.');
   if (c.couriers.some(r => !r || !Object.hasOwn(MARKETPLACE_LABELS,r.platform) || !filled(r.source) || !filled(r.courier) || !filled(r.service) || !COURIER_SERVICE_OPTIONS.some(p => p.courier === r.courier && p.service === r.service))) fail('Lengkapi mapping kurir dengan pasangan kurir/layanan Scalev yang valid.');
+  if (c.couriers.some(r => r.deliveryOption !== undefined && (r.platform !== 'tiktokshop' || !text(r.deliveryOption)))) fail('Delivery Option hanya tersedia untuk kurir TikTok Shop.');
+  const optionKeys = c.couriers.filter(r => r.deliveryOption?.trim()).map(r => JSON.stringify([normalizeCourierText(r.source), normalizeCourierText(r.deliveryOption!)]));
+  if (!unique(optionKeys)) fail('Setiap pasangan provider dan Delivery Option TikTok Shop hanya boleh memiliki satu aturan.');
 }
 
 export function validateCatalogConfig(config: ParserConfig, catalog: Catalog) {

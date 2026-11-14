@@ -21,6 +21,9 @@ saves. There is no session-only routing override.
    optional advanced rules. They never rewrite SKU identity or become prerequisites
    for catalog-based or approved routing. Do not seed historical guesses as rules.
 5. Maintain Marketplace courier/service mappings and save the team configuration.
+   For TikTok Shop, match `Shipping Provider Name` and `Delivery Option`.
+   A matching option takes precedence over a provider rule with a blank option.
+   Orders with conflicting options across items require source review.
 
 ## Exact bundle identity and Store routing
 

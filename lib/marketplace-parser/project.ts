@@ -1,9 +1,9 @@
-import { COURIER_SERVICE_OPTIONS, validateParserConfig } from './config';
+import { COURIER_SERVICE_OPTIONS, normalizeCourierText, validateParserConfig } from './config';
 import { centsText } from './money';
+import { orderAddress } from './address';
 import { resolveStore } from './routing';
 import { CSV_HEADERS, type Catalog, type CsvRow, type Edits, type ParsedFile, type ParserConfig, type PreviewLine, type PreviewOrder, type Projection } from './types';
 
-const norm = (s: string) => s.trim().toLocaleLowerCase('id');
 export function classifySku(sku: string, account: string, config: ParserConfig) {
   const candidates = config.products.flatMap(rule => {
     if (rule.account !== '*' && rule.account !== account) return [];
@@ -91,19 +91,25 @@ export function projectMarketplace(input: { file: ParsedFile; account: string; d
     else if (warehouse && !warehouse.exportName) errors.push('Nama ekspor Warehouse belum terkonfirmasi. Perbaiki pengaturan Warehouse.');
     const sync = catalog.businessSyncs.find(s=>s.business===business);
     if (!catalog.loadedBusinessCodes.includes(business) || sync?.status!=='ready') errors.push('Katalog Business tujuan belum siap. Sinkronkan Business atau muat ulang katalog sebelum download.');
-    const couriers = config.couriers.filter(c => c.platform === source.platform && norm(c.source) === norm(source.provider));
+    const providerRules = config.couriers.filter(c => c.platform === source.platform && normalizeCourierText(c.source) === normalizeCourierText(source.provider));
+    const options = source.platform === 'tiktokshop' ? source.lines.map(line => normalizeCourierText(line.raw['Delivery Option'] || '')) : [];
+    const mixedOptions = new Set(options).size > 1;
+    const exact = providerRules.filter(rule => rule.deliveryOption?.trim() && normalizeCourierText(rule.deliveryOption) === options[0]);
+    const couriers = exact.length ? exact : providerRules.filter(rule => !rule.deliveryOption?.trim());
     const courier = (couriers.length === 1 ? couriers[0].courier : '').trim();
     const service = (couriers.length === 1 ? couriers[0].service : '').trim();
-    if (!courier || !service) errors.push(`Mapping kurir belum tersedia: ${source.provider || 'kosong'}.`);
+    if (mixedOptions) errors.push('Delivery Option berbeda antaritem pada order TikTok Shop ini. Periksa file sumber.');
+    else if (!courier || !service) errors.push(`Mapping kurir belum tersedia: ${[source.provider || 'kosong', options[0]].filter(Boolean).join(' · ')}.`);
     else if (!COURIER_SERVICE_OPTIONS.some(c => c.courier === courier && c.service === service)) errors.push('Pasangan kurir dan layanan tidak tersedia di daftar Scalev.');
     const username = source.username;
+    const destination = orderAddress(source);
     if (!username.trim()) errors.push('Nama/username pembeli belum tersedia.');
     if (!source.tracking.trim()) errors.push('Resi kosong. Lengkapi file sumber.');
-    for (const value of [source.externalId,source.tracking,username,store?.name || '',warehouse?.name || '',courier,service,...lines.map(l => l.sku)]) if (/^[\s]*[=+@-]|[\u0000\t]/.test(value)) errors.push('Teks mengandung awalan formula/karakter kontrol. Periksa sumber sebelum ekspor CSV.');
+    for (const value of [source.externalId,source.tracking,username,...Object.values(destination),store?.name || '',warehouse?.name || '',courier,service,...lines.map(l => l.sku)]) if (/^[\s]*[=+@-]|[\u0000\t]/.test(value)) errors.push('Teks mengandung awalan formula/karakter kontrol. Periksa sumber sebelum ekspor CSV.');
     const rows: CsvRow[] = lines.map((line,index) => {
       const row = Object.fromEntries(CSV_HEADERS.map(h => [h,''])) as CsvRow;
       Object.assign(row,{ id: source.key, item_type: 'bundle', sku: line.sku, price: line.unitCents === null ? '' : centsText(line.unitCents), quantity: line.quantity === null ? '' : String(line.quantity), shipping_cost: '0', other_income: '0', weight_bump: '0' });
-      if (index === 0) Object.assign(row,{ external_id: source.externalId, platform: source.platform, timestamp: date, store: store?.name || '', name: username, username, payment_method: 'marketplace', bank: source.platform, courier, courier_service: service, warehouse: warehouse?.exportName || '', shipment_receipt: source.tracking });
+      if (index === 0) Object.assign(row,{ external_id: source.externalId, platform: source.platform, timestamp: date, store: store?.name || '', name: username, username, ...destination, payment_method: 'marketplace', bank: source.platform, courier, courier_service: service, warehouse: warehouse?.exportName || '', shipment_receipt: source.tracking });
       return row;
     });
     const totalCents = lines.reduce((sum,l) => sum + (l.totalCents ?? 0),0);
