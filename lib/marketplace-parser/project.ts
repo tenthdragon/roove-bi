@@ -1,10 +1,9 @@
-import { COURIER_SERVICE_OPTIONS, validateParserConfig } from './config';
+import { COURIER_SERVICE_OPTIONS, normalizeCourierText, validateParserConfig } from './config';
 import { centsText } from './money';
 import { orderAddress } from './address';
 import { resolveStore } from './routing';
 import { CSV_HEADERS, type Catalog, type CsvRow, type Edits, type ParsedFile, type ParserConfig, type PreviewLine, type PreviewOrder, type Projection } from './types';
 
-const norm = (s: string) => s.trim().toLocaleLowerCase('id');
 export function classifySku(sku: string, account: string, config: ParserConfig) {
   const candidates = config.products.flatMap(rule => {
     if (rule.account !== '*' && rule.account !== account) return [];
@@ -92,10 +91,15 @@ export function projectMarketplace(input: { file: ParsedFile; account: string; d
     else if (warehouse && !warehouse.exportName) errors.push('Nama ekspor Warehouse belum terkonfirmasi. Perbaiki pengaturan Warehouse.');
     const sync = catalog.businessSyncs.find(s=>s.business===business);
     if (!catalog.loadedBusinessCodes.includes(business) || sync?.status!=='ready') errors.push('Katalog Business tujuan belum siap. Sinkronkan Business atau muat ulang katalog sebelum download.');
-    const couriers = config.couriers.filter(c => c.platform === source.platform && norm(c.source) === norm(source.provider));
+    const providerRules = config.couriers.filter(c => c.platform === source.platform && normalizeCourierText(c.source) === normalizeCourierText(source.provider));
+    const options = source.platform === 'tiktokshop' ? source.lines.map(line => normalizeCourierText(line.raw['Delivery Option'] || '')) : [];
+    const mixedOptions = new Set(options).size > 1;
+    const exact = providerRules.filter(rule => rule.deliveryOption?.trim() && normalizeCourierText(rule.deliveryOption) === options[0]);
+    const couriers = exact.length ? exact : providerRules.filter(rule => !rule.deliveryOption?.trim());
     const courier = (couriers.length === 1 ? couriers[0].courier : '').trim();
     const service = (couriers.length === 1 ? couriers[0].service : '').trim();
-    if (!courier || !service) errors.push(`Mapping kurir belum tersedia: ${source.provider || 'kosong'}.`);
+    if (mixedOptions) errors.push('Delivery Option berbeda antaritem pada order TikTok Shop ini. Periksa file sumber.');
+    else if (!courier || !service) errors.push(`Mapping kurir belum tersedia: ${[source.provider || 'kosong', options[0]].filter(Boolean).join(' · ')}.`);
     else if (!COURIER_SERVICE_OPTIONS.some(c => c.courier === courier && c.service === service)) errors.push('Pasangan kurir dan layanan tidak tersedia di daftar Scalev.');
     const username = source.username;
     const destination = orderAddress(source);

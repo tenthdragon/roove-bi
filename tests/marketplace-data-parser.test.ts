@@ -104,6 +104,19 @@ test('one invalid order prevents downloading all other valid orders',() => {
 test('TikTok seller discount determines price; platform subsidy stays separate and long IDs stay exact',() => {
   const p = projection(parseWorkbook(book({ TikTok: [tiktok()] }))); assert.ok(orderReady(p.orders[0])); assert.equal(p.orders[0].lines[0].unitCents,24500000); assert.equal(p.orders[0].totalCents,49000000); assert.equal(p.orders[0].rows[0].external_id,'583648045861405949');
 });
+test('TikTok matches provider and Delivery Option before a general provider rule', () => {
+  const c = configFixture();
+  c.couriers.push({ platform: 'tiktokshop', source: 'J&T Express', deliveryOption: '  HEMAT ', courier: 'J&T Express Cashless', service: 'ECONOMY' });
+  const workbook = (...options: string[]) => parseWorkbook(book({ TikTok: options.map(option => tiktok({ 'Delivery Option': option })) }));
+  assert.equal(projection(workbook('Hemat', ' hemat'), c).orders[0].rows[0].courier_service, 'ECONOMY');
+  assert.equal(projection(workbook('Standar'), c).orders[0].rows[0].courier_service, 'EZ');
+  assert.equal(projection(workbook(''), c).orders[0].rows[0].courier_service, 'EZ');
+  blocked(projection(workbook('Hemat', 'Standar'), c));
+  c.couriers = c.couriers.filter(rule => rule.source !== 'J&T Express' || rule.deliveryOption);
+  blocked(projection(workbook('Standar'), c));
+  c.couriers.push({ ...c.couriers[c.couriers.length - 1], deliveryOption: 'hemat' });
+  assert.throws(() => validateParserConfig(c), /satu aturan/);
+});
 test('TikTok exports the original address fields once per order, including masks and CSV punctuation', () => {
   const destination = { 'Detail Address': '  ***, "Blok A"\n***  ', Districts: '*******', 'Regency and City': 'Kota Contoh' };
   const f = parseWorkbook(book({ TikTok: [tiktok(destination), tiktok({ ...destination, Quantity: 1, 'SKU Subtotal Before Discount': 295000 })] }));

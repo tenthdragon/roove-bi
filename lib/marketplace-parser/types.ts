@@ -5,7 +5,7 @@ export type ProductRule = { id: string; account: string; match: 'sku' | 'prefix'
 export type StoreScope = { storeId: number; warehouseId: number | null };
 export type RouteRule = { id: string; account: string; productId: string; storeId: number };
 export type CombinationRule = { id: string; account: string; productIds: string[]; match: 'contains' | 'exact'; priority: number; storeId: number };
-export type CourierRule = { platform: Platform; source: string; courier: string; service: string };
+export type CourierRule = { platform: Platform; source: string; deliveryOption?: string; courier: string; service: string };
 export type ParserConfig = {
   schemaVersion: 3;
   accounts: MarketplaceAccount[];
