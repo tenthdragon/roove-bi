@@ -17,9 +17,10 @@ saves. There is no session-only routing override.
    every bundle available to that Business, owned or shared, regardless of Store
    membership or price options. A full Business sync must have completed successfully.
    Running, failed, unknown or changing generations block export for that Business.
-4. Products, SKU classification, Product routes and combination priorities remain
-   optional advanced rules. They never rewrite SKU identity or become prerequisites
-   for catalog-based or approved routing. Do not seed historical guesses as rules.
+4. Open **Mapping bundle ke Store** in **Aturan parsing** to review the latest saved
+   Store for each source account, Business and SKU or SKU combination. A single
+   SKU applies at any quantity. A combination lists the exact quantity of each SKU.
+   Use **Gunakan & simpan** in the order preview to save a Store decision.
 5. Maintain Marketplace courier/service mappings and save the team configuration.
    For TikTok Shop, match `Shipping Provider Name` and `Delivery Option`.
    A matching option takes precedence over a provider rule with a blank option.

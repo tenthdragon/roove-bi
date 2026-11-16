@@ -65,7 +65,7 @@ test('catalog refresh invalidates confirmation, and server refusal cannot produc
   try { await upload(rendered.root); await review(rendered.root); await click(rendered.root,'Muat ulang katalog'); assert.equal(rendered.root.findByProps({ 'aria-label': 'Konfirmasi hasil parsing' }).props.checked,false); await review(rendered.root); await click(rendered.root,'Download CSV'); assert.equal(intercepted.blob(),undefined); assert.equal(rendered.root.findByProps({ 'aria-label': 'Konfirmasi hasil parsing' }).props.checked,false); assert.ok(content(rendered.root).includes('Katalog berubah')); }
   finally { rendered.unmount(); intercepted.restore(); }
 });
-test('add account validates an inline form; UUID is not rendered; routing Store options remain in the account Business',async () => {
+test('add account validates an inline form and preserves existing advanced routing rules on save',async () => {
   let saved: ParserConfig | undefined; const p = props(); p.saveConfig = async (_w,_r,c) => { saved = structuredClone(c); return { workspaceId: p.context.workspaceId,revision: 4 }; };
   const rendered = create(React.createElement(Tool,p));
   try {
@@ -75,8 +75,39 @@ test('add account validates an inline form; UUID is not rendered; routing Store 
     await act(async () => { formLabel('Business akun').findByType('select').props.onChange({ target: { value: 'JHN' } }); });
     await click(rendered.root,'Tambahkan akun'); assert.equal(rendered.root.findByProps({ 'aria-label': 'Nama akun 5' }).props.value,'Lazada New');
     assert.ok(!/[a-f0-9]{8}-[a-f0-9]{4}-/i.test(content(rendered.root)));
-    const jhnRoute = rendered.root.findByProps({ 'aria-label': 'Store routing 6' }); assert.ok(content(jhnRoute).includes('Pluve Main Store JHN')); assert.ok(!content(jhnRoute).includes('Roove Main Store - Marketplace'));
     await click(rendered.root,'Simpan konfigurasi tim'); assert.ok(saved); assert.equal(saved.schemaVersion,3); assert.equal(saved.accounts.at(-1)!.business,'JHN');
+    for (const kind of ['groups','products','routes','combinations'] as const) assert.deepEqual(saved[kind],p.context.config[kind]);
+  } finally { rendered.unmount(); }
+});
+test('settings list current bundle mappings per account and Business with exact combination quantities', async () => {
+  const p = props();
+  const single = { id: 'a', account: 'roove', business: 'RTI', caseKey: 'single',
+    items: [{bundleId: 1, sku: 'SKU-A', quantity: 1}], storeId: 10, revision: 2, actor: 'Tester', createdAt: '2026-11-11' };
+  p.context.catalog.decisions = [
+    single,
+    { ...single, id: 'old', revision: 1, storeId: 11 },
+    { ...single, id: 'other-account', account: 'tiktok-roove', storeId: 12 },
+    { ...single, id: 'other-business', business: 'JHN', storeId: 20 },
+    { ...single, id: 'combo', account: 'archived', accountLabel: 'Akun arsip', caseKey: 'combo', storeId: 99, storeName: 'Store arsip',
+      items: [...single.items, {bundleId: 2, sku: 'BONUS', quantity: 3}] },
+  ];
+  const rendered = create(React.createElement(Tool, p));
+  try {
+    await click(rendered.root, 'Aturan parsing');
+    const summaries = rendered.root.findAllByType('summary').map(content);
+    assert.ok(summaries.includes('Mapping bundle ke Store 4 mapping'));
+    assert.ok(!summaries.some(label => /Produk dan pengenalan SKU|Routing Produk ke Store|Routing kombinasi Produk/.test(label)));
+    const table = () => rendered.root.findByProps({'aria-label': 'Mapping bundle ke Store'});
+    const rows = () => table().findByType('tbody').findAllByType('tr').map(content);
+    assert.deepEqual(rows().sort(), [
+      'Shopee Roove RTI SKU-A Semua jumlah Roove Main Store - Marketplace',
+      'TikTok Roove RTI SKU-A Semua jumlah Globite Store - Marketplace',
+      'Shopee Roove JHN SKU-A Semua jumlah Pluve Main Store JHN',
+      'Akun arsip RTI SKU-A × 1 BONUS × 3 Store arsip',
+    ].sort());
+    const section = table().parent!.parent!;
+    await act(async () => section.findByType('input').props.onChange({target: {value: 'bonus'}}));
+    assert.deepEqual(rows(), ['Akun arsip RTI SKU-A × 1 BONUS × 3 Store arsip']);
   } finally { rendered.unmount(); }
 });
 test('save disables controls until complete and preserves revision conflict feedback',async () => {

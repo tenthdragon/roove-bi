@@ -21,6 +21,14 @@ export async function readParserCatalog(workspaceId: string, selectedStoreIds: n
   const businessRows = businesses.data || [];
   const codes = new Map(businessRows.map(b => [Number(b.id),String(b.business_code)]));
   const catalog: Catalog = { version: '', businesses: businessRows.map(b => ({ id: Number(b.id),code: b.business_code,name: b.business_name })), stores: [], bundles: [], warehouses: [], loadedStoreIds: [], loadedBusinessCodes: [], businessSyncs: [] };
+  const decisions = await allPages<any>((from,to) => db.from('marketplace_parser_route_decisions')
+    .select('id,account_id,business_code,case_key,items,store_id,store_name,revision,actor_name,created_at,batch:marketplace_parser_batches(account_snapshot)')
+    .eq('workspace_id',workspaceId).order('created_at').order('id').range(from,to));
+  catalog.decisions = decisions.map(d => ({
+    id: d.id, account: d.account_id, accountLabel: d.batch?.account_snapshot?.label, business: d.business_code,
+    caseKey: d.case_key, items: d.items, storeId: d.store_id, storeName: d.store_name,
+    revision: d.revision, actor: d.actor_name, createdAt: d.created_at,
+  }));
   if (!codes.size) return catalog;
   const stores = await allPages<any>((from,to) => db.from('scalev_store_channels').select('id,business_id,store_name').eq('workspace_id',workspaceId).in('business_id',[...codes.keys()]).eq('is_active',true).order('id').range(from,to));
   catalog.stores = stores.map(s => ({ id: Number(s.id),business: codes.get(Number(s.business_id))!,name: String(s.store_name) }));
@@ -45,8 +53,6 @@ export async function readParserCatalog(workspaceId: string, selectedStoreIds: n
   if (!Array.isArray(requested) || requested.length > 100 || requested.some(code => typeof code !== 'string' || !code || code.length > 100)) throw new Error('Pilihan Business tidak valid.');
   const selected = catalog.businesses.filter(b => requested.includes(b.code));
   if (selected.length !== new Set(requested).size) throw new Error('Business tidak aktif atau bukan milik workspace ini.');
-  const decisions = await allPages<any>((from,to) => db.from('marketplace_parser_route_decisions').select('id,account_id,business_code,case_key,items,store_id,revision,actor_name,created_at').eq('workspace_id',workspaceId).order('created_at').order('id').range(from,to));
-  catalog.decisions = decisions.map(d=>({id:d.id,account:d.account_id,business:d.business_code,caseKey:d.case_key,items:d.items,storeId:d.store_id,revision:d.revision,actor:d.actor_name,createdAt:d.created_at}));
   const readSyncs = () => selected.length ? allPages<{ business_id: number; sync_status: string; last_synced_at: string | null; updated_at: string }>((from,to) => db.from('scalev_catalog_sync_state').select('business_id,sync_status,last_synced_at,updated_at').eq('workspace_id',workspaceId).in('business_id',selected.map(b => b.id)).order('business_id').range(from,to)) : Promise.resolve([]);
   const before = await readSyncs();
   const links = selected.length ? await allPages<any>((from,to) => db.from('scalev_catalog_bundle_store_links').select('id,business_id,scalev_bundle_id,store_name').eq('workspace_id',workspaceId).in('business_id',selected.map(b=>b.id)).eq('is_available',true).order('id').range(from,to)) : [];
