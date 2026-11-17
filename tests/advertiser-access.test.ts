@@ -116,3 +116,16 @@ test('Meta Ads server entry point respects disabled modules and retains legacy m
   const revoked = serverAccess('advertiser', new Set()).guards;
   await assert.rejects(revoked.requireDashboardTabAccess('meta-funnels'), /tidak memiliki akses/);
 });
+
+test('a workspace parser grant opens its menu and server actions independently of Sales Channel', async () => {
+  const keys = new Set(['tab:marketplace-data-parser']);
+  for (const role of ['admin', 'direktur_ops', 'brand_manager']) {
+    assert.deepEqual(getOrderedAccessibleTabIds(role, keys), ['marketplace-data-parser']);
+    const { guards } = serverAccess(role, keys);
+    assert.equal((await guards.requireDashboardTabAccess('marketplace-data-parser')).workspaceId, 'workspace-a');
+    await assert.rejects(guards.requireDashboardTabAccess('channels'), /tidak memiliki akses/);
+    await assert.rejects(guards.requireDashboardPermissionAccess('whs:mapping'), /tidak memiliki izin/);
+  }
+  const noGrant = serverAccess('staf_ops', new Set()).guards;
+  await assert.rejects(noGrant.requireDashboardTabAccess('marketplace-data-parser'), /tidak memiliki akses/);
+});

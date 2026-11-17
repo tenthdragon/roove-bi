@@ -554,6 +554,7 @@ export default function DashboardLayout({ children }) {
     return workspace
       ? ids.filter((tabId) => isWorkspaceModuleEnabled(workspace, tabId)
           && (tabId !== 'manual-ad-spend' || manualAdSpendEnabled)
+          && (tabId !== 'marketplace-data-parser' || isWorkspaceModuleEnabled(workspace, 'channels'))
           && (!['meta-funnels', 'manual-ad-spend'].includes(tabId) || isWorkspaceModuleEnabled(workspace, 'marketing')))
       : ids;
   }, [profile, accessRole, permissions, workspaceBootstrap, manualAdSpendEnabled]);

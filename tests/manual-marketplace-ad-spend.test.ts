@@ -1,3 +1,4 @@
+import * as spendDomain from '../lib/manual-marketplace-ad-spend';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
@@ -17,7 +18,7 @@ test('manual zero suppresses only the matching sheet platform, brand, and date',
   assert.deepEqual(selectActiveSheetFallbackRows([], sheet), sheet);
 });
 
-test('advertiser input menu requires its individual grant; owner/admin/Brand Manager/Sales Manager can access it', () => {
+test('advertiser input menu requires its individual grant; owner/admin/Direktur Ops/Brand Manager/Sales Manager can access it', () => {
   const base = new Set(['tab:meta-funnels']);
   assert.deepEqual(buildVisibleTabs('advertiser', base)[0]?.children?.map((tab) => tab.id), ['meta-funnels']);
   const granted = new Set([...base, 'tab:manual-ad-spend']);
@@ -26,7 +27,9 @@ test('advertiser input menu requires its individual grant; owner/admin/Brand Man
   assert.deepEqual(buildVisibleTabs('advertiser', new Set(['tab:manual-ad-spend']))[0]?.children?.map((tab) => tab.id), ['manual-ad-spend']);
   assert.deepEqual(buildVisibleTabs('admin', new Set(['tab:manual-ad-spend']))[0]?.children?.map((tab) => tab.id), ['manual-ad-spend']);
   assert.ok(getOrderedAccessibleTabIds('owner', new Set()).includes('manual-ad-spend'));
-  assert.deepEqual(buildVisibleTabs('brand_manager', new Set(['tab:manual-ad-spend']))[0]?.children?.map((tab) => tab.id), ['manual-ad-spend']);
+  for (const role of ['brand_manager', 'direktur_ops']) {
+    assert.ok(getOrderedAccessibleTabIds(role, granted).includes('manual-ad-spend'));
+  }
   for (const role of ['staf_ops', 'pending', 'marketing_api_reviewer']) {
     assert.equal(getOrderedAccessibleTabIds(role, granted).includes('manual-ad-spend'), false);
   }
@@ -89,9 +92,10 @@ function loadActions(stubs: Record<string, unknown>, file = '../lib/manual-marke
   return exports as Record<string, (...args: any[]) => Promise<any>>;
 }
 
-test('owner/admin/Brand Manager/Sales Manager/advertiser can write and delete, with active-workspace and input checks', async () => {
+test('owner/admin/Direktur Ops/Brand Manager/Sales Manager/advertiser can write and delete, with active-workspace and input checks', async () => {
   const calls: Array<[string, Record<string, unknown>]> = [];
   let role = 'advertiser';
+  let moduleEnabled = true;
   const actions = loadActions({
     './dashboard-access': {
       requireDashboardRoles: async (roles: string[], message: string) => {
@@ -103,11 +107,8 @@ test('owner/admin/Brand Manager/Sales Manager/advertiser can write and delete, w
     './supabase-server': { createServerSupabase: () => ({ rpc: async (name: string, params: Record<string, unknown>) => {
       calls.push([name, params]); return { data: 12, error: null };
     } }) },
-    './workspaces': { isWorkspaceModuleEnabled: () => true },
-    './manual-marketplace-ad-spend': {
-      isManualMarketplacePlatform: (value: unknown) => value === 'shopee_ads' || value === 'tiktok_ads',
-      MANUAL_MARKETPLACE_PLATFORMS: ['shopee_ads', 'tiktok_ads'],
-    },
+    './workspaces': { isWorkspaceModuleEnabled: () => moduleEnabled },
+    './manual-marketplace-ad-spend': spendDomain,
   });
   const entry = { workspaceId: 'workspace-a', id: null, platform: 'shopee_ads', brandId: 1,
     date: '2026-10-07', amount: 150000, note: '', version: null };
@@ -119,7 +120,7 @@ test('owner/admin/Brand Manager/Sales Manager/advertiser can write and delete, w
   await assert.rejects(actions.saveManualMarketplaceSpend({ ...entry, workspaceId: 'workspace-b' }), /Workspace berubah/);
   await assert.rejects(actions.saveManualMarketplaceSpend({ ...entry, platform: 'meta_ads' }), /tidak valid/);
   await assert.rejects(actions.saveManualMarketplaceSpend({ ...entry, amount: -1 }), /tidak valid/);
-  for (const allowedRole of ['owner', 'admin', 'brand_manager', 'sales_manager', 'advertiser']) {
+  for (const allowedRole of ['owner', 'admin', 'direktur_ops', 'brand_manager', 'sales_manager', 'advertiser']) {
     role = allowedRole;
     await actions.saveManualMarketplaceSpend(entry);
     await actions.saveManualMarketplaceSpend({ ...entry, id: 12, version: 1, amount: 0 });
@@ -131,10 +132,14 @@ test('owner/admin/Brand Manager/Sales Manager/advertiser can write and delete, w
   }
   for (const deniedRole of ['staf_ops', 'pending', 'marketing_api_reviewer']) {
     role = deniedRole;
-    await assert.rejects(actions.saveManualMarketplaceSpend(entry), /Hanya owner, admin, Brand Manager, Sales Manager, dan advertiser/);
-    await assert.rejects(actions.deleteManualMarketplaceSpend({ workspaceId: 'workspace-a', id: 12, version: 2 }), /Hanya owner, admin, Brand Manager, Sales Manager, dan advertiser/);
+    await assert.rejects(actions.saveManualMarketplaceSpend(entry), /Input biaya iklan hanya tersedia/);
+    await assert.rejects(actions.deleteManualMarketplaceSpend({ workspaceId: 'workspace-a', id: 12, version: 2 }), /Input biaya iklan hanya tersedia/);
   }
-  assert.equal(calls.length, 16);
+  role = 'direktur_ops';
+  moduleEnabled = false;
+  await assert.rejects(actions.saveManualMarketplaceSpend(entry), /tidak diaktifkan/);
+  await assert.rejects(actions.deleteManualMarketplaceSpend({ workspaceId: 'workspace-a', id: 12, version: 2 }), /tidak diaktifkan/);
+  assert.equal(calls.length, 19);
 });
 
 function serviceStub(data: Record<string, unknown>, queries: Array<{ table: string; filters: unknown[][] }>, filterRows = false, errorTables: string[] = []) {
@@ -174,7 +179,7 @@ function serviceStub(data: Record<string, unknown>, queries: Array<{ table: stri
   } };
 }
 
-test('page enables both platforms for owner/admin/Brand Manager/Sales Manager, while advertiser grants and history stay scoped', async () => {
+test('page enables both platforms for owner/admin/Direktur Ops/Brand Manager/Sales Manager, while advertiser grants and history stay scoped', async () => {
   let role = 'owner';
   let enabled = true;
   const queries: Array<{ table: string; filters: unknown[][] }> = [];
@@ -196,12 +201,9 @@ test('page enables both platforms for owner/admin/Brand Manager/Sales Manager, w
     './service-supabase': { createServiceSupabase: () => serviceStub(data, queries) },
     './supabase-server': {},
     './workspaces': { isWorkspaceModuleEnabled: () => enabled },
-    './manual-marketplace-ad-spend': {
-      isManualMarketplacePlatform: (value: unknown) => value === 'shopee_ads' || value === 'tiktok_ads',
-      MANUAL_MARKETPLACE_PLATFORMS: ['shopee_ads', 'tiktok_ads'],
-    },
+    './manual-marketplace-ad-spend': spendDomain,
   });
-  for (const privilegedRole of ['owner', 'admin', 'brand_manager', 'sales_manager']) {
+  for (const privilegedRole of ['owner', 'admin', 'direktur_ops', 'brand_manager', 'sales_manager']) {
     role = privilegedRole; queries.length = 0;
     const page = await actions.getManualMarketplaceSpendPage('2026-10');
     assert.equal(page.canInput, true);
@@ -276,10 +278,7 @@ test('assigned brands scope both platforms, sheet totals and both audit snapshot
     './service-supabase': { createServiceSupabase: () => serviceStub(data, queries, true, errorTables) },
     './supabase-server': {},
     './workspaces': { isWorkspaceModuleEnabled: () => true },
-    './manual-marketplace-ad-spend': {
-      isManualMarketplacePlatform: (value: unknown) => value === 'shopee_ads' || value === 'tiktok_ads',
-      MANUAL_MARKETPLACE_PLATFORMS: ['shopee_ads', 'tiktok_ads'],
-    },
+    './manual-marketplace-ad-spend': spendDomain,
   });
   const page = await actions.getManualMarketplaceSpendPage('2026-10');
   assert.deepEqual(page.brands.map((b: any) => b.id), [1, 3]);
@@ -309,7 +308,7 @@ test('assigned brands scope both platforms, sheet totals and both audit snapshot
   await assert.rejects(actions.getManualMarketplaceSpendPage('2026-10'), /Belum ada brand/);
   assert.equal(queries.some(q => q.table === 'manual_marketplace_ad_spend'), false);
 
-  for (role of ['owner', 'admin', 'brand_manager', 'sales_manager']) {
+  for (role of ['owner', 'admin', 'direktur_ops', 'brand_manager', 'sales_manager']) {
     const privileged = await actions.getManualMarketplaceSpendPage('2026-10');
     assert.deepEqual(privileged.brands.map((b: any) => b.id), [1, 2, 3]);
     assert.equal(privileged.entries.length, 5);
@@ -318,9 +317,12 @@ test('assigned brands scope both platforms, sheet totals and both audit snapshot
   }
 });
 
-test('profile grants admin/Brand Manager/Sales Manager navigation only in enabled workspaces and uses the active membership role', async () => {
+test('profile grants admin/Direktur Ops/Brand Manager/Sales Manager navigation only in enabled workspaces and uses the active membership role', async () => {
   for (const [profileRole, membershipRole, enabled, granted, expected] of [
     ['admin', 'admin', true, false, true],
+    ['advertiser', 'direktur_ops', true, false, true],
+    ['direktur_ops', 'direktur_ops', false, false, false],
+    ['direktur_ops', 'staf_ops', true, true, false],
     ['sales_manager', 'sales_manager', true, false, true],
     ['sales_manager', 'sales_manager', false, false, false],
     ['advertiser', 'sales_manager', true, false, true],
@@ -352,6 +354,7 @@ test('profile grants admin/Brand Manager/Sales Manager navigation only in enable
         createServiceSupabase: () => service,
       },
       '@/lib/theme-preference': {},
+      '@/lib/manual-marketplace-ad-spend': spendDomain,
       '@/lib/manual-marketplace-cutover': { isMissingManualMarketplaceSchema: () => false },
       '@/lib/workspace-access': { getWorkspaceBootstrapForVerifiedProfile: async () => ({
         activeWorkspace: { id: 'workspace-a', membershipRole },
@@ -359,7 +362,7 @@ test('profile grants admin/Brand Manager/Sales Manager navigation only in enable
     }, '../app/api/auth/profile/route.ts');
     const result = await route.GET();
     assert.equal(result.permissions.includes('tab:manual-ad-spend'), expected, `${profileRole}/${membershipRole}/${enabled}/${granted}`);
-    if (['admin', 'brand_manager', 'sales_manager'].includes(membershipRole)) assert.equal(queries.some(q => q.table === 'workspace_advertiser_spend_access'), false);
+    if (['admin', 'direktur_ops', 'brand_manager', 'sales_manager'].includes(membershipRole)) assert.equal(queries.some(q => q.table === 'workspace_advertiser_spend_access'), false);
   }
 });
 
@@ -374,10 +377,7 @@ test('owner grant action accepts only the two platforms in the current workspace
       calls.push([name, params]); return { data: ['shopee_ads', 'tiktok_ads'], error: null };
     } }) },
     './workspaces': { isWorkspaceModuleEnabled: () => true },
-    './manual-marketplace-ad-spend': {
-      isManualMarketplacePlatform: (value: unknown) => value === 'shopee_ads' || value === 'tiktok_ads',
-      MANUAL_MARKETPLACE_PLATFORMS: ['shopee_ads', 'tiktok_ads'],
-    },
+    './manual-marketplace-ad-spend': spendDomain,
   });
   await actions.saveAdvertiserSpendAccess('advertiser-a', ['tiktok_ads', 'shopee_ads'], 'workspace-a');
   assert.deepEqual(calls, [['set_workspace_advertiser_spend_access', {

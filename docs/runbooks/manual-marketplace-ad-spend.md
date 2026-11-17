@@ -23,11 +23,11 @@ approval; creation, correction, deletion and grant changes retain audit rows.
 Corrections require access to both the original and destination brand. Revoked
 brands cannot be edited or deleted, even from a stale page. Advertiser history
 includes only their own changes whose before and after brands are still assigned.
-Owners, active workspace admins, Brand Managers, and Sales Managers can enter both platforms
+Owners, active workspace admins, Direktur Ops, Brand Managers, and Sales Managers can enter both platforms
 for all brands in their active workspace without advertiser grants, and inspect
 entries and their audit log. Like advertisers, they can
 correct or remove only their own entries. Access follows the active workspace;
-an admin, Brand Manager, or Sales Manager role in another workspace does not grant access here.
+an admin, Direktur Ops, Brand Manager, or Sales Manager role in another workspace does not grant access here.
 
 Migration `239_manual_marketplace_ad_spend.sql` enabled the initial cutover for both
 workspaces (`roove` and `apurva`). It requires both to exist, then copies legacy rows to
@@ -70,6 +70,8 @@ apply only 245 before the app and capture the current function definitions and
 grants for rollback. Existing workspace module switches still apply to both
 navigation entry points.
 
+Migration `20261117040822_marketplace_parser_and_spend_role_access.sql` extends both spend functions to Direktur Ops and grants parser access to Admin, Direktur Ops, and Brand Manager. The spend functions also check the workspace module switches on each write.
+
 The deployment order is migration first, then the application. Review the
 production migration history and archived-row count before activation. The
 sheet fallback is only available for dates and brands actually present in
@@ -103,7 +105,7 @@ node tests/manual-marketplace-spend-access-database.mjs
 ```
 
 Run `npm run db:local:verify` from the primary checkout before the database test.
-The test applies only migration 245 to a disposable database with minimal schema
+The test applies only the marketplace role-access migration to a disposable database with minimal schema
 dependencies in the local Supabase container, then removes that database. It
 does not apply migrations to the shared local sample. CI runs the same role and
 brand-boundary checks with `--ci` in its disposable PostgreSQL container.

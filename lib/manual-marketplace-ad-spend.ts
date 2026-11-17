@@ -1,5 +1,8 @@
 export type ManualMarketplacePlatform = 'shopee_ads' | 'tiktok_ads';
 
+export const MANUAL_SPEND_MANAGER_ROLES = ['owner', 'admin', 'direktur_ops', 'brand_manager', 'sales_manager'];
+export const MANUAL_SPEND_INPUT_ROLES = [...MANUAL_SPEND_MANAGER_ROLES, 'advertiser'];
+
 export const MANUAL_MARKETPLACE_PLATFORMS: ManualMarketplacePlatform[] = [
   'shopee_ads',
   'tiktok_ads',
