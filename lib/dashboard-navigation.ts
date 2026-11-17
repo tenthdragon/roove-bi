@@ -1,3 +1,4 @@
+import { MANUAL_SPEND_INPUT_ROLES } from './manual-marketplace-ad-spend';
 import { ALL_TABS, canAccessTab, type TabDef } from './utils';
 
 export function getCurrentTab(path: string) {
@@ -23,7 +24,7 @@ function hasAdminAreaAccess(role: string, permissions: Set<string>) {
 export function canAccessLayoutTab(role: string, tab: TabDef, permissions: Set<string>) {
   // Sales Channel Analysis inherits its parent Sales Channel permission.
   if (tab.id === 'sales-channel-analysis') return canAccessTab(role, 'channels', permissions);
-  if (tab.id === 'manual-ad-spend' && !['owner', 'admin', 'brand_manager', 'sales_manager', 'advertiser'].includes(role)) return false;
+  if (tab.id === 'manual-ad-spend' && !MANUAL_SPEND_INPUT_ROLES.includes(role)) return false;
   if (tab.id === 'admin') return hasAdminAreaAccess(role, permissions);
   if (tab.ownerOnly && role !== 'owner') return false;
   return canAccessTab(role, tab.id, permissions);

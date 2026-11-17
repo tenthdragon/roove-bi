@@ -48,6 +48,7 @@ export const PERMISSION_GROUPS = [
       { key: 'tab:marketing',          label: 'Marketing Channel' },
       { key: 'tab:meta-funnels',       label: '↳ Meta Ads Funnel' },
       { key: 'tab:channels',           label: 'Sales Channel' },
+      { key: 'tab:marketplace-data-parser', label: '↳ MP Data Parser' },
       { key: 'tab:waba-management',    label: '↳ WABA Management' },
       { key: 'tab:ppic',               label: 'PPIC' },
       { key: 'tab:warehouse',          label: 'Warehouse' },

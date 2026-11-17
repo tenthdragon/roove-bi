@@ -4,6 +4,10 @@ The sidebar is **MP Data Parser**; the page title is **Marketplace Data Parser**
 Configuration is shared by the workspace and versioned with compare-and-swap
 saves. There is no session-only routing override.
 
+Admin, Direktur Ops, and Brand Manager receive the workspace permission
+`tab:marketplace-data-parser`. A Sales Channel grant also opens the parser.
+The Sales Channel and parser modules must both be enabled in the workspace.
+
 ## Configure the workspace
 
 1. Add each source account with its Marketplace and exactly one connected

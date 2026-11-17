@@ -6,6 +6,7 @@ import {
 } from '@/lib/supabase-server';
 import { isThemePreference } from '@/lib/theme-preference';
 import { getWorkspaceBootstrapForVerifiedProfile } from '@/lib/workspace-access';
+import { MANUAL_SPEND_MANAGER_ROLES } from '@/lib/manual-marketplace-ad-spend';
 import { isMissingManualMarketplaceSchema } from '@/lib/manual-marketplace-cutover';
 
 export const dynamic = 'force-dynamic';
@@ -92,7 +93,7 @@ export async function GET() {
           (row) => row.permission_key,
         );
 
-        if (['admin', 'brand_manager', 'sales_manager'].includes(effectiveRole) && manualAdSpendEnabled) {
+        if (MANUAL_SPEND_MANAGER_ROLES.includes(effectiveRole) && manualAdSpendEnabled) {
           permissions.push('tab:manual-ad-spend');
         }
 

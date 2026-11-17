@@ -187,7 +187,7 @@ test('duplicate product routes, malformed combinations and stale config schemas 
   assert.throws(() => validateParserConfig({ schemaVersion: 2 }),/Muat ulang/);
 });
 test('menu remains under Sales Channel with its permission gate and 28-column CSV format',() => {
-  assert.deepEqual(dashboardTabPermissionKeys('marketplace-data-parser'),['tab:channels']);
+  assert.deepEqual(dashboardTabPermissionKeys('marketplace-data-parser'),['tab:marketplace-data-parser','tab:channels']);
   assert.ok(buildVisibleTabs('sales_manager',new Set(['tab:channels'])).find(t => t?.id === 'channels')?.children?.some(c => c.id === 'marketplace-data-parser'));
   assert.ok(!buildVisibleTabs('advertiser',new Set(['tab:marketing'])).some(t => t?.children?.some(c => c.id === 'marketplace-data-parser'))); assert.equal(CSV_HEADERS.length,28);
 });

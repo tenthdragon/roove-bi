@@ -2,7 +2,7 @@ import { execFileSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { randomBytes } from 'node:crypto';
 
-// Only migration 245 runs, in a disposable database with minimal dependencies.
+// Only the marketplace role-access migration runs, in a disposable database with minimal dependencies.
 // The shared local sample, its schema, and existing spend are never changed.
 const database = `manual_spend_access_test_${randomBytes(6).toString('hex')}`;
 const container = process.argv.includes('--ci') ? 'roove-access-requests-test' : 'supabase_db_roove-bi-local';
@@ -24,7 +24,7 @@ const roleHelpers = ['is_platform_owner', 'workspace_has_role'].map(name =>
 const tables = ['manual_marketplace_ad_spend_cutovers', 'workspace_advertiser_spend_access', 'manual_marketplace_ad_spend'].map(name =>
   definition(initial, new RegExp(`CREATE TABLE public\\.${name} \\([\\s\\S]*?\\n\\);`))).join('\n');
 const brandAssignments = definition(read('../supabase/migrations/224_advertiser_brand_access.sql'), /CREATE TABLE public\.workspace_advertiser_brands \([\s\S]*?\n\);/);
-const migration = read('../supabase/migrations/245_manual_marketplace_spend_sales_manager.sql');
+const migration = read('../supabase/migrations/20261117040822_marketplace_parser_and_spend_role_access.sql');
 
 docker('createdb', [database]);
 try {
@@ -40,7 +40,15 @@ CREATE FUNCTION auth.uid() RETURNS uuid LANGUAGE sql STABLE AS $$
 $$;
 GRANT USAGE ON SCHEMA auth TO authenticated;
 CREATE TABLE public.profiles (id uuid PRIMARY KEY, role text NOT NULL);
-CREATE TABLE public.workspaces (id uuid PRIMARY KEY);
+CREATE TABLE public.workspaces (id uuid PRIMARY KEY, settings jsonb NOT NULL DEFAULT '{}');
+CREATE TABLE public.role_permissions (role text, permission_key text, PRIMARY KEY(role, permission_key));
+CREATE TABLE public.workspace_role_permissions (
+  workspace_id uuid REFERENCES public.workspaces(id), role text, permission_key text,
+  PRIMARY KEY(workspace_id, role, permission_key)
+);
+INSERT INTO public.workspaces (id) VALUES
+  ('00000000-0000-4000-8000-000000000001'),
+  ('00000000-0000-4000-8000-000000000002');
 CREATE TABLE public.workspace_memberships (
   workspace_id uuid, user_id uuid, role text, status text,
   PRIMARY KEY(workspace_id, user_id)
