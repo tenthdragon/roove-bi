@@ -81,39 +81,63 @@ export function SummaryCard({ label, value, hint }: { label: string; value: stri
   );
 }
 
-export function ModalShell({ title, subtitle, onClose, maxWidth = 760, children }: {
+export function ModalShell({ title, subtitle, onClose, maxWidth = 760, children, dirty = false, busy = false }: {
   title: string; subtitle?: string; onClose: () => void; maxWidth?: number; children: ReactNode;
+  dirty?: boolean; busy?: boolean;
 }) {
   const titleId = useId();
-  const dialogRef = useRef<HTMLDivElement>(null);
-  const onCloseRef = useRef(onClose);
-  useEffect(() => { onCloseRef.current = onClose; }, [onClose]);
+  const dialogRef = useRef<HTMLDialogElement>(null);
+  const requestClose = () => {
+    if (busy) return;
+    if (!dirty || window.confirm('Perubahan belum disimpan. Tutup dan buang perubahan?')) onClose();
+  };
   useEffect(() => {
+    const dialog = dialogRef.current;
+    if (!dialog) return;
+    const trigger = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     const previousOverflow = document.body.style.overflow;
     document.body.style.overflow = 'hidden';
-    const handleKeyDown = (event: KeyboardEvent) => { if (event.key === 'Escape') onCloseRef.current(); };
-    document.addEventListener('keydown', handleKeyDown);
-    const timer = window.setTimeout(() => {
-      dialogRef.current?.querySelector<HTMLElement>('input:not([disabled]), select:not([disabled])')?.focus();
-    }, 0);
+    // Native modal dialogs make the background inert and contain keyboard focus.
+    dialog.showModal();
     return () => {
+      dialog.close();
       document.body.style.overflow = previousOverflow;
-      document.removeEventListener('keydown', handleKeyDown);
-      window.clearTimeout(timer);
+      if (trigger?.isConnected) trigger.focus();
     };
   }, []);
+  useEffect(() => {
+    if (!dirty && !busy) return;
+    const warn = (event: BeforeUnloadEvent) => { event.preventDefault(); event.returnValue = ''; };
+    window.addEventListener('beforeunload', warn);
+    return () => window.removeEventListener('beforeunload', warn);
+  }, [dirty, busy]);
   return (
-    <div className="tw-modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}>
-      <div ref={dialogRef} role="dialog" aria-modal="true" aria-labelledby={titleId} tabIndex={-1} className="tw-modal-panel" style={{ maxWidth }}>
+    <dialog ref={dialogRef} role="dialog" aria-modal="true" aria-labelledby={titleId} aria-busy={busy} className="tw-modal-backdrop"
+      onCancel={(event) => { event.preventDefault(); requestClose(); }}
+      onClick={(event) => { if (event.target === event.currentTarget) requestClose(); }}
+      onClickCapture={(event) => {
+        if (event.target instanceof Element && event.target.closest('[data-dialog-close]')) {
+          event.preventDefault(); event.stopPropagation(); requestClose();
+        }
+      }}>
+      <div className="tw-modal-panel" style={{ maxWidth }}>
         <div className="tw-modal-header">
           <div>
             <h2 id={titleId} style={{ margin: 0, fontSize: 17 }}>{title}</h2>
             {subtitle ? <div style={{ color: 'var(--dim)', fontSize: 12, marginTop: 4 }}>{subtitle}</div> : null}
           </div>
-          <button type="button" onClick={onClose} className="tw-close-button" aria-label="Tutup dialog">×</button>
+          <button type="button" onClick={requestClose} disabled={busy} className="tw-close-button" aria-label="Tutup dialog">×</button>
         </div>
         {children}
       </div>
-    </div>
+    </dialog>
   );
+}
+
+export function LoadError({ message, onRetry }: { message: string; onRetry: () => void }) {
+  return <div className="tw-load-error" role="alert">
+    <strong>Data belum berhasil dimuat</strong>
+    <p>{message}</p>
+    <button type="button" style={secondaryButtonStyle} onClick={onRetry}>Coba lagi</button>
+  </div>;
 }
