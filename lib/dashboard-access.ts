@@ -1,5 +1,6 @@
 import { createServerSupabase } from './supabase-server';
 import { dashboardTabPermissionKeys } from './dashboard-permissions';
+import { loadAdvertiserParserAccess } from './advertiser-parser-access';
 import { getWorkspaceBootstrapForVerifiedProfile } from './workspace-access';
 import {
   isWorkspaceModuleEnabled,
@@ -102,15 +103,7 @@ export async function requireDashboardTabAccess(tabId: string, label?: string): 
   }
   if (ctx.profile.role === 'owner') return ctx;
 
-  const tabLabel = label || tabId;
-  await verifyPermissionKeys(
-    ctx.workspaceId,
-    ctx.profile.role,
-    dashboardTabPermissionKeys(tabId),
-    `Gagal memverifikasi akses ${tabLabel}.`,
-    `Akun ini tidak memiliki akses ke ${tabLabel}.`
-  );
-
+  await verifyTabAccess(ctx, [tabId], label || tabId);
   return ctx;
 }
 
@@ -124,15 +117,28 @@ export async function requireAnyDashboardTabAccess(tabIds: string[], label: stri
   }
   if (ctx.profile.role === 'owner') return ctx;
 
+  await verifyTabAccess(ctx, allowedTabIds, label);
+
+  return ctx;
+}
+
+async function verifyTabAccess(ctx: AccessContext, tabIds: string[], label: string) {
+  let roleTabs = tabIds;
+  if (ctx.profile.role === 'advertiser' && tabIds.includes('marketplace-data-parser')) {
+    const granted = await loadAdvertiserParserAccess(createServerSupabase(), ctx.workspaceId, ctx.profile.id);
+    if (granted) return;
+    // A role-wide parser or Sales Channel grant cannot enable an advertiser.
+    roleTabs = tabIds.filter(tab => tab !== 'marketplace-data-parser');
+    if (roleTabs.length === 0) throw new Error(`Akun ini tidak memiliki akses ke ${label}.`);
+  }
   await verifyPermissionKeys(
     ctx.workspaceId,
     ctx.profile.role,
-    allowedTabIds.flatMap(dashboardTabPermissionKeys),
+    roleTabs.flatMap(dashboardTabPermissionKeys),
     `Gagal memverifikasi akses ${label}.`,
     `Akun ini tidak memiliki akses ke ${label}.`
   );
 
-  return ctx;
 }
 
 export async function requireDashboardPermissionAccess(permissionKey: string, label?: string): Promise<AccessContext> {

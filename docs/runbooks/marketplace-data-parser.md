@@ -8,6 +8,20 @@ Admin, Direktur Ops, and Brand Manager receive the workspace permission
 `tab:marketplace-data-parser`. A Sales Channel grant also opens the parser.
 The Sales Channel and parser modules must both be enabled in the workspace.
 
+For Advertisers, the workspace owner enables **Hak akses MP Data Parser** on
+the individual account in **Admin → Users**. Access starts disabled and applies
+to the parser configuration, batches, and exports shared within that workspace.
+The permission matrix shows **Per pengguna** for the Advertiser parser cell.
+Role-wide parser or Sales Channel permissions cannot replace this individual
+activation. Changing or suspending the membership clears the activation, and
+grant, revoke, and membership cleanup events are audited.
+
+Apply `20261119040417_advertiser_marketplace_parser_access.sql` before the app
+release. It creates the per-user grants and audit tables, the owner-authorized
+RPC, and membership cleanup trigger. Admin, Direktur Ops (COO), and Brand Manager
+continue to use their workspace role permissions. Catalog administration uses
+its existing additional permission checks.
+
 ## Configure the workspace
 
 1. Add each source account with its Marketplace and exactly one connected

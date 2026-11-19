@@ -1,4 +1,5 @@
 import * as spendDomain from '../lib/manual-marketplace-ad-spend';
+import { loadAdvertiserParserAccess } from '../lib/advertiser-parser-access';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
@@ -346,6 +347,7 @@ test('profile grants admin/Direktur Ops/Brand Manager/Sales Manager navigation o
       manual_marketplace_ad_spend_cutovers: enabled ? { workspace_id: 'workspace-a' } : null,
       workspace_role_permissions: [],
       workspace_advertiser_spend_access: granted ? [{ platform: 'shopee_ads' }] : [],
+      workspace_advertiser_parser_access: granted ? { user_id: 'viewer' } : null,
     }, queries);
     const route = loadActions({
       'next/server': { NextResponse: { json: (body: unknown) => body } },
@@ -354,6 +356,7 @@ test('profile grants admin/Direktur Ops/Brand Manager/Sales Manager navigation o
         createServiceSupabase: () => service,
       },
       '@/lib/theme-preference': {},
+      '@/lib/advertiser-parser-access': { loadAdvertiserParserAccess },
       '@/lib/manual-marketplace-ad-spend': spendDomain,
       '@/lib/manual-marketplace-cutover': { isMissingManualMarketplaceSchema: () => false },
       '@/lib/workspace-access': { getWorkspaceBootstrapForVerifiedProfile: async () => ({
@@ -362,6 +365,7 @@ test('profile grants admin/Direktur Ops/Brand Manager/Sales Manager navigation o
     }, '../app/api/auth/profile/route.ts');
     const result = await route.GET();
     assert.equal(result.permissions.includes('tab:manual-ad-spend'), expected, `${profileRole}/${membershipRole}/${enabled}/${granted}`);
+    assert.equal(result.permissions.includes('user:marketplace-data-parser'), membershipRole === 'advertiser' && granted);
     if (['admin', 'direktur_ops', 'brand_manager', 'sales_manager'].includes(membershipRole)) assert.equal(queries.some(q => q.table === 'workspace_advertiser_spend_access'), false);
   }
 });

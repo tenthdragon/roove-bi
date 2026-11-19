@@ -524,7 +524,8 @@ export default function DashboardLayout({ children }) {
             return;
           }
 
-          setPermissions(new Set((perms ?? []).map((r: any) => r.permission_key)));
+          setPermissions(new Set((perms ?? []).map((r: any) => r.permission_key)
+            .filter((key: string) => key !== 'user:marketplace-data-parser')));
         }
       }
       setLoading(false);
