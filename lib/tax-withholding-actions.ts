@@ -12,11 +12,13 @@ import {
   normalizeCounterpartyInput,
   normalizeEntityInput,
   normalizeFacilityInput,
+  normalizeObjectCodeInput,
   type CounterpartyInput,
   type FacilityCode,
   type FacilityInput,
   type IdentityType,
   type TaxArticle,
+  type TaxObjectCodeInput,
   type WithholdingEntityInput,
 } from './tax-withholding-domain';
 import {
@@ -29,6 +31,7 @@ import {
 export type {
   CounterpartyInput,
   FacilityInput,
+  TaxObjectCodeInput,
   WithholdingEntityInput,
 } from './tax-withholding-domain';
 
@@ -566,4 +569,70 @@ function translateDbError(error: { code?: string; message: string }, kind: 'enti
 export async function getTaxReferenceOptions(): Promise<{ facilityCodes: readonly FacilityCode[]; articles: readonly TaxArticle[] }> {
   await requireTaxAccess();
   return { facilityCodes: FACILITY_CODES, articles: TAX_ARTICLES };
+}
+
+// ---------------------------------------------------------------------------
+// Kode objek pajak: referensi global, dirawat dari layar Kode Objek tanpa migrasi
+// ---------------------------------------------------------------------------
+
+export type TaxObjectCodeRecord = {
+  code: string;
+  name: string;
+  pph_article: TaxArticle;
+  rate_percent: number;
+  kap: string | null;
+  kjs: string | null;
+  description: string | null;
+  legal_basis: string | null;
+  is_active: boolean;
+  updated_at: string;
+};
+
+const OBJECT_CODE_SELECT = 'code, name, pph_article, rate_percent, kap, kjs, description, legal_basis, is_active, updated_at';
+
+function toObjectCodeRecord(row: TaxObjectCodeRecord): TaxObjectCodeRecord {
+  return { ...row, rate_percent: Number(row.rate_percent) };
+}
+
+/** Every reference code, inactive ones included, for the maintenance screen. */
+export async function listTaxObjectCodes(): Promise<TaxObjectCodeRecord[]> {
+  await requireTaxAccess();
+  const svc = createServiceSupabase();
+  const rows = await fetchAllRows<TaxObjectCodeRecord>((from, to) => svc
+    .from('tax_object_codes')
+    .select(OBJECT_CODE_SELECT)
+    .order('code')
+    .range(from, to));
+  return rows.map(toObjectCodeRecord);
+}
+
+/**
+ * Create a new code or update an existing one. The code itself never changes
+ * (slips reference it); deactivate and add a new code instead. The reference is
+ * shared by every workspace, so only finance roles may edit and edits only
+ * affect the default rate proposed for future slips.
+ */
+export async function saveTaxObjectCode(input: TaxObjectCodeInput & { mode: 'create' | 'update' }): Promise<TaxObjectCodeRecord> {
+  await requireTaxManageAccess();
+  const normalized = normalizeObjectCodeInput(input);
+  if (!normalized.value) throw new Error(normalized.errors.join(' '));
+  const value = normalized.value;
+  const svc = createServiceSupabase();
+
+  const existing = await svc.from('tax_object_codes').select('code').eq('code', value.code);
+  if (existing.error) throw existing.error;
+  const exists = (existing.data ?? []).length > 0;
+
+  if (input.mode === 'create') {
+    if (exists) throw new Error(`Kode objek ${value.code} sudah ada. Ubah kode yang ada atau pakai kode lain.`);
+    const result = await svc.from('tax_object_codes').insert(value).select(OBJECT_CODE_SELECT).single();
+    if (result.error) throw result.error;
+    return toObjectCodeRecord(result.data as TaxObjectCodeRecord);
+  }
+
+  if (!exists) throw new Error(`Kode objek ${value.code} tidak ditemukan.`);
+  const { code: _code, ...payload } = value;
+  const result = await svc.from('tax_object_codes').update(payload).eq('code', value.code).select(OBJECT_CODE_SELECT).single();
+  if (result.error) throw result.error;
+  return toObjectCodeRecord(result.data as TaxObjectCodeRecord);
 }

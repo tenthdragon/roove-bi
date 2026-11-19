@@ -231,3 +231,31 @@ test('a failed master refresh preserves the mounted form and its unsaved inputs'
     if (priorWindow) Object.defineProperty(globalThis, 'window', priorWindow); else Reflect.deleteProperty(globalThis, 'window');
   }
 });
+
+test('object codes: finance creates a code once, edits keep the code fixed, other roles are rejected', async () => {
+  db.tax_object_codes = [{ code: '24-104-24', name: 'Jasa Software', pph_article: 'pph23', rate_percent: '2.000', kap: '411124', kjs: '104', description: null, legal_basis: null, is_active: true, updated_at: '2026-01-01T00:00:00Z' }];
+  const created = await actions.saveTaxObjectCode({ mode: 'create', code: '28.408.02', name: 'Hibah saham BUMN', pphArticle: 'pph4_2', ratePercent: '0', kap: '411128', kjs: '408', legalBasis: 'PER-12/PJ/2026', description: 'Restrukturisasi BUMN' });
+  assert.equal(created.code, '28-408-02');
+  assert.equal(created.rate_percent, 0);
+  assert.equal(created.is_active, true);
+  assert.equal(db.tax_object_codes.length, 2);
+
+  await assert.rejects(actions.saveTaxObjectCode({ mode: 'create', code: '24-104-24', name: 'Dup', pphArticle: 'pph23', ratePercent: '2' }), /sudah ada/);
+  await assert.rejects(actions.saveTaxObjectCode({ mode: 'update', code: '24-104-99', name: 'Hilang', pphArticle: 'pph23', ratePercent: '2' }), /tidak ditemukan/);
+  await assert.rejects(actions.saveTaxObjectCode({ mode: 'create', code: '24-104-70', name: 'Salah pasal', pphArticle: 'pph26', ratePercent: '20' }), /Awalan kode 24-/);
+  assert.equal(db.tax_object_codes.length, 2);
+
+  const updated = await actions.saveTaxObjectCode({ mode: 'update', code: '24-104-24', name: 'Jasa Software (PMK 141)', pphArticle: 'pph23', ratePercent: '2', kap: '411124', kjs: '104', description: 'Termasuk lisensi dan pemeliharaan.', isActive: false });
+  assert.equal(updated.code, '24-104-24');
+  assert.equal(updated.description, 'Termasuk lisensi dan pemeliharaan.');
+  assert.equal(updated.is_active, false);
+  assert.equal(db.tax_object_codes.find(row => row.code === '24-104-24').name, 'Jasa Software (PMK 141)');
+
+  const all = await actions.listTaxObjectCodes();
+  assert.deepEqual(all.map(row => [row.code, row.rate_percent, row.is_active]), [['24-104-24', 2, false], ['28-408-02', 0, true]]);
+
+  role = 'staf_marketing';
+  const writesBefore = writes;
+  await assert.rejects(actions.saveTaxObjectCode({ mode: 'create', code: '24-104-71', name: 'X', pphArticle: 'pph23', ratePercent: '2' }), /Hanya role finance/);
+  assert.equal(writes, writesBefore);
+});

@@ -423,3 +423,96 @@ export function cleanOptional(value: unknown): string | null {
   const text = String(value ?? '').trim();
   return text ? text : null;
 }
+
+// ---------------------------------------------------------------------------
+// Kode objek pajak (referensi global yang dirawat dari layar Kode Objek)
+// ---------------------------------------------------------------------------
+
+export type TaxObjectCodeInput = {
+  code: string;
+  name: string;
+  pphArticle: string;
+  ratePercent: number | string;
+  kap?: string | null;
+  kjs?: string | null;
+  description?: string | null;
+  legalBasis?: string | null;
+  isActive?: boolean;
+};
+
+export type NormalizedObjectCode = {
+  code: string;
+  name: string;
+  pph_article: TaxArticle;
+  rate_percent: number;
+  kap: string | null;
+  kjs: string | null;
+  description: string | null;
+  legal_basis: string | null;
+  is_active: boolean;
+};
+
+// Coretax numbers object codes by article prefix; a mismatch is almost always a
+// typo in the code or the wrong pasal picked, so it is rejected up front.
+export const OBJECT_CODE_PREFIX_ARTICLES: Record<string, readonly TaxArticle[]> = {
+  '22': ['pph22'],
+  '24': ['pph23'],
+  '27': ['pph26'],
+  '28': ['pph4_2', 'pph15'],
+  '29': ['pph15'],
+};
+
+export function normalizeObjectCode(value: unknown): string | null {
+  const digits = String(value ?? '').replace(/\D/g, '');
+  if (digits.length !== 7) return null;
+  return `${digits.slice(0, 2)}-${digits.slice(2, 5)}-${digits.slice(5)}`;
+}
+
+export function normalizeObjectCodeInput(input: TaxObjectCodeInput): { value: NormalizedObjectCode | null; errors: string[] } {
+  const errors: string[] = [];
+  const code = normalizeObjectCode(input.code);
+  if (!code) errors.push('Kode objek harus 7 digit dengan format 24-104-24.');
+
+  const name = String(input.name ?? '').trim();
+  if (!name) errors.push('Nama objek pajak wajib diisi.');
+
+  const article = String(input.pphArticle ?? '').trim();
+  const isArticle = (TAX_ARTICLES as readonly string[]).includes(article);
+  if (!isArticle) errors.push('Pasal PPh wajib dipilih.');
+  if (code && isArticle) {
+    const allowed = OBJECT_CODE_PREFIX_ARTICLES[code.slice(0, 2)];
+    if (!allowed) {
+      errors.push(`Awalan kode ${code.slice(0, 2)}- belum dikenal; kode objek Coretax diawali 22, 24, 27, 28, atau 29.`);
+    } else if (!allowed.includes(article as TaxArticle)) {
+      errors.push(`Awalan kode ${code.slice(0, 2)}- dipakai untuk ${allowed.map((item) => TAX_ARTICLE_LABELS[item]).join(' atau ')}, bukan ${TAX_ARTICLE_LABELS[article as TaxArticle]}.`);
+    }
+  }
+
+  const rateText = String(input.ratePercent ?? '').trim().replace(',', '.');
+  const rate = Number(rateText);
+  if (!rateText || !Number.isFinite(rate) || rate < 0 || rate > 100 || !/^\d+(\.\d{1,3})?$/.test(rateText)) {
+    errors.push('Tarif harus angka 0 sampai 100 dengan maksimal 3 desimal.');
+  }
+
+  const kap = String(input.kap ?? '').replace(/\D/g, '');
+  const kjs = String(input.kjs ?? '').replace(/\D/g, '');
+  if (kap && kap.length !== 6) errors.push('KAP harus 6 digit angka.');
+  if (kjs && kjs.length !== 3) errors.push('KJS harus 3 digit angka.');
+  if (Boolean(kap) !== Boolean(kjs)) errors.push('KAP dan KJS harus diisi bersama agar rekap setoran bisa dikelompokkan.');
+
+  if (errors.length > 0 || !code) return { value: null, errors };
+  return {
+    value: {
+      code,
+      name,
+      pph_article: article as TaxArticle,
+      rate_percent: rate,
+      kap: kap || null,
+      kjs: kjs || null,
+      description: cleanOptional(input.description),
+      legal_basis: cleanOptional(input.legalBasis),
+      is_active: input.isActive ?? true,
+    },
+    errors,
+  };
+}
