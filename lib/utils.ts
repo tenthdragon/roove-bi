@@ -345,6 +345,9 @@ export type TabId = string;
 export function canAccessTab(role: string, tabId: string, permissions: Set<string>): boolean {
   if (role === 'pending') return false;
   if (role === 'owner') return true;
+  if (role === 'advertiser' && tabId === 'marketplace-data-parser') {
+    return permissions.has('user:marketplace-data-parser');
+  }
   return dashboardTabPermissionKeys(tabId).some(key => permissions.has(key));
 }
 

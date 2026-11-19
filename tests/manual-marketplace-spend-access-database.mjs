@@ -2,7 +2,7 @@ import { execFileSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { randomBytes } from 'node:crypto';
 
-// Only the marketplace role-access migration runs, in a disposable database with minimal dependencies.
+// Marketplace role and advertiser parser access run in a disposable database with minimal dependencies.
 // The shared local sample, its schema, and existing spend are never changed.
 const database = `manual_spend_access_test_${randomBytes(6).toString('hex')}`;
 const container = process.argv.includes('--ci') ? 'roove-access-requests-test' : 'supabase_db_roove-bi-local';
@@ -65,6 +65,8 @@ ${read('./manual-marketplace-spend-access-db.sql')}
 ${read('./manual-marketplace-spend-brand-scope-db.sql')}
 ${read('./manual-marketplace-spend-brand-manager-db.sql')}
 ${read('./manual-marketplace-spend-sales-manager-db.sql')}
+${read('../supabase/migrations/20261119040417_advertiser_marketplace_parser_access.sql')}
+${read('./advertiser-parser-access-db.sql')}
 `));
 } finally {
   docker('dropdb', ['--if-exists', database]);

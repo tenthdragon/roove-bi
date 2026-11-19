@@ -6,6 +6,7 @@ import { useSearchParams } from 'next/navigation';
 import { uploadExcelData, fetchAllUsers, rejectUserAccessRequest, updateUserRole } from '@/lib/actions';
 import AdvertiserBrandAssignments from '@/components/AdvertiserBrandAssignments';
 import AdvertiserSpendAccess from '@/components/AdvertiserSpendAccess';
+import AdvertiserParserAccess from '@/components/AdvertiserParserAccess';
 import {
   deleteMarketplaceFeeEstimateRate,
   deleteMonthlyOverhead,
@@ -1523,6 +1524,7 @@ export default function AdminPage() {
                   )}
                   {u.role === 'advertiser' && <AdvertiserBrandAssignments key={`${activeWorkspace.id}:${u.id}`} userId={u.id} workspaceId={activeWorkspace.id} />}
                   {u.role === 'advertiser' && <AdvertiserSpendAccess key={`spend:${activeWorkspace.id}:${u.id}`} userId={u.id} workspaceId={activeWorkspace.id} />}
+                  {u.role === 'advertiser' && <AdvertiserParserAccess key={`parser:${activeWorkspace.id}:${u.id}`} userId={u.id} workspaceId={activeWorkspace.id} />}
                 </div>
               );
             })}
@@ -1670,12 +1672,14 @@ function PermissionsMatrix() {
                       <td style={labelStyle}>{label}</td>
                       {MATRIX_ROLES.map(r => (
                         <td key={r.id} style={tdStyle}>
-                          <input
+                          {r.id === 'advertiser' && key === 'tab:marketplace-data-parser' ? (
+                            <span title="Aktifkan pada akun Advertiser di Admin → Users">Per pengguna</span>
+                          ) : <input
                             type="checkbox"
                             checked={matrix[r.id]?.has(key) ?? false}
                             onChange={() => toggle(r.id, key)}
                             style={{ cursor: 'pointer', width: 15, height: 15 }}
-                          />
+                          />}
                         </td>
                       ))}
                     </tr>

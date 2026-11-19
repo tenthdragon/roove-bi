@@ -7,7 +7,7 @@
     "build": "next build",
     "start": "next start",
     "lint": "next lint",
-    "test:advertiser": "node --import tsx --test tests/advertiser-access.test.ts tests/advertiser-brand-access.test.ts tests/meta-brand-edit.test.ts",
+    "test:advertiser": "node --import tsx --test tests/advertiser-access.test.ts tests/advertiser-parser-access.test.tsx tests/advertiser-brand-access.test.ts tests/meta-brand-edit.test.ts",
     "test:advertiser-db": "node tests/advertiser-role-database.mjs",
     "test:advertiser-brand-report-db": "node tests/advertiser-brand-report-database.mjs",
     "test:access-requests-db": "node tests/workspace-access-requests-database.mjs",

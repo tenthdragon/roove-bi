@@ -6,6 +6,7 @@ import { ALL_TABS, canAccessTab, MATRIX_ROLES, PERMISSION_GROUPS } from '../lib/
 import { buildVisibleTabs, getCurrentTab, getOrderedAccessibleTabIds, getTabPath } from '../lib/dashboard-navigation';
 import { isWorkspaceModuleEnabled } from '../lib/workspaces';
 import { dashboardTabPermissionKeys } from '../lib/dashboard-permissions';
+import { loadAdvertiserParserAccess } from '../lib/advertiser-parser-access';
 
 const advertiserPermissions = new Set(['tab:meta-funnels']);
 
@@ -50,7 +51,7 @@ function loadServerModule(file: string, imports: Record<string, unknown>): any {
   return exports;
 }
 
-function serverAccess(role = 'advertiser', keys = advertiserPermissions, disabled_modules: string[] = []) {
+function serverAccess(role = 'advertiser', keys = advertiserPermissions, disabled_modules: string[] = [], parser = { enabled: false, error: null as any }) {
   const workspace = { id: 'workspace-a', membershipRole: role, settings: { disabled_modules } };
   const checkedScopes: Record<string, unknown>[] = [];
   const supabase = {
@@ -62,6 +63,12 @@ function serverAccess(role = 'advertiser', keys = advertiserPermissions, disable
         eq(key: string, value: unknown) { scope[key] = value; return query; },
         in(key: string, value: string[]) { scope[key] = value; return query; },
         async single() { assert.equal(table, 'profiles'); return { data: { id: 'user-a', role, active_workspace_id: workspace.id } }; },
+        async maybeSingle() {
+          assert.equal(table, 'workspace_advertiser_parser_access');
+          assert.equal(scope.workspace_id, 'workspace-a');
+          assert.equal(scope.user_id, 'user-a');
+          return { data: parser.enabled ? { user_id: 'user-a' } : null, error: parser.error };
+        },
         async limit() {
           assert.equal(table, 'workspace_role_permissions');
           checkedScopes.push(scope);
@@ -76,6 +83,7 @@ function serverAccess(role = 'advertiser', keys = advertiserPermissions, disable
   const guards = loadServerModule('dashboard-access', {
     './supabase-server': { createServerSupabase: () => supabase },
     './dashboard-permissions': { dashboardTabPermissionKeys },
+    './advertiser-parser-access': { loadAdvertiserParserAccess },
     './workspace-access': { getWorkspaceBootstrapForVerifiedProfile: async () => ({ activeWorkspace: workspace, isPlatformOwner: false }) },
     './workspaces': { isWorkspaceModuleEnabled },
   });
@@ -92,6 +100,33 @@ test('server permits Meta Ads reads but rejects direct parent, finance, admin an
   await assert.rejects(guards.requireDashboardPermissionAccess('admin:meta'), /tidak memiliki izin/);
   await assert.rejects(guards.requireDashboardRoles(['owner'], 'Owner only'), /Owner only/);
   assert.ok(checkedScopes.every(scope => scope.workspace_id === 'workspace-a' && scope.role === 'advertiser'));
+});
+
+test('advertiser parser navigation and server actions require the individual grant', async () => {
+  const roleGrants = new Set(['tab:channels', 'tab:marketplace-data-parser']);
+  assert.equal(canAccessTab('advertiser', 'marketplace-data-parser', roleGrants), false);
+  const granted = new Set(['user:marketplace-data-parser']);
+  assert.deepEqual(getOrderedAccessibleTabIds('advertiser', granted), ['marketplace-data-parser']);
+  assert.equal(canAccessTab('advertiser', 'channels', granted), false);
+
+  const parser = { enabled: false, error: null as any };
+  const { guards } = serverAccess('advertiser', roleGrants, [], parser);
+  await assert.rejects(guards.requireDashboardTabAccess('marketplace-data-parser'), /tidak memiliki akses/);
+  await assert.rejects(guards.requireAnyDashboardTabAccess(['marketplace-data-parser'], 'Parser'), /tidak memiliki akses/);
+  assert.equal((await guards.requireAnyDashboardTabAccess(['channels', 'marketplace-data-parser'], 'Sales')).profile.role, 'advertiser');
+  parser.enabled = true;
+  assert.equal((await guards.requireDashboardTabAccess('marketplace-data-parser')).profile.role, 'advertiser');
+  const onlyParser = serverAccess('advertiser', new Set(), [], parser).guards;
+  assert.equal((await onlyParser.requireAnyDashboardTabAccess(['marketplace-data-parser'], 'Parser')).workspaceId, 'workspace-a');
+  await assert.rejects(onlyParser.requireDashboardTabAccess('channels'), /tidak memiliki akses/);
+  parser.enabled = false;
+  await assert.rejects(guards.requireDashboardTabAccess('marketplace-data-parser'), /tidak memiliki akses/);
+  parser.error = { code: '42P01' };
+  await assert.rejects(guards.requireDashboardTabAccess('marketplace-data-parser'), /tidak memiliki akses/);
+  parser.error = { code: '42501' };
+  await assert.rejects(guards.requireDashboardTabAccess('marketplace-data-parser'), /Gagal memverifikasi/);
+  const disabled = serverAccess('advertiser', granted, ['marketplace-data-parser'], { enabled: true, error: null }).guards;
+  await assert.rejects(disabled.requireDashboardTabAccess('marketplace-data-parser'), /tidak diaktifkan/);
 });
 
 test('Meta Ads server entry point respects disabled modules and retains legacy marketing access', async () => {
