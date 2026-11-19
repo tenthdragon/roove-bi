@@ -146,6 +146,30 @@ Referensi kode objek, norma dan negara tersimpan di `lib/tax-withholding-bpnr-re
 - **Entitas pemotong** merujuk ke `scalev_webhook_businesses` (RTI, RLB, RLT, JHN,
   RLBPP) lewat `(workspace_id, business_id)`, mengikuti pola `business_brand_roles`.
 
+### 4.1 Konteks kerja dan perlindungan isian
+
+- Pemotong, tahun, masa, pencarian, status, dan tampilan rekap bertahan selama
+  berpindah bagian di halaman ini. Bukti Potong dan Rekap Setor memakai PT/tahun
+  yang sama. Pergantian workspace mengosongkan konteks dan data sebelumnya.
+- Bukti baru memakai masa yang sedang dipilih, ditampilkan di form, dan dikirim
+  eksplisit saat simpan. Tanggal invoice tidak memindahkan masa secara diam-diam.
+  Setelah tersimpan, daftar membuka PT/masa bukti tersebut dan menghapus filter
+  pencarian/status agar hasil simpan terlihat. Edit mempertahankan masa bukti lama.
+- Dialog memakai modal native: latar tidak bisa dioperasikan, fokus dikembalikan
+  ke pemicu setelah tutup, dan Escape/tombol tutup/klik latar meminta konfirmasi
+  bila ada perubahan. Penutupan diblokir saat menyimpan; refresh/tutup halaman
+  memakai peringatan browser selama ada isian atau operasi yang belum selesai.
+- Form mengelompokkan transaksi dan nominal, dengan perhitungan di dekat nominal.
+  Tarif khusus, dokumen/tanggal tambahan, dan pembukuan dibuka sesuai kebutuhan.
+  Lawan transaksi baru bisa ditambahkan dari form tanpa membuang isian bukti.
+- Di mobile, tab dan tabel bergulir di area masing-masing, invoice tetap terlihat,
+  ringkasan lebih ringkas, serta form memakai satu kolom. Gagal memuat menampilkan
+  tombol **Coba lagi**; hasil filter kosong menyediakan **Hapus filter**.
+
+Perubahan ini tidak menambah migrasi atau mengubah perhitungan, XML, dan aturan
+validasi di server. Pengujian visual menggunakan komponen asli dengan data sintetis
+lokal; belum memverifikasi alur simpan melalui database produksi.
+
 ## 5. Model data
 
 Migration baru satu berkas, nomor berikutnya setelah `246_` (saat ini `247_tax_withholding.sql`).

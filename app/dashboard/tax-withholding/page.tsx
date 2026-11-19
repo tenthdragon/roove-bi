@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useId, useMemo, useRef, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import {
   commitCounterpartyImport,
   deleteCounterpartyFacility,
@@ -33,6 +33,8 @@ import {
   type IdentityType,
   type TaxArticle,
 } from '@/lib/tax-withholding-domain';
+import { ModalShell, LoadError } from '@/components/TaxWithholdingShared';
+import { TaxWorkProvider } from '@/components/TaxWithholdingContext';
 import { useWorkspace } from '@/lib/WorkspaceContext';
 import { RekapanImportSection, SlipsSection } from '@/components/TaxWithholdingSlips';
 import { TaxRecapSection } from '@/components/TaxWithholdingRecap';
@@ -116,43 +118,6 @@ const primaryButtonStyle = {
 const cellStyle = { padding: '12px 14px', borderBottom: '1px solid var(--border)', verticalAlign: 'top' } as const;
 const headCellStyle = { ...cellStyle, fontSize: 11, textTransform: 'uppercase', letterSpacing: 0.4, color: 'var(--dim)', textAlign: 'left' } as const;
 
-function ModalShell({ title, subtitle, onClose, maxWidth = 620, children }: {
-  title: string; subtitle?: string; onClose: () => void; maxWidth?: number; children: ReactNode;
-}) {
-  const titleId = useId();
-  const dialogRef = useRef<HTMLDivElement>(null);
-  const onCloseRef = useRef(onClose);
-  useEffect(() => { onCloseRef.current = onClose; }, [onClose]);
-  useEffect(() => {
-    const previousOverflow = document.body.style.overflow;
-    document.body.style.overflow = 'hidden';
-    const handleKeyDown = (event: KeyboardEvent) => { if (event.key === 'Escape') onCloseRef.current(); };
-    document.addEventListener('keydown', handleKeyDown);
-    const timer = window.setTimeout(() => {
-      dialogRef.current?.querySelector<HTMLElement>('input:not([disabled]), select:not([disabled])')?.focus();
-    }, 0);
-    return () => {
-      document.body.style.overflow = previousOverflow;
-      document.removeEventListener('keydown', handleKeyDown);
-      window.clearTimeout(timer);
-    };
-  }, []);
-  return (
-    <div className="tw-modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}>
-      <div ref={dialogRef} role="dialog" aria-modal="true" aria-labelledby={titleId} tabIndex={-1} className="tw-modal-panel" style={{ maxWidth }}>
-        <div className="tw-modal-header">
-          <div>
-            <h2 id={titleId} style={{ margin: 0, fontSize: 17 }}>{title}</h2>
-            {subtitle ? <div style={{ color: 'var(--dim)', fontSize: 12, marginTop: 4 }}>{subtitle}</div> : null}
-          </div>
-          <button type="button" onClick={onClose} className="tw-close-button" aria-label="Tutup dialog">×</button>
-        </div>
-        {children}
-      </div>
-    </div>
-  );
-}
-
 function SummaryCard({ label, value, hint }: { label: string; value: string | number; hint?: string }) {
   return (
     <div className="tw-summary-card">
@@ -184,6 +149,12 @@ function facilityTone(status: ReturnType<typeof facilityExpiryStatus>) {
 export default function TaxWithholdingPage() {
   const { activeWorkspace } = useWorkspace();
   const [subTab, setSubTab] = useState<SubTab>('slips');
+  return <TaxWorkProvider key={activeWorkspace.id}><TaxWithholdingContent subTab={subTab} setSubTab={setSubTab} /></TaxWorkProvider>;
+}
+
+function TaxWithholdingContent({ subTab, setSubTab }: { subTab: SubTab; setSubTab: (tab: SubTab) => void }) {
+  const { activeWorkspace } = useWorkspace();
+  const [creatingCounterparty, setCreatingCounterparty] = useState(false);
   const [data, setData] = useState<TaxWithholdingBootstrap | null>(null);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -270,6 +241,50 @@ export default function TaxWithholdingPage() {
           .tax-withholding-page .tw-modal-backdrop{align-items:flex-start;padding:10px}
           .tax-withholding-page .tw-modal-actions{flex-direction:column-reverse}.tax-withholding-page .tw-modal-actions button{width:100%;min-height:44px}
         }
+        .tax-withholding-page,.tax-withholding-page>*:not(dialog),.tax-withholding-page .tw-tab-panel>*:not(dialog),.tax-withholding-page .tw-page-header>div{min-width:0}
+        .tax-withholding-page{grid-template-columns:minmax(0,1fr)}
+        .tax-withholding-page .tw-tab-panel{display:grid;grid-template-columns:minmax(0,1fr);gap:18px}
+        .tax-withholding-page .tw-tabs{max-width:100%;overflow-x:auto;overscroll-behavior-inline:contain;scrollbar-width:thin}
+        .tax-withholding-page .tw-tab{flex:0 0 auto;white-space:nowrap}
+        .tax-withholding-page .tw-summary-grid-recap{grid-template-columns:repeat(5,minmax(0,1fr))}
+        .tax-withholding-page .tw-summary-card>div:nth-child(2){font-size:20px!important;font-variant-numeric:tabular-nums}
+        .tax-withholding-page .tw-toolbar>div,.tax-withholding-page .tw-grid-2>*{min-width:0;max-width:100%}
+        .tax-withholding-page .tw-filter{max-width:100%}
+        .tax-withholding-page button:disabled{opacity:.48;cursor:not-allowed}
+        .tax-withholding-page .tw-load-error{padding:20px;color:var(--red);font-size:14px}
+        .tax-withholding-page .tw-load-error p{margin:6px 0 14px;color:var(--text-secondary)}
+        .tax-withholding-page dialog.tw-modal-backdrop{margin:0;width:100%;height:100%;max-width:none;max-height:none;border:0;color:var(--text)}
+        .tax-withholding-page dialog.tw-modal-backdrop:not([open]){display:none}
+        .tax-withholding-page dialog.tw-modal-backdrop::backdrop{background:transparent}
+        .tax-withholding-page .tw-context-note{margin:0;font-size:13px;color:var(--text-secondary)}
+        .tax-withholding-page .tw-form-section{border:0;padding:0;margin:0;min-width:0;display:grid;gap:14px}
+        .tax-withholding-page .tw-form-section legend{font-size:15px;font-weight:750;margin-bottom:14px;padding:0}
+        .tax-withholding-page .tw-disclosure{border-top:1px solid var(--border);padding-top:14px;min-width:0}
+        .tax-withholding-page .tw-disclosure summary{cursor:pointer;font-weight:700;font-size:14px;padding:4px 0}
+        .tax-withholding-page .tw-disclosure summary span{display:block;font-size:12px;font-weight:400;color:var(--dim);margin-top:4px}
+        .tax-withholding-page .tw-disclosure[open]>.tw-grid-2{margin-top:16px}
+        .tax-withholding-page .tw-scroll-note{display:none}
+        @media(max-width:1100px){.tax-withholding-page .tw-summary-grid-recap{grid-template-columns:repeat(3,minmax(0,1fr))}}
+        @media(max-width:768px){
+          .tax-withholding-page .tw-page-header{display:flex;align-items:stretch}
+          .tax-withholding-page .tw-tabs{width:100%;padding-bottom:6px}
+          .tax-withholding-page .tw-tab{flex:0 0 auto;min-height:44px;font-size:14px}
+          .tax-withholding-page .tw-summary-grid,.tax-withholding-page .tw-summary-grid-recap{grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}
+          .tax-withholding-page .tw-summary-card{padding:12px;border-radius:10px}
+          .tax-withholding-page .tw-summary-card:first-child{grid-column:1/-1}
+          .tax-withholding-page .tw-summary-card>div:nth-child(2){font-size:18px!important;margin-top:4px!important}
+          .tax-withholding-page .tw-entity-grid{grid-template-columns:minmax(0,1fr);padding:12px}
+          .tax-withholding-page .tw-toolbar{padding:12px;gap:12px}
+          .tax-withholding-page .tw-toolbar-actions{width:100%;justify-content:flex-start}
+          .tax-withholding-page .tw-toolbar-actions .tw-search{flex-basis:100%}
+          .tax-withholding-page :is(input:not([type=checkbox]),select,textarea){font-size:16px!important;min-height:44px;min-width:0;max-width:100%}
+          .tax-withholding-page :is(.tw-action-button,.tw-close-button){min-height:44px;min-width:44px}
+          .tax-withholding-page .tw-modal-body{padding:16px;gap:22px}
+          .tax-withholding-page .tw-modal-header,.tax-withholding-page .tw-modal-actions{padding:12px 16px}
+          .tax-withholding-page .tw-modal-panel{max-height:calc(100dvh - 20px)}
+          .tax-withholding-page .tw-scroll-note{display:block;padding:10px 12px;margin:0;font-size:12px;color:var(--dim)}
+          .tax-withholding-page .tw-slip-table :is(th,td):nth-child(2){position:sticky;left:0;z-index:1;background:var(--card);min-width:150px;max-width:180px;border-right:1px solid var(--border)}
+        }
       `}</style>
 
       <header className="tw-page-header">
@@ -277,7 +292,7 @@ export default function TaxWithholdingPage() {
           <div style={{ fontSize: 12, color: 'var(--accent)', fontWeight: 700, marginBottom: 5 }}>{activeWorkspace.name}</div>
           <h1 style={{ margin: 0, fontSize: 24 }}>Bukti Potong (PPh)</h1>
           <p style={{ margin: '6px 0 0', color: 'var(--text-secondary)', fontSize: 13, maxWidth: 640 }}>
-            Bukti potong PPh unifikasi Coretax: input per transaksi dengan tarif otomatis, master pemotong dan lawan transaksi, impor dari workbook REKAP, export XML BPPU per masa, pencatatan nomor bukti potong Coretax, dan rekap setor per KAP/KJS.
+            Siapkan bukti potong, ekspor XML ke Coretax, lalu catat nomor bukti potong dan setoran per masa pajak.
           </p>
         </div>
         <div role="tablist" aria-label="Bagian" className="tw-tabs">
@@ -288,14 +303,23 @@ export default function TaxWithholdingPage() {
             ['entities', 'Pemotong'],
             ['import', 'Impor'],
           ] as Array<[SubTab, string]>).map(([id, label]) => (
-            <button key={id} type="button" role="tab" aria-selected={subTab === id} className="tw-tab" onClick={() => setSubTab(id)}>{label}</button>
+            <button key={id} type="button" role="tab" id={`tax-tab-${id}`} aria-controls="tax-panel" tabIndex={subTab === id ? 0 : -1} aria-selected={subTab === id} className="tw-tab" onClick={() => setSubTab(id)}
+              onKeyDown={(event) => {
+                const keys = ['ArrowLeft', 'ArrowRight', 'Home', 'End'];
+                if (!keys.includes(event.key)) return;
+                event.preventDefault();
+                const tabs = Array.from(event.currentTarget.parentElement!.querySelectorAll<HTMLButtonElement>('[role="tab"]'));
+                const index = tabs.indexOf(event.currentTarget);
+                const next = event.key === 'Home' ? 0 : event.key === 'End' ? tabs.length - 1 : (index + (event.key === 'ArrowRight' ? 1 : -1) + tabs.length) % tabs.length;
+                tabs[next].click(); tabs[next].focus(); tabs[next].scrollIntoView({ block: 'nearest', inline: 'nearest' });
+              }}>{label}</button>
           ))}
         </div>
       </header>
 
-      {loadError ? (
-        <div className="tw-notice" style={{ borderColor: 'var(--red)', color: 'var(--red)' }}>{loadError}</div>
-      ) : loading && !data ? (
+      <div id="tax-panel" role="tabpanel" aria-labelledby={`tax-tab-${subTab}`} className="tw-tab-panel">
+      {loadError ? <LoadError message={loadError} onRetry={() => void load()} /> : null}
+      {loading && !data ? (
         <div className="tw-notice">Memuat data…</div>
       ) : data ? (
         <>
@@ -310,7 +334,7 @@ export default function TaxWithholdingPage() {
               <button type="button" className="tw-action-button" style={{ color: 'var(--accent)' }} onClick={() => setSubTab('counterparties')}>Buka Lawan Transaksi</button>
             </div>
           ) : null}
-          {subTab === 'slips' ? <SlipsSection key={activeWorkspace.id} entities={data.entities} counterparties={data.counterparties} canManage={data.canManage} notify={setMessage} /> : null}
+          {subTab === 'slips' ? <SlipsSection key={activeWorkspace.id} entities={data.entities} counterparties={data.counterparties} canManage={data.canManage} notify={setMessage} onCreateCounterparty={() => setCreatingCounterparty(true)} /> : null}
           {subTab === 'recap' ? <TaxRecapSection key={`recap-${activeWorkspace.id}`} entities={data.entities} canManage={data.canManage} notify={setMessage} /> : null}
           {subTab === 'counterparties' ? (
             <>
@@ -330,9 +354,11 @@ export default function TaxWithholdingPage() {
               <RekapanImportSection key={`rekapan-${activeWorkspace.id}`} entities={data.entities} workspaceId={activeWorkspace.id} canManage={data.canManage} notify={setMessage} onImported={() => { void load(); }} />
             </>
           ) : null}
+          {creatingCounterparty && data.canManage ? <CounterpartyModal counterparty={null} today={today} onClose={() => setCreatingCounterparty(false)} onSaved={async (text) => { await load(); setMessage({ type: 'success', text }); setCreatingCounterparty(false); }} notify={setMessage} /> : null}
         </>
       ) : null}
 
+      </div>
       {message ? (
         <div role="status" className="tw-toast" style={{ color: message.type === 'error' ? 'var(--red)' : 'var(--green)' }}>{message.text}</div>
       ) : null}
@@ -491,6 +517,7 @@ function CounterpartyModal({ counterparty, today, onClose, onSaved, notify }: {
   } : EMPTY_COUNTERPARTY);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const savedForm = useRef(JSON.stringify(form));
   const [savedId, setSavedId] = useState<number | null>(counterparty?.id ?? null);
   const [facilities, setFacilities] = useState<TaxCounterpartyFacility[]>(counterparty?.facilities ?? []);
   const [facilityForm, setFacilityForm] = useState<FacilityForm | null>(null);
@@ -506,7 +533,9 @@ function CounterpartyModal({ counterparty, today, onClose, onSaved, notify }: {
         isPkp: form.isPkp, countryCode: form.countryCode, address: form.address, phone: form.phone, notes: form.notes, isActive: form.isActive,
       });
       setSavedId(saved.id);
-      setForm((prev) => ({ ...prev, id: saved.id, identityNumber: saved.identity_number }));
+      const nextForm = { ...form, id: saved.id, identityNumber: saved.identity_number };
+      savedForm.current = JSON.stringify(nextForm);
+      setForm(nextForm);
       setFacilities(saved.facilities);
       await onSaved(form.id ? 'Lawan transaksi diperbarui.' : 'Lawan transaksi ditambahkan. Anda bisa menambah fasilitas sekarang.');
       if (form.id) onClose();
@@ -557,7 +586,7 @@ function CounterpartyModal({ counterparty, today, onClose, onSaved, notify }: {
         : 'Nomor identitas pajak negara asal';
 
   return (
-    <ModalShell title={counterparty ? 'Edit lawan transaksi' : 'Tambah lawan transaksi'} subtitle={counterparty ? `Terakhir diubah ${formatDate(counterparty.updated_at.slice(0, 10))}` : undefined} onClose={onClose} maxWidth={720}>
+    <ModalShell title={counterparty ? 'Edit lawan transaksi' : 'Tambah lawan transaksi'} subtitle={counterparty ? `Terakhir diubah ${formatDate(counterparty.updated_at.slice(0, 10))}` : undefined} onClose={onClose} busy={saving} dirty={JSON.stringify(form) !== savedForm.current || facilityForm !== null} maxWidth={720}>
       <div className="tw-modal-body">
         <div className="tw-grid-2">
           <label style={labelStyle} className="tw-span-2">Nama
@@ -687,7 +716,7 @@ function CounterpartyModal({ counterparty, today, onClose, onSaved, notify }: {
         {error ? <div style={{ color: 'var(--red)', fontSize: 13 }}>{error}</div> : null}
       </div>
       <div className="tw-modal-actions">
-        <button type="button" style={secondaryButtonStyle} onClick={onClose} disabled={saving}>{savedId ? 'Tutup' : 'Batal'}</button>
+        <button type="button" style={secondaryButtonStyle} data-dialog-close disabled={saving}>{savedId ? 'Tutup' : 'Batal'}</button>
         <button type="button" style={primaryButtonStyle} onClick={() => void submit()} disabled={saving}>
           {saving ? 'Menyimpan…' : savedId ? 'Simpan perubahan' : 'Simpan'}
         </button>
@@ -704,6 +733,8 @@ function EntitiesSection({ data, onChanged, notify }: {
   data: TaxWithholdingBootstrap; onChanged: () => Promise<void>; notify: (message: PageMessage) => void;
 }) {
   const [editing, setEditing] = useState<EntityForm | null>(null);
+  const initialEntity = useRef('');
+  const beginEditing = (value: EntityForm) => { initialEntity.current = JSON.stringify(value); setError(null); setEditing(value); };
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -714,8 +745,8 @@ function EntitiesSection({ data, onChanged, notify }: {
   const availableBusinesses = data.businesses.filter((business) =>
     business.is_active && (!data.entities.some((entity) => entity.business_id === business.id) || editing?.businessId === String(business.id)));
 
-  const openNew = () => setEditing({ ...EMPTY_ENTITY, businessId: availableBusinesses[0] ? String(availableBusinesses[0].id) : '' });
-  const openEdit = (entity: TaxWithholdingEntity) => setEditing({
+  const openNew = () => beginEditing({ ...EMPTY_ENTITY, businessId: availableBusinesses[0] ? String(availableBusinesses[0].id) : '' });
+  const openEdit = (entity: TaxWithholdingEntity) => beginEditing({
     id: entity.id, businessId: String(entity.business_id), legalName: entity.legal_name, npwp: entity.npwp, tkuId: entity.tku_id,
     city: entity.city ?? '', signerName: entity.signer_name ?? '', signerTitle: entity.signer_title ?? '', signerNpwp: entity.signer_npwp ?? '', isActive: entity.is_active,
   });
@@ -788,7 +819,7 @@ function EntitiesSection({ data, onChanged, notify }: {
       )}
 
       {editing ? (
-        <ModalShell title={editing.id ? 'Edit pemotong' : 'Tambah pemotong'} onClose={() => setEditing(null)}>
+        <ModalShell title={editing.id ? 'Edit pemotong' : 'Tambah pemotong'} onClose={() => setEditing(null)} busy={saving} dirty={JSON.stringify(editing) !== initialEntity.current}>
           <div className="tw-modal-body">
             <div className="tw-grid-2">
               <label style={labelStyle} className="tw-span-2">Business
@@ -829,7 +860,7 @@ function EntitiesSection({ data, onChanged, notify }: {
             {error ? <div style={{ color: 'var(--red)', fontSize: 13 }}>{error}</div> : null}
           </div>
           <div className="tw-modal-actions">
-            <button type="button" style={secondaryButtonStyle} onClick={() => setEditing(null)} disabled={saving}>Batal</button>
+            <button type="button" style={secondaryButtonStyle} data-dialog-close disabled={saving}>Batal</button>
             <button type="button" style={primaryButtonStyle} onClick={() => void submit()} disabled={saving}>{saving ? 'Menyimpan…' : 'Simpan'}</button>
           </div>
         </ModalShell>

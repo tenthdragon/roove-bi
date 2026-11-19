@@ -165,7 +165,7 @@ export function CoretaxRecordModal({ entity, year, month, onClose, onChanged, no
   const canSubmit = !busy && !loading && pendingAssignments.length > 0 && duplicateNumbers.length === 0;
 
   return (
-    <ModalShell title="Catat nomor bukti potong Coretax" subtitle={`${entity.legal_name} · ${MONTHS[month - 1]} ${year}`} onClose={onClose} maxWidth={1040}>
+    <ModalShell title="Catat nomor bukti potong Coretax" subtitle={`${entity.legal_name} · ${MONTHS[month - 1]} ${year}`} onClose={onClose} busy={busy} dirty={Boolean(text.trim() || file || Object.keys(typed).length)} maxWidth={1040}>
       <div className="tw-modal-body" style={{ display: 'grid', gap: 14 }}>
         {error ? <div className="tw-notice" style={{ color: 'var(--red)' }}>{error}</div> : null}
         {preview ? (
@@ -179,7 +179,7 @@ export function CoretaxRecordModal({ entity, year, month, onClose, onChanged, no
             <div style={{ fontSize: 12, color: 'var(--text-secondary)' }}>
               Setelah file XML diunggah, Coretax memberi nomor pada setiap bukti potong. Tempel dua kolom (nomor dokumen dan nomor bukti potong) dari daftar Coretax, unggah unduhannya, atau ketik nomor langsung di tabel. Nomor dicocokkan lewat nomor dokumen yang tertulis di XML (nomor faktur pajak untuk dokumen TaxInvoice).
             </div>
-            <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) minmax(0, 1fr)', gap: 12 }}>
+            <div className="tw-grid-2">
               <label style={labelStyle}>
                 Tempel dari Coretax / spreadsheet
                 <textarea value={text} onChange={(event) => setText(event.target.value)} rows={4} style={{ ...inputStyle, resize: 'vertical', fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace', fontSize: 12 }} placeholder={'INV/2026/10/001\t26000UK7L\nINV/2026/10/002\t26000UK7M'} />
@@ -293,7 +293,7 @@ export function CoretaxRecordModal({ entity, year, month, onClose, onChanged, no
         ) : loading ? <div style={{ color: 'var(--text-secondary)', fontSize: 13 }}>Memuat…</div> : null}
       </div>
       <div className="tw-modal-actions">
-        <button type="button" style={secondaryButtonStyle} onClick={onClose} disabled={busy}>Tutup</button>
+        <button type="button" style={secondaryButtonStyle} data-dialog-close disabled={busy}>Tutup</button>
         <button type="button" style={secondaryButtonStyle} disabled={loading || busy} onClick={() => void refresh()}>Muat ulang</button>
         <button type="button" style={primaryButtonStyle} disabled={!canSubmit} onClick={() => void submit()}>
           {busy ? 'Mencatat…' : `Catat nomor (${pendingAssignments.length})`}
@@ -340,7 +340,7 @@ export function CoretaxNumberModal({ slip, onClose, onDone }: { slip: TaxSlip; o
   };
 
   return (
-    <ModalShell title={slip.status === 'reported' ? 'Ubah nomor Coretax' : 'Catat nomor Coretax'} subtitle={`${slip.invoice_number} · ${slip.counterparty_name}`} onClose={onClose} maxWidth={480}>
+    <ModalShell title={slip.status === 'reported' ? 'Ubah nomor Coretax' : 'Catat nomor Coretax'} subtitle={`${slip.invoice_number} · ${slip.counterparty_name}`} onClose={onClose} busy={busy !== null} dirty={value !== (slip.coretax_slip_number ?? '')} maxWidth={480}>
       <div className="tw-modal-body" style={{ display: 'grid', gap: 12 }}>
         <div style={{ fontSize: 13, color: 'var(--text-secondary)' }}>
           {slip.status === 'reported'
@@ -356,7 +356,7 @@ export function CoretaxNumberModal({ slip, onClose, onDone }: { slip: TaxSlip; o
         {error ? <div style={{ color: 'var(--red)', fontSize: 12 }}>{error}</div> : null}
       </div>
       <div className="tw-modal-actions">
-        <button type="button" style={secondaryButtonStyle} onClick={onClose} disabled={busy !== null}>Batal</button>
+        <button type="button" style={secondaryButtonStyle} data-dialog-close disabled={busy !== null}>Batal</button>
         {slip.status === 'reported' && slip.export_batch_id ? (
           <button type="button" style={{ ...secondaryButtonStyle, color: 'var(--yellow)' }} disabled={busy !== null} onClick={() => void clear()}>{busy === 'clear' ? 'Menghapus…' : 'Hapus nomor'}</button>
         ) : null}

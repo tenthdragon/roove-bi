@@ -30,6 +30,7 @@ import { DOCUMENT_TYPES, IDENTITY_LABELS, TAX_ARTICLE_LABELS, formatIdentity, ty
 import type { GrossInputMode } from '@/lib/tax-withholding-rules';
 import {
   MONTHS,
+  LoadError,
   ModalShell,
   STATUS_LABELS,
   STATUS_TONE,
@@ -50,13 +51,14 @@ import {
   type Notify,
 } from '@/components/TaxWithholdingShared';
 import { CoretaxNumberModal, CoretaxRecordModal } from '@/components/TaxWithholdingCoretax';
+import { useTaxWorkContext } from '@/components/TaxWithholdingContext';
 
 const DOCUMENT_LABELS: Record<DocumentType, string> = {
   CommercialInvoice: 'Surat Tagihan / Invoice', TaxInvoice: 'Faktur Pajak', Contract: 'Kontrak', PaymentProof: 'Bukti Pembayaran',
   StatementLetter: 'Surat Pernyataan', Announchment: 'Pengumuman', DeedofEngangement: 'Akta Perjanjian',
   DeedofGeneralMeetingStakeholder: 'Akta RUPS', BankAccountNumber: 'Nomor Rekening',
 };
-const todayIso = () => new Date().toISOString().slice(0, 10);
+const todayIso = () => new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Jakarta', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date());
 
 function useObjectCodes(notify: Notify, enabled: boolean) {
   const [codes, setCodes] = useState<TaxObjectCodeOption[]>([]);
@@ -73,19 +75,18 @@ function useObjectCodes(notify: Notify, enabled: boolean) {
 // Daftar bukti potong
 // ---------------------------------------------------------------------------
 
-export function SlipsSection({ entities, counterparties, canManage, notify }: {
+export function SlipsSection({ entities, counterparties, canManage, notify, onCreateCounterparty }: {
   entities: TaxWithholdingEntity[]; counterparties: TaxCounterparty[]; canManage: boolean; notify: Notify;
+  onCreateCounterparty?: () => void;
 }) {
   const activeEntities = useMemo(() => entities.filter((entity) => entity.is_active), [entities]);
   const now = useMemo(() => new Date(), []);
-  const [entityId, setEntityId] = useState<number>(activeEntities[0]?.id ?? entities[0]?.id ?? 0);
-  const [year, setYear] = useState(now.getFullYear());
-  const [month, setMonth] = useState(now.getMonth() + 1);
-  const [statusFilter, setStatusFilter] = useState<SlipStatus | 'all'>('all');
-  const [search, setSearch] = useState('');
+  const { entityId, year, month, status: statusFilter, search, update: updateContext } = useTaxWorkContext(entities);
   const [slips, setSlips] = useState<TaxSlip[]>([]);
   const [totals, setTotals] = useState<TaxSlipTotals | null>(null);
   const [loading, setLoading] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [removing, setRemoving] = useState(false);
   const [editing, setEditing] = useState<TaxSlip | 'new' | null>(null);
   const [deleting, setDeleting] = useState<TaxSlip | null>(null);
   const [exporting, setExporting] = useState(false);
@@ -98,14 +99,11 @@ export function SlipsSection({ entities, counterparties, canManage, notify }: {
   // Reference codes are only needed once there is a withholding entity to file for.
   const objectCodes = useObjectCodes(notify, activeEntities.length > 0);
 
-  useEffect(() => {
-    if (!entities.some((entity) => entity.id === entityId)) setEntityId(activeEntities[0]?.id ?? entities[0]?.id ?? 0);
-  }, [entities, activeEntities, entityId]);
-
   const load = useCallback(async () => {
     const sequence = ++loadSequence.current;
     setSlips([]);
     setTotals(null);
+    setLoadError(null);
     if (!entityId) { setLoading(false); return; }
     setLoading(true);
     try {
@@ -114,11 +112,11 @@ export function SlipsSection({ entities, counterparties, canManage, notify }: {
       setSlips(result.slips);
       setTotals(result.totals);
     } catch (error) {
-      if (sequence === loadSequence.current) notify({ type: 'error', text: errorText(error) });
+      if (sequence === loadSequence.current) setLoadError(errorText(error));
     } finally {
       if (sequence === loadSequence.current) setLoading(false);
     }
-  }, [entityId, year, month, statusFilter, search, notify]);
+  }, [entityId, year, month, statusFilter, search]);
 
   useEffect(() => {
     void load();
@@ -126,7 +124,8 @@ export function SlipsSection({ entities, counterparties, canManage, notify }: {
   }, [load]);
 
   const remove = async () => {
-    if (!deleting) return;
+    if (!deleting || removing) return;
+    setRemoving(true);
     try {
       await deleteTaxSlip(deleting.id);
       notify({ type: 'success', text: 'Bukti potong dihapus.' });
@@ -134,6 +133,8 @@ export function SlipsSection({ entities, counterparties, canManage, notify }: {
       await load();
     } catch (error) {
       notify({ type: 'error', text: errorText(error) });
+    } finally {
+      setRemoving(false);
     }
   };
 
@@ -150,7 +151,7 @@ export function SlipsSection({ entities, counterparties, canManage, notify }: {
     <>
       {totals ? (
         <div className="tw-summary-grid">
-          <SummaryCard label="Bukti potong masa ini" value={totals.count} hint={`Draft ${totals.byStatus.draft} · Siap ${totals.byStatus.ready} · Dilaporkan ${totals.byStatus.reported + totals.byStatus.paid}`} />
+          <SummaryCard label="Bukti potong masa ini" value={totals.count} hint={`Draft ${totals.byStatus.draft} · Siap ${totals.byStatus.ready} · Menunggu nomor Coretax ${totals.byStatus.exported ?? 0} · Dilaporkan ${totals.byStatus.reported + totals.byStatus.paid}`} />
           <SummaryCard label="Total DPP" value={formatMoney(totals.grossAmount)} />
           <SummaryCard label="Total PPh dipotong" value={formatMoney(totals.withholdingAmount)} />
           <SummaryCard label="Per pasal" value={totals.byArticle.length === 0 ? '—' : totals.byArticle.map((row) => `${TAX_ARTICLE_LABELS[row.article]} ${formatMoney(row.withholdingAmount)}`).join(' · ')} />
@@ -160,19 +161,19 @@ export function SlipsSection({ entities, counterparties, canManage, notify }: {
       <section className="tw-section">
         <div className="tw-toolbar">
           <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
-            <select aria-label="Pemotong" className="tw-filter" value={entityId} onChange={(event) => setEntityId(Number(event.target.value))}>
+            <select aria-label="Pemotong" className="tw-filter" value={entityId} onChange={(event) => updateContext({ entityId: Number(event.target.value) })}>
               {entities.map((entity) => <option key={entity.id} value={entity.id}>{entity.legal_name}{entity.is_active ? '' : ' (nonaktif)'}</option>)}
             </select>
-            <select aria-label="Masa pajak" className="tw-filter" value={month} onChange={(event) => setMonth(Number(event.target.value))}>
+            <select aria-label="Masa pajak" className="tw-filter" value={month} onChange={(event) => updateContext({ month: Number(event.target.value) })}>
               {MONTHS.map((label, index) => <option key={label} value={index + 1}>{label}</option>)}
             </select>
-            <select aria-label="Tahun pajak" className="tw-filter" value={year} onChange={(event) => setYear(Number(event.target.value))}>
+            <select aria-label="Tahun pajak" className="tw-filter" value={year} onChange={(event) => updateContext({ year: Number(event.target.value) })}>
               {years.map((value) => <option key={value} value={value}>{value}</option>)}
             </select>
           </div>
           <div className="tw-toolbar-actions">
-            <input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Cari vendor, invoice, kode…" className="tw-filter tw-search" aria-label="Cari bukti potong" />
-            <select aria-label="Filter status" className="tw-filter" value={statusFilter} onChange={(event) => setStatusFilter(event.target.value as SlipStatus | 'all')}>
+            <input value={search} onChange={(event) => updateContext({ search: event.target.value })} placeholder="Cari vendor, invoice, kode…" className="tw-filter tw-search" aria-label="Cari bukti potong" />
+            <select aria-label="Filter status" className="tw-filter" value={statusFilter} onChange={(event) => updateContext({ status: event.target.value as SlipStatus | 'all' })}>
               <option value="all">Semua status</option>
               {(Object.keys(STATUS_LABELS) as SlipStatus[]).map((status) => <option key={status} value={status}>{STATUS_LABELS[status]}</option>)}
             </select>
@@ -183,14 +184,18 @@ export function SlipsSection({ entities, counterparties, canManage, notify }: {
         </div>
 
         {selectedEntity && !selectedEntity.is_active ? <div className="tw-notice">Pemotong nonaktif. Riwayat bukti potong tetap dapat dilihat; aktifkan pemotong untuk membuat atau mengubah bukti potong.</div> : null}
-        {loading && slips.length === 0 ? (
+        {loadError ? <LoadError message={loadError} onRetry={() => void load()} /> : loading && slips.length === 0 ? (
           <div style={{ padding: 24, color: 'var(--text-secondary)', fontSize: 13 }}>Memuat…</div>
         ) : slips.length === 0 ? (
           <div style={{ padding: 28, textAlign: 'center', color: 'var(--text-secondary)', fontSize: 13 }}>
-            Belum ada bukti potong untuk {MONTHS[month - 1]} {year}. Tambah manual atau impor REKAPAN di bagian Impor.
+            {search.trim() || statusFilter !== 'all' ? <>
+              <p>Tidak ada bukti potong yang cocok dengan pencarian atau filter status.</p>
+              <button type="button" style={secondaryButtonStyle} onClick={() => updateContext({ search: '', status: 'all' })}>Hapus filter</button>
+            </> : <>Belum ada bukti potong untuk {MONTHS[month - 1]} {year}. Tambah manual atau impor REKAPAN di bagian Impor.</>}
           </div>
         ) : (
-          <div className="table-scroll">
+          <div className="table-scroll tw-slip-table" tabIndex={0} role="region" aria-label="Daftar bukti potong, geser untuk melihat seluruh kolom">
+            <p className="tw-scroll-note">Geser tabel untuk melihat PPh, status, dan tindakan. Invoice tetap terlihat.</p>
             <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 1080, fontSize: 13 }}>
               <thead>
                 <tr>
@@ -264,12 +269,20 @@ export function SlipsSection({ entities, counterparties, canManage, notify }: {
         <SlipForm
           slip={editing === 'new' ? null : editing}
           entityId={entityId}
+          periodMonth={month}
+          periodYear={year}
           entities={editing === 'new' ? activeEntities : entities}
           counterparties={counterparties}
           objectCodes={objectCodes}
+          onCreateCounterparty={onCreateCounterparty}
           readOnly={!canEdit || (editing !== 'new' && editing.status !== 'draft' && editing.status !== 'ready')}
           onClose={() => setEditing(null)}
-          onSaved={async (text) => { notify({ type: 'success', text }); setEditing(null); await load(); }}
+          onSaved={async (text, saved) => {
+            notify({ type: 'success', text }); setEditing(null);
+            const changesContext = entityId !== saved.entity_id || year !== saved.period_year || month !== saved.period_month || search !== '' || statusFilter !== 'all';
+            updateContext({ entityId: saved.entity_id, year: saved.period_year, month: saved.period_month, search: '', status: 'all' });
+            if (!changesContext) await load();
+          }}
         />
       ) : null}
 
@@ -312,11 +325,11 @@ export function SlipsSection({ entities, counterparties, canManage, notify }: {
       ) : null}
 
       {deleting ? (
-        <ModalShell title="Hapus bukti potong?" subtitle={`${deleting.invoice_number} · ${deleting.counterparty_name}`} onClose={() => setDeleting(null)} maxWidth={460}>
+        <ModalShell title="Hapus bukti potong?" subtitle={`${deleting.invoice_number} · ${deleting.counterparty_name}`} onClose={() => setDeleting(null)} busy={removing} maxWidth={460}>
           <div className="tw-modal-body"><div style={{ fontSize: 13, color: 'var(--text-secondary)' }}>Bukti potong draft/siap akan dihapus permanen. Bukti potong yang sudah di-export tidak bisa dihapus dari sini.</div></div>
           <div className="tw-modal-actions">
-            <button type="button" style={secondaryButtonStyle} onClick={() => setDeleting(null)}>Batal</button>
-            <button type="button" style={{ ...primaryButtonStyle, background: 'var(--red-solid)' }} onClick={() => void remove()}>Hapus</button>
+            <button type="button" data-dialog-close style={secondaryButtonStyle} disabled={removing}>Batal</button>
+            <button type="button" style={{ ...primaryButtonStyle, background: 'var(--red-solid)' }} disabled={removing} onClick={() => void remove()}>{removing ? 'Menghapus…' : 'Hapus'}</button>
           </div>
         </ModalShell>
       ) : null}
@@ -395,7 +408,7 @@ function ExportModal({ entity, year, month, onClose, onChanged, notify }: {
   const isBpnr = form === 'BPNR';
 
   return (
-    <ModalShell title={isBpnr ? 'Export XML BPNR (PPh 26)' : 'Export XML BPPU'} subtitle={`${entity.legal_name} · ${MONTHS[month - 1]} ${year}`} onClose={onClose} maxWidth={980}>
+    <ModalShell title={isBpnr ? 'Export XML BPNR (PPh 26)' : 'Export XML BPPU'} subtitle={`${entity.legal_name} · ${MONTHS[month - 1]} ${year}`} onClose={onClose} busy={busy !== null} maxWidth={980}>
       <div className="tw-modal-body" style={{ display: 'grid', gap: 14 }}>
         <div role="radiogroup" aria-label="Formulir export" style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
           {EXPORT_FORM_OPTIONS.map((option) => (
@@ -510,7 +523,7 @@ function ExportModal({ entity, year, month, onClose, onChanged, notify }: {
         ) : null}
       </div>
       <div className="tw-modal-actions">
-        <button type="button" style={secondaryButtonStyle} onClick={onClose}>Tutup</button>
+        <button type="button" style={secondaryButtonStyle} data-dialog-close disabled={busy !== null}>Tutup</button>
         <button type="button" style={secondaryButtonStyle} disabled={loading || busy !== null} onClick={() => void refresh()}>Muat ulang</button>
         <button type="button" style={primaryButtonStyle} disabled={!canCreate} onClick={() => void create()}>
           {busy === 'create' ? 'Membuat batch…' : `Buat batch ${form} & unduh XML${previewMatches ? ` (${batchIds.length})` : ''}`}
@@ -536,7 +549,7 @@ function VoidModal({ slip, onClose, onDone }: { slip: TaxSlip; onClose: () => vo
     }
   };
   return (
-    <ModalShell title="Batalkan dari batch export?" subtitle={`${slip.invoice_number} · ${slip.counterparty_name} · batch #${slip.export_batch_id ?? '-'}`} onClose={onClose} maxWidth={520}>
+    <ModalShell title="Batalkan dari batch export?" subtitle={`${slip.invoice_number} · ${slip.counterparty_name} · batch #${slip.export_batch_id ?? '-'}`} onClose={onClose} busy={busy} dirty={reason.trim().length > 0} maxWidth={520}>
       <div className="tw-modal-body" style={{ display: 'grid', gap: 12 }}>
         <div style={{ fontSize: 13, color: 'var(--text-secondary)' }}>
           Bukti potong kembali ke status draft agar bisa diperbaiki dan masuk batch berikutnya. File XML batch yang sudah dibuat tidak berubah; pastikan bukti potong ini juga dibatalkan atau tidak diunggah di Coretax.
@@ -548,7 +561,7 @@ function VoidModal({ slip, onClose, onDone }: { slip: TaxSlip; onClose: () => vo
         {error ? <div style={{ color: 'var(--red)', fontSize: 12 }}>{error}</div> : null}
       </div>
       <div className="tw-modal-actions">
-        <button type="button" style={secondaryButtonStyle} onClick={onClose} disabled={busy}>Batal</button>
+        <button type="button" style={secondaryButtonStyle} data-dialog-close disabled={busy}>Batal</button>
         <button type="button" style={{ ...primaryButtonStyle, background: 'var(--yellow-solid)' }} disabled={busy || reason.trim().length < 5} onClick={() => void submit()}>Kembalikan ke draft</button>
       </div>
     </ModalShell>
@@ -579,10 +592,15 @@ type SlipFormState = {
   notes: string;
 };
 
-function SlipForm({ slip, entityId, entities, counterparties, objectCodes, readOnly, onClose, onSaved }: {
+function SlipForm({ slip, entityId, periodMonth, periodYear, entities, counterparties, objectCodes, readOnly, onClose, onSaved, onCreateCounterparty }: {
   slip: TaxSlip | null; entityId: number; entities: TaxWithholdingEntity[]; counterparties: TaxCounterparty[];
-  objectCodes: TaxObjectCodeOption[]; readOnly: boolean; onClose: () => void; onSaved: (text: string) => Promise<void>;
+  periodMonth: number; periodYear: number;
+  onCreateCounterparty?: () => void;
+  objectCodes: TaxObjectCodeOption[]; readOnly: boolean; onClose: () => void; onSaved: (text: string, saved: TaxSlip) => Promise<void>;
 }) {
+  const filingMonth = slip?.period_month ?? periodMonth;
+  const filingYear = slip?.period_year ?? periodYear;
+  const periodPrefix = `${filingYear}-${String(filingMonth).padStart(2, '0')}`;
   const [form, setForm] = useState<SlipFormState>(() => slip ? {
     entityId: slip.entity_id, counterpartyId: slip.counterparty_id, counterpartyQuery: slip.counterparty_name,
     invoiceDate: slip.invoice_date, invoiceNumber: slip.invoice_number, description: slip.description ?? '',
@@ -592,11 +610,13 @@ function SlipForm({ slip, entityId, entities, counterparties, objectCodes, readO
     documentType: slip.document_type, taxInvoiceNumber: slip.tax_invoice_number ?? '', documentDate: slip.document_date, withholdingDate: slip.withholding_date,
     accountCode: slip.account_code ?? '', accountName: slip.account_name ?? '', trelloUrl: slip.trello_url ?? '', notes: slip.notes ?? '',
   } : {
-    entityId, counterpartyId: null, counterpartyQuery: '', invoiceDate: todayIso(), invoiceNumber: '', description: '',
+    entityId, counterpartyId: null, counterpartyQuery: '', invoiceDate: todayIso().startsWith(periodPrefix) ? todayIso() : `${periodPrefix}-01`, invoiceNumber: '', description: '',
     objectCode: '', objectQuery: '', grossInputMode: 'total_incl_vat', grossInputAmount: '', additionalCost: '',
     rateOverridePercent: '', rateOverrideReason: '', documentType: 'CommercialInvoice', taxInvoiceNumber: '', documentDate: '', withholdingDate: '',
     accountCode: '', accountName: '', trelloUrl: '', notes: '',
   });
+  const initialForm = useRef(JSON.stringify(form));
+  const dirty = !readOnly && JSON.stringify(form) !== initialForm.current;
   const [preview, setPreview] = useState<Awaited<ReturnType<typeof previewTaxSlip>> | null>(null);
   const [previewError, setPreviewError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
@@ -644,17 +664,17 @@ function SlipForm({ slip, entityId, entities, counterparties, objectCodes, readO
     setSaving(true);
     setError(null);
     try {
-      await saveTaxSlip({
+      const saved = await saveTaxSlip({
         id: slip?.id ?? null, entityId: form.entityId, counterpartyId: form.counterpartyId, invoiceDate: form.invoiceDate,
         invoiceNumber: form.invoiceNumber, description: form.description, objectCode: form.objectCode,
         grossInputMode: form.grossInputMode, grossInputAmount: form.grossInputAmount, additionalCost: form.additionalCost || null,
         rateOverridePercent: form.rateOverridePercent || null, rateOverrideReason: form.rateOverrideReason || null,
         documentType: form.documentType, taxInvoiceNumber: form.documentType === 'TaxInvoice' ? form.taxInvoiceNumber : null,
         documentDate: form.documentDate || null, withholdingDate: form.withholdingDate || null,
-        periodMonth: slip?.period_month ?? null, periodYear: slip?.period_year ?? null,
+        periodMonth: filingMonth, periodYear: filingYear,
         accountCode: form.accountCode, accountName: form.accountName, trelloUrl: form.trelloUrl, notes: form.notes,
       });
-      await onSaved(slip ? 'Bukti potong diperbarui.' : 'Bukti potong ditambahkan.');
+      await onSaved(`${slip ? 'Bukti potong diperbarui' : 'Bukti potong ditambahkan'} pada ${MONTHS[saved.period_month - 1]} ${saved.period_year}.`, saved);
     } catch (err) {
       setError(errorText(err));
     } finally {
@@ -664,9 +684,10 @@ function SlipForm({ slip, entityId, entities, counterparties, objectCodes, readO
 
   const disabled = readOnly || saving;
   return (
-    <ModalShell title={slip ? (readOnly ? 'Detail bukti potong' : 'Edit bukti potong') : 'Tambah bukti potong'} subtitle={slip ? `Status ${STATUS_LABELS[slip.status]}${slip.coretax_slip_number ? ` · nomor Coretax ${slip.coretax_slip_number}` : ''}` : undefined} onClose={onClose} maxWidth={820}>
+    <ModalShell title={slip ? (readOnly ? 'Detail bukti potong' : 'Edit bukti potong') : 'Tambah bukti potong'} subtitle={`Masa pajak ${MONTHS[filingMonth - 1]} ${filingYear}${slip ? ` · ${STATUS_LABELS[slip.status]}${slip.coretax_slip_number ? ` · nomor Coretax ${slip.coretax_slip_number}` : ''}` : ''}`} onClose={onClose} dirty={dirty} busy={saving} maxWidth={820}>
       <div className="tw-modal-body">
-        <div className="tw-grid-2">
+        <p className="tw-context-note">{readOnly ? 'Tercatat' : 'Akan dicatat'} pada <strong>{MONTHS[filingMonth - 1]} {filingYear}</strong>. Tanggal invoice tidak mengubah masa pajak ini.</p>
+        <fieldset className="tw-form-section"><legend>Transaksi</legend><div className="tw-grid-2">
           <label style={labelStyle}>Pemotong
             <select style={inputStyle} value={form.entityId} onChange={(event) => update('entityId', Number(event.target.value))} disabled={disabled || Boolean(slip)}>
               {entities.map((entity) => <option key={entity.id} value={entity.id}>{entity.legal_name}</option>)}
@@ -706,7 +727,9 @@ function SlipForm({ slip, entityId, entities, counterparties, objectCodes, readO
                   </button>
                 ))}
               </div>
-            ) : null}
+            ) : form.counterpartyQuery.trim() && !readOnly ? <div style={{ color: 'var(--dim)', fontSize: 12 }}>Lawan transaksi tidak ditemukan. Periksa nama atau NPWP/NIK.
+              {onCreateCounterparty ? <button type="button" className="tw-action-button" style={{ color: 'var(--accent)' }} onClick={onCreateCounterparty}>Tambah lawan transaksi tanpa menutup form</button> : null}
+            </div> : null}
           </div>
 
           <div style={labelStyle} className="tw-span-2">Kode objek pajak
@@ -727,6 +750,8 @@ function SlipForm({ slip, entityId, entities, counterparties, objectCodes, readO
             ) : null}
           </div>
 
+        </div></fieldset>
+        <fieldset className="tw-form-section"><legend>Nominal & perhitungan</legend><div className="tw-grid-2">
           <label style={labelStyle}>Nominal
             <input style={inputStyle} value={form.grossInputAmount} onChange={(event) => update('grossInputAmount', event.target.value)} placeholder="7600" inputMode="decimal" disabled={disabled} />
           </label>
@@ -739,42 +764,7 @@ function SlipForm({ slip, entityId, entities, counterparties, objectCodes, readO
           <label style={labelStyle}>Biaya tambahan (tidak kena PPh)
             <input style={inputStyle} value={form.additionalCost} onChange={(event) => update('additionalCost', event.target.value)} placeholder="0" inputMode="decimal" disabled={disabled} />
           </label>
-          <label style={labelStyle}>Jenis dokumen referensi
-            <select style={inputStyle} value={form.documentType} onChange={(event) => update('documentType', event.target.value as DocumentType)} disabled={disabled}>
-              {DOCUMENT_TYPES.map((type) => <option key={type} value={type}>{DOCUMENT_LABELS[type]}</option>)}
-            </select>
-          </label>
-          {form.documentType === 'TaxInvoice' ? (
-            <label style={labelStyle}>Nomor faktur pajak (16 digit, menjadi nomor dokumen di XML)
-              <input style={inputStyle} value={form.taxInvoiceNumber} onChange={(event) => update('taxInvoiceNumber', event.target.value)} placeholder="010.000-26.12345678" inputMode="numeric" disabled={disabled} />
-            </label>
-          ) : null}
-          <label style={labelStyle}>Tarif manual (%) — kosongkan untuk otomatis
-            <input style={inputStyle} value={form.rateOverridePercent} onChange={(event) => update('rateOverridePercent', event.target.value)} placeholder="otomatis" inputMode="decimal" disabled={disabled} />
-          </label>
-          <label style={labelStyle}>Alasan tarif manual
-            <input style={inputStyle} value={form.rateOverrideReason} onChange={(event) => update('rateOverrideReason', event.target.value)} placeholder="wajib jika tarif diubah" disabled={disabled} />
-          </label>
-          <label style={labelStyle}>Tanggal dokumen (default = tanggal invoice)
-            <input type="date" style={inputStyle} value={form.documentDate} onChange={(event) => update('documentDate', event.target.value)} disabled={disabled} />
-          </label>
-          <label style={labelStyle}>Tanggal pemotongan (default = tanggal invoice)
-            <input type="date" style={inputStyle} value={form.withholdingDate} onChange={(event) => update('withholdingDate', event.target.value)} disabled={disabled} />
-          </label>
-          <label style={labelStyle}>No. akun
-            <input style={inputStyle} value={form.accountCode} onChange={(event) => update('accountCode', event.target.value)} disabled={disabled} />
-          </label>
-          <label style={labelStyle}>Nama akun
-            <input style={inputStyle} value={form.accountName} onChange={(event) => update('accountName', event.target.value)} disabled={disabled} />
-          </label>
-          <label style={labelStyle}>Link Trello
-            <input style={inputStyle} value={form.trelloUrl} onChange={(event) => update('trelloUrl', event.target.value)} disabled={disabled} />
-          </label>
-          <label style={labelStyle}>Catatan
-            <input style={inputStyle} value={form.notes} onChange={(event) => update('notes', event.target.value)} disabled={disabled} />
-          </label>
         </div>
-
         <div style={{ padding: 14, borderRadius: 10, background: 'var(--accent-subtle)', display: 'grid', gap: 8 }}>
           <div style={{ fontWeight: 700, fontSize: 13 }}>{readOnly && slip ? 'Angka tersimpan' : 'Perhitungan'}</div>
           {readOnly && slip ? (
@@ -806,10 +796,60 @@ function SlipForm({ slip, entityId, entities, counterparties, objectCodes, readO
             <div style={{ color: 'var(--dim)', fontSize: 12 }}>Isi lawan transaksi, kode objek, tanggal, dan nominal untuk melihat perhitungan.</div>
           )}
         </div>
-        {error ? <div style={{ color: 'var(--red)', fontSize: 13 }}>{error}</div> : null}
+        </fieldset>
+        <details className="tw-disclosure" open={Boolean(slip?.rate_source === 'override')}>
+          <summary>Tarif khusus <span>Opsional · perubahan tarif memerlukan alasan</span></summary>
+          <div className="tw-grid-2">
+          <label style={labelStyle}>Tarif manual (%) — kosongkan untuk otomatis
+            <input style={inputStyle} value={form.rateOverridePercent} onChange={(event) => update('rateOverridePercent', event.target.value)} placeholder="otomatis" inputMode="decimal" disabled={disabled} />
+          </label>
+          {form.rateOverridePercent.trim() !== '' ? <label style={labelStyle}>Alasan tarif manual
+            <input style={inputStyle} value={form.rateOverrideReason} onChange={(event) => update('rateOverrideReason', event.target.value)} placeholder="wajib jika tarif diubah" disabled={disabled} />
+          </label> : null}
+          </div>
+        </details>
+        <details className="tw-disclosure" open={Boolean(slip && (slip.document_type !== 'CommercialInvoice' || slip.withholding_date !== slip.invoice_date || slip.document_date !== slip.invoice_date))}>
+          <summary>Dokumen & tanggal tambahan <span>Default mengikuti invoice</span></summary>
+          <div className="tw-grid-2">
+          <label style={labelStyle}>Jenis dokumen referensi
+            <select style={inputStyle} value={form.documentType} onChange={(event) => update('documentType', event.target.value as DocumentType)} disabled={disabled}>
+              {DOCUMENT_TYPES.map((type) => <option key={type} value={type}>{DOCUMENT_LABELS[type]}</option>)}
+            </select>
+          </label>
+          {form.documentType === 'TaxInvoice' ? (
+            <label style={labelStyle}>Nomor faktur pajak (16 digit, menjadi nomor dokumen di XML)
+              <input style={inputStyle} value={form.taxInvoiceNumber} onChange={(event) => update('taxInvoiceNumber', event.target.value)} placeholder="010.000-26.12345678" inputMode="numeric" disabled={disabled} />
+            </label>
+          ) : null}
+          <label style={labelStyle}>Tanggal dokumen (default = tanggal invoice)
+            <input type="date" style={inputStyle} value={form.documentDate} onChange={(event) => update('documentDate', event.target.value)} disabled={disabled} />
+          </label>
+          <label style={labelStyle}>Tanggal pemotongan (default = tanggal invoice)
+            <input type="date" style={inputStyle} value={form.withholdingDate} onChange={(event) => update('withholdingDate', event.target.value)} disabled={disabled} />
+          </label>
+          </div>
+        </details>
+        <details className="tw-disclosure" open={Boolean(slip && (slip.account_code || slip.account_name || slip.trello_url || slip.notes))}>
+          <summary>Pembukuan & catatan <span>Opsional</span></summary>
+          <div className="tw-grid-2">
+          <label style={labelStyle}>No. akun
+            <input style={inputStyle} value={form.accountCode} onChange={(event) => update('accountCode', event.target.value)} disabled={disabled} />
+          </label>
+          <label style={labelStyle}>Nama akun
+            <input style={inputStyle} value={form.accountName} onChange={(event) => update('accountName', event.target.value)} disabled={disabled} />
+          </label>
+          <label style={labelStyle}>Link Trello
+            <input style={inputStyle} value={form.trelloUrl} onChange={(event) => update('trelloUrl', event.target.value)} disabled={disabled} />
+          </label>
+          <label style={labelStyle}>Catatan
+            <input style={inputStyle} value={form.notes} onChange={(event) => update('notes', event.target.value)} disabled={disabled} />
+          </label>
+          </div>
+        </details>
+        {error ? <div role="alert" style={{ color: 'var(--red)', fontSize: 13 }}>{error}</div> : null}
       </div>
       <div className="tw-modal-actions">
-        <button type="button" style={secondaryButtonStyle} onClick={onClose} disabled={saving}>{readOnly ? 'Tutup' : 'Batal'}</button>
+        <button type="button" data-dialog-close style={secondaryButtonStyle} disabled={saving}>{readOnly ? 'Tutup' : 'Batal'}</button>
         {!readOnly ? <button type="button" style={primaryButtonStyle} onClick={() => void submit()} disabled={saving}>{saving ? 'Menyimpan…' : 'Simpan'}</button> : null}
       </div>
     </ModalShell>

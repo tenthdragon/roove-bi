@@ -5,6 +5,7 @@ import { readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { transpileModule, ModuleKind, ScriptTarget, JsxEmit } from 'typescript';
 import * as domain from '../lib/tax-withholding-domain';
+import { TaxWorkProvider } from '../components/TaxWithholdingContext';
 
 const require = createRequire(import.meta.url);
 const { create, act } = require('react-test-renderer');
@@ -28,11 +29,11 @@ const previewResult = (gross: string, withholding: string) => ({ grossAmount: gr
 type Pending = { input: any; resolve: (value: any) => void; reject: (error: Error) => void };
 
 function harness() {
-  const pending: Pending[] = [], previews: Pending[] = [], notifications: any[] = [];
+  const pending: Pending[] = [], previews: Pending[] = [], saves: Pending[] = [], notifications: any[] = [];
   const timers = new Map<number, { fn: () => void; ms: number }>(); let timerId = 0;
   const previous = { window: globalThis.window, document: globalThis.document };
   Object.assign(globalThis, {
-    window: { setTimeout(fn: () => void, ms: number) { timers.set(++timerId, { fn, ms }); return timerId; }, clearTimeout(id: number) { timers.delete(id); } },
+    window: { addEventListener() {}, removeEventListener() {}, setTimeout(fn: () => void, ms: number) { timers.set(++timerId, { fn, ms }); return timerId; }, clearTimeout(id: number) { timers.delete(id); } },
     document: { body: { style: {} }, addEventListener() {}, removeEventListener() {} },
   });
   const deferred = (list: Pending[], input: any) => new Promise((resolve, reject) => list.push({ input, resolve, reject }));
@@ -41,6 +42,7 @@ function harness() {
       listTaxSlips: (input: any) => deferred(pending, input),
       getTaxObjectCodes: async () => [{ code: '24-104-24', name: 'Software', pph_article: 'pph23', rate_percent: 2 }],
       previewTaxSlip: (input: any) => deferred(previews, input),
+      saveTaxSlip: (input: any) => deferred(saves, input),
     },
     '@/lib/tax-withholding-domain': domain,
   };
@@ -51,12 +53,15 @@ function harness() {
   new Function('require', 'exports', 'React', source)((name: string) => stubs[name] ?? require(name), exports, React);
   const props = { entities, counterparties: [], canManage: true, notify: (message: any) => notifications.push(message) };
   let view: any;
+  let currentProps = props;
+  const tree = (visible = true) => React.createElement(TaxWorkProvider, null, visible ? React.createElement(exports.SlipsSection, currentProps) : null);
   return {
-    pending, previews, notifications,
+    pending, previews, saves, notifications,
     get root() { return view.root; },
     text: () => JSON.stringify(view.toJSON()),
-    async mount(overrides = {}) { await act(async () => { view = create(React.createElement(exports.SlipsSection, { ...props, ...overrides })); await tick(); }); },
-    async update(overrides = {}) { await act(async () => { view.update(React.createElement(exports.SlipsSection, { ...props, ...overrides })); await tick(); }); },
+    async mount(overrides = {}) { currentProps = { ...props, ...overrides }; await act(async () => { view = create(tree()); await tick(); }); },
+    async update(overrides = {}) { currentProps = { ...props, ...overrides }; await act(async () => { view.update(tree()); await tick(); }); },
+    async switchSection(visible: boolean) { await act(async () => { view.update(tree(visible)); await tick(); }); },
     async previewTimer() { await act(async () => { for (const [id, timer] of [...timers]) if (timer.ms === 350) { timers.delete(id); timer.fn(); } await tick(); }); },
     async close() { try { await act(async () => view?.unmount()); } finally { Object.assign(globalThis, previous); } },
   };
@@ -82,6 +87,96 @@ test('slip list ignores late responses and errors after entity/period selection 
     assert.match(h.text(), /Memuat/); assert.deepEqual(h.notifications, []);
     await settle(h.pending[3], result(2, 'FEBRUARY'));
     assert.match(h.text(), /FEBRUARY/);
+  } finally { await h.close(); }
+});
+
+test('working PT, period and filters survive visiting another section', async () => {
+  const h = harness();
+  try {
+    await h.mount();
+    await act(async () => {
+      h.root.findByProps({ 'aria-label': 'Pemotong' }).props.onChange({ target: { value: '2' } });
+      h.root.findByProps({ 'aria-label': 'Masa pajak' }).props.onChange({ target: { value: '10' } });
+      h.root.findByProps({ 'aria-label': 'Tahun pajak' }).props.onChange({ target: { value: '2025' } });
+      h.root.findByProps({ 'aria-label': 'Cari bukti potong' }).props.onChange({ target: { value: 'INV-OLD' } });
+    });
+    await h.switchSection(false);
+    await h.switchSection(true);
+    assert.deepEqual(h.pending.at(-1)!.input, { entityId: 2, year: 2025, month: 10, status: 'all', search: 'INV-OLD' });
+    assert.equal(h.root.findByProps({ 'aria-label': 'Pemotong' }).props.value, 2);
+  } finally { await h.close(); }
+});
+
+test('new slip uses selected filing period even when invoice date differs, then reveals the saved PT', async () => {
+  const h = harness();
+  try {
+    await h.mount({ counterparties: [{ id: 1, name: 'VENDOR', identity_type: 'npwp', identity_number: '0012345678901234', is_active: true, is_pkp: false, country_code: 'IDN', facilities: [] }] });
+    await act(async () => {
+      h.root.findByProps({ 'aria-label': 'Masa pajak' }).props.onChange({ target: { value: '10' } });
+      h.root.findByProps({ 'aria-label': 'Tahun pajak' }).props.onChange({ target: { value: '2025' } });
+    });
+    await act(async () => button(h, '+ Tambah').props.onClick());
+    assert.match(h.text(), /Oktober 2025/);
+    const dialog = h.root.findByProps({ role: 'dialog' });
+    const date = dialog.findAllByProps({ type: 'date' })[0];
+    assert.equal(date.props.value, '2025-10-01');
+    await act(async () => {
+      date.props.onChange({ target: { value: '2025-11-02' } });
+      dialog.findAllByType('select')[0].props.onChange({ target: { value: '2' } });
+      dialog.findByProps({ placeholder: 'INV/2026/10/0001' }).props.onChange({ target: { value: 'INV-NEW' } });
+      dialog.findByProps({ 'aria-label': 'Cari lawan transaksi' }).props.onChange({ target: { value: 'VENDOR' } });
+      dialog.findByProps({ 'aria-label': 'Cari kode objek pajak' }).props.onChange({ target: { value: '24-104-24' } });
+      dialog.findByProps({ placeholder: '7600' }).props.onChange({ target: { value: '1000' } });
+    });
+    await act(async () => {
+      h.root.findAllByType('button').find((b: any) => b.children[0] === 'VENDOR')!.props.onClick();
+      h.root.findAllByType('button').find((b: any) => b.children.some((c: any) => c?.type === 'span' && c.children[0] === '24-104-24'))!.props.onClick();
+    });
+    await act(async () => button(h, 'Simpan').props.onClick());
+    assert.equal(h.saves[0].input.periodMonth, 10);
+    assert.equal(h.saves[0].input.periodYear, 2025);
+    assert.equal(h.saves[0].input.invoiceDate, '2025-11-02');
+    await settle(h.saves[0], { ...slip(2, 'INV-NEW'), period_month: 10, period_year: 2025 });
+    assert.deepEqual(h.pending.at(-1)!.input, { entityId: 2, year: 2025, month: 10, status: 'all', search: '' });
+    assert.match(h.notifications.at(-1).text, /Oktober 2025/);
+  } finally { await h.close(); }
+});
+
+test('load errors persist with retry and do not claim the period is empty; filtered empty offers reset', async () => {
+  const h = harness();
+  try {
+    await h.mount();
+    await act(async () => h.pending[0].reject(new Error('Koneksi terputus')));
+    assert.match(h.text(), /Koneksi terputus/);
+    assert.doesNotMatch(h.text(), /Belum ada bukti potong/);
+    await act(async () => button(h, 'Coba lagi').props.onClick());
+    await settle(h.pending.at(-1)!, result(1, 'RECOVERED'));
+    assert.match(h.text(), /RECOVERED/);
+    await act(async () => h.root.findByProps({ 'aria-label': 'Cari bukti potong' }).props.onChange({ target: { value: 'NO-MATCH' } }));
+    await settle(h.pending.at(-1)!, { slips: [], totals: { ...result(1, '').totals, count: 0 } });
+    assert.match(h.text(), /Tidak ada bukti potong yang cocok/);
+    assert.doesNotMatch(h.text(), /Belum ada bukti potong/);
+    await act(async () => button(h, 'Hapus filter').props.onClick());
+    assert.equal(h.pending.at(-1)!.input.search, '');
+  } finally { await h.close(); }
+});
+
+test('adding a missing counterparty keeps the open slip inputs when the master list refreshes', async () => {
+  const h = harness();
+  let requested = 0;
+  try {
+    await h.mount({ onCreateCounterparty: () => requested++ });
+    await act(async () => button(h, '+ Tambah').props.onClick());
+    await act(async () => {
+      h.root.findByProps({ placeholder: 'INV/2026/10/0001' }).props.onChange({ target: { value: 'KEEP-INVOICE' } });
+      h.root.findByProps({ 'aria-label': 'Cari lawan transaksi' }).props.onChange({ target: { value: 'VENDOR BARU' } });
+    });
+    await act(async () => button(h, 'Tambah lawan transaksi tanpa menutup form').props.onClick());
+    assert.equal(requested, 1);
+    await h.update({ counterparties: [{ id: 9, name: 'VENDOR BARU', identity_type: 'npwp', identity_number: '0012345678901234', is_active: true, is_pkp: false, country_code: 'IDN', facilities: [] }] });
+    assert.equal(h.root.findByProps({ placeholder: 'INV/2026/10/0001' }).props.value, 'KEEP-INVOICE');
+    await act(async () => h.root.findAllByType('button').find((b: any) => b.children[0] === 'VENDOR BARU')!.props.onClick());
+    assert.equal(h.root.findByProps({ 'aria-label': 'Cari lawan transaksi' }).props.value, 'VENDOR BARU');
   } finally { await h.close(); }
 });
 

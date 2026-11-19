@@ -7,7 +7,7 @@ import * as XLSX from 'xlsx';
 const require = createRequire(import.meta.url);
 const A = '00000000-0000-4000-8000-000000000001';
 const B = '00000000-0000-4000-8000-000000000002';
-let activeWorkspace = A, displayedWorkspace = A, role = 'admin', denied = false;
+let activeWorkspace = A, displayedWorkspace = A, role = 'admin', denied = false, failBootstrap = false;
 let db: Record<string, any[]> = {}, reads = 0, writes = 0;
 function from(table: string) {
   const filters: Record<string, unknown> = {};
@@ -63,7 +63,7 @@ function form(rows: unknown[][], workspace: string | null = A) {
   return data;
 }
 const vendor = (overrides = {}) => ({ id: 1, workspace_id: A, name: 'VENDOR', identity_type: 'npwp', identity_number: '0210893970035000', is_pkp: false, country_code: 'IDN', address: null, notes: null, ...overrides });
-beforeEach(() => { activeWorkspace = A; displayedWorkspace = A; role = 'admin'; denied = false; reads = 0; writes = 0; db = { tax_counterparties: [], tax_counterparty_facilities: [] }; });
+beforeEach(() => { activeWorkspace = A; displayedWorkspace = A; role = 'admin'; denied = false; failBootstrap = false; reads = 0; writes = 0; db = { tax_counterparties: [], tax_counterparty_facilities: [] }; });
 
 test('import preserves renewed certificates and repeated imports remain idempotent', async () => {
   db.tax_counterparties = [vendor()];
@@ -131,7 +131,10 @@ test('preview and commit reject stale/missing workspace and unauthorized roles b
 // Only the authenticated workspace and database transport are synthetic.
 Object.assign(globalThis, { React });
 require.cache[require.resolve('../lib/WorkspaceContext')] = { exports: { useWorkspace: () => ({ activeWorkspace: { id: displayedWorkspace, name: displayedWorkspace === A ? 'Alpha' : 'Beta' } }) } } as any;
-require.cache[require.resolve('../lib/tax-withholding-actions')] = { exports: { ...actions, getTaxWithholdingBootstrap: async () => ({ canManage: true, businesses: [], entities: [], counterparties: [], objectCodeCount: 210 }) } } as any;
+require.cache[require.resolve('../lib/tax-withholding-actions')] = { exports: { ...actions, getTaxWithholdingBootstrap: async () => {
+  if (failBootstrap) throw new Error('Master belum dapat dimuat ulang');
+  return { canManage: true, businesses: [], entities: [], counterparties: [], objectCodeCount: 210 };
+} } } as any;
 const Page = require('../app/dashboard/tax-withholding/page').default;
 const { create, act } = require('react-test-renderer');
 
@@ -179,6 +182,30 @@ test('two tabs: page workspace is sent before preview and commit; switching the 
     await act(async () => renderer.update(<Page />));
     const commit = renderer.root.findAllByType('button').find((b: any) => b.children.join('') === 'Impor sekarang');
     assert.equal(commit.props.disabled, true);
+  } finally {
+    if (renderer) await act(async () => renderer.unmount());
+    if (priorWindow) Object.defineProperty(globalThis, 'window', priorWindow); else Reflect.deleteProperty(globalThis, 'window');
+  }
+});
+
+test('a failed master refresh preserves the mounted form and its unsaved inputs', async () => {
+  const priorWindow = Object.getOwnPropertyDescriptor(globalThis, 'window');
+  Object.defineProperty(globalThis, 'window', { configurable: true, value: { setTimeout, clearTimeout, addEventListener() {}, removeEventListener() {} } });
+  let renderer: any;
+  const click = async (label: string) => act(async () => renderer.root.findAllByType('button').find((b: any) => b.children.join('') === label).props.onClick());
+  try {
+    await act(async () => { renderer = create(<Page />); });
+    await click('Lawan Transaksi');
+    await click('+ Tambah');
+    const nameInput = () => renderer.root.findByType('dialog').findAllByType('input')[0];
+    await act(async () => nameInput().props.onChange({ target: { value: 'ISIAN BELUM DISIMPAN' } }));
+    failBootstrap = true;
+    await act(async () => renderer.root.find((node: any) => node.type?.name === 'CounterpartiesSection').props.onChanged());
+    assert.match(JSON.stringify(renderer.toJSON()), /Master belum dapat dimuat ulang/);
+    assert.equal(nameInput().props.value, 'ISIAN BELUM DISIMPAN');
+    failBootstrap = false;
+    await click('Coba lagi');
+    assert.equal(nameInput().props.value, 'ISIAN BELUM DISIMPAN');
   } finally {
     if (renderer) await act(async () => renderer.unmount());
     if (priorWindow) Object.defineProperty(globalThis, 'window', priorWindow); else Reflect.deleteProperty(globalThis, 'window');

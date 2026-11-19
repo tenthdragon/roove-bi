@@ -9,9 +9,11 @@ import { getTaxYearSummary, type TaxSummaryGroup, type TaxYearSummary } from '@/
 import { TAX_ARTICLE_LABELS } from '@/lib/tax-withholding-domain';
 import { listTaxPaymentRecords, type TaxPaymentRecord } from '@/lib/tax-withholding-payment-actions';
 import { paymentGroupKey, withPaymentOnlyGroups } from '@/lib/tax-withholding-payment';
+import { useTaxWorkContext } from '@/components/TaxWithholdingContext';
 import { PaymentCell, PaymentModal, type PaymentTarget } from '@/components/TaxWithholdingPayment';
 import {
   MONTHS,
+  LoadError,
   SummaryCard,
   cellStyle,
   downloadTextFile,
@@ -89,25 +91,20 @@ function paidTotal(payments: Map<string, TaxPaymentRecord[]>, group: TaxSummaryG
 
 export function TaxRecapSection({ entities, canManage, notify }: { entities: TaxWithholdingEntity[]; canManage: boolean; notify: Notify }) {
   const now = useMemo(() => new Date(), []);
-  const activeEntities = useMemo(() => entities.filter((entity) => entity.is_active), [entities]);
-  const [entityId, setEntityId] = useState<number>(activeEntities[0]?.id ?? entities[0]?.id ?? 0);
-  const [year, setYear] = useState(now.getFullYear());
+  const { entityId, year, recapView: view, update: updateContext } = useTaxWorkContext(entities);
   const [summary, setSummary] = useState<TaxYearSummary | null>(null);
   const [records, setRecords] = useState<TaxPaymentRecord[]>([]);
   const [target, setTarget] = useState<PaymentTarget | null>(null);
   const [loading, setLoading] = useState(false);
-  const [view, setView] = useState<'months' | 'year'>('months');
+  const [loadError, setLoadError] = useState<string | null>(null);
   const loadSequence = useRef(0);
-
-  useEffect(() => {
-    if (!entities.some((entity) => entity.id === entityId)) setEntityId(activeEntities[0]?.id ?? entities[0]?.id ?? 0);
-  }, [entities, activeEntities, entityId]);
 
   const load = useCallback(async () => {
     const sequence = ++loadSequence.current;
     setSummary(null);
     setRecords([]);
-    if (!entityId) return;
+    setLoadError(null);
+    if (!entityId) { setLoading(false); return; }
     setLoading(true);
     try {
       const [result, payments] = await Promise.all([getTaxYearSummary({ entityId, year }), listTaxPaymentRecords({ entityId, year })]);
@@ -116,11 +113,11 @@ export function TaxRecapSection({ entities, canManage, notify }: { entities: Tax
       setSummary(withPaymentOnlyGroups(result, payments));
       setRecords(payments);
     } catch (error) {
-      if (sequence === loadSequence.current) notify({ type: 'error', text: errorText(error) });
+      if (sequence === loadSequence.current) setLoadError(errorText(error));
     } finally {
       if (sequence === loadSequence.current) setLoading(false);
     }
-  }, [entityId, year, notify]);
+  }, [entityId, year]);
 
   useEffect(() => {
     void load();
@@ -154,7 +151,7 @@ export function TaxRecapSection({ entities, canManage, notify }: { entities: Tax
   return (
     <>
       {summary ? (
-        <div className="tw-summary-grid">
+        <div className="tw-summary-grid tw-summary-grid-recap">
           <SummaryCard label={`Bukti potong ${summary.year}`} value={summary.count} hint={`${reportedCount} sudah dilaporkan ke Coretax`} />
           <SummaryCard label="Total DPP" value={formatMoney(summary.grossAmount)} />
           <SummaryCard label="Total PPh dipotong" value={formatMoney(summary.withholdingAmount)} />
@@ -165,13 +162,13 @@ export function TaxRecapSection({ entities, canManage, notify }: { entities: Tax
       <section className="tw-section">
         <div className="tw-toolbar">
           <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
-            <select aria-label="Pemotong" className="tw-filter" value={entityId} onChange={(event) => setEntityId(Number(event.target.value))}>
+            <select aria-label="Pemotong" className="tw-filter" value={entityId} onChange={(event) => updateContext({ entityId: Number(event.target.value) })}>
               {entities.map((entity) => <option key={entity.id} value={entity.id}>{entity.legal_name}{entity.is_active ? '' : ' (nonaktif)'}</option>)}
             </select>
-            <select aria-label="Tahun pajak" className="tw-filter" value={year} onChange={(event) => setYear(Number(event.target.value))}>
+            <select aria-label="Tahun pajak" className="tw-filter" value={year} onChange={(event) => updateContext({ year: Number(event.target.value) })}>
               {years.map((value) => <option key={value} value={value}>{value}</option>)}
             </select>
-            <select aria-label="Tampilan rekap" className="tw-filter" value={view} onChange={(event) => setView(event.target.value as 'months' | 'year')}>
+            <select aria-label="Tampilan rekap" className="tw-filter" value={view} onChange={(event) => updateContext({ recapView: event.target.value as 'months' | 'year' })}>
               <option value="months">Per masa</option>
               <option value="year">Total tahun</option>
             </select>
@@ -183,12 +180,12 @@ export function TaxRecapSection({ entities, canManage, notify }: { entities: Tax
         <div style={{ padding: '10px 18px 0', fontSize: 12, color: 'var(--text-secondary)' }}>
           Satu baris per pasal, KAP dan KJS adalah satu ID Billing per masa. PPh dijumlahkan dari bukti potong yang tersimpan; kolom &ldquo;belum dilaporkan&rdquo; menandai bukti potong yang belum punya nomor Coretax. Kolom &ldquo;Setoran&rdquo; mencatat ID Billing dan NTPN; NTPN yang tercatat mengubah bukti potong kelompok itu menjadi dibayar.
         </div>
-        {loading && !summary ? (
+        {loadError ? <LoadError message={loadError} onRetry={() => void load()} /> : loading && !summary ? (
           <div style={{ padding: 24, color: 'var(--text-secondary)', fontSize: 13 }}>Memuat…</div>
         ) : summary && summary.months.length === 0 ? (
           <div style={{ padding: 28, textAlign: 'center', color: 'var(--text-secondary)', fontSize: 13 }}>Belum ada bukti potong untuk tahun {summary.year}.</div>
         ) : summary ? (
-          <div className="table-scroll">
+          <div className="table-scroll" tabIndex={0} role="region" aria-label="Rekap setor, geser untuk melihat seluruh kolom">
             <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 1080, fontSize: 13 }}>
               <thead>
                 <tr>

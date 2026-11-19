@@ -4,7 +4,7 @@
 // and the modal creates or edits a kode billing, records or clears its NTPN,
 // or deletes an unpaid record.
 
-import React, { useState } from 'react';
+import React, { useRef, useState } from 'react';
 import type { TaxSummaryGroup } from '@/lib/tax-withholding-coretax-actions';
 import {
   clearTaxPaymentNtpn,
@@ -90,6 +90,9 @@ export function PaymentModal({ entityId, year, target, onClose, onDone }: {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  const initialValues = useRef(JSON.stringify({ billingId, amount, createdAt, validUntil, notes, ntpn, paidAt, paidAmount }));
+  const dirty = JSON.stringify({ billingId, amount, createdAt, validUntil, notes, ntpn, paidAt, paidAmount }) !== initialValues.current;
+
   const subtitle = `${MONTHS[month - 1]} ${year} · ${TAX_ARTICLE_LABELS[group.article]} · KAP ${group.kap ?? '—'} / KJS ${group.kjs ?? '—'} · PPh terutang ${formatMoney(group.withholdingAmount)}`;
   const billingValid = BILLING_ID_PATTERN.test(normalizeBillingId(billingId));
   const ntpnValid = NTPN_PATTERN.test(normalizeNtpn(ntpn));
@@ -107,13 +110,13 @@ export function PaymentModal({ entityId, year, target, onClose, onDone }: {
 
   if (mode === 'delete' && record) {
     return (
-      <ModalShell title="Hapus ID Billing?" subtitle={subtitle} onClose={onClose} maxWidth={480}>
+      <ModalShell title="Hapus ID Billing?" subtitle={subtitle} onClose={onClose} busy={busy} dirty={dirty} maxWidth={480}>
         <div className="tw-modal-body" style={{ display: 'grid', gap: 10 }}>
           <div style={{ fontSize: 13, color: 'var(--text-secondary)' }}>ID Billing <span className="tw-mono">{record.billing_id}</span> ({formatMoney(record.billing_amount)}) dihapus dari catatan. Hanya catatan tanpa NTPN yang bisa dihapus.</div>
           {error ? <div style={{ color: 'var(--red)', fontSize: 12 }}>{error}</div> : null}
         </div>
         <div className="tw-modal-actions">
-          <button type="button" style={secondaryButtonStyle} onClick={onClose} disabled={busy}>Batal</button>
+          <button type="button" style={secondaryButtonStyle} data-dialog-close disabled={busy}>Batal</button>
           <button type="button" style={{ ...primaryButtonStyle, background: 'var(--red-solid)' }} disabled={busy} onClick={() => void run(async () => { await deleteTaxPaymentRecord({ id: record.id, version: record.updated_at }); return 'ID Billing dihapus.'; })}>Hapus</button>
         </div>
       </ModalShell>
@@ -122,13 +125,13 @@ export function PaymentModal({ entityId, year, target, onClose, onDone }: {
 
   if (mode === 'clear-ntpn' && record) {
     return (
-      <ModalShell title="Hapus NTPN?" subtitle={subtitle} onClose={onClose} maxWidth={480}>
+      <ModalShell title="Hapus NTPN?" subtitle={subtitle} onClose={onClose} busy={busy} dirty={dirty} maxWidth={480}>
         <div className="tw-modal-body" style={{ display: 'grid', gap: 10 }}>
           <div style={{ fontSize: 13, color: 'var(--text-secondary)' }}>NTPN <span className="tw-mono">{record.ntpn}</span> dihapus dari ID Billing <span className="tw-mono">{record.billing_id}</span>. Bukti potong kelompok ini kembali berstatus dilaporkan bila tidak ada setoran lain yang menutupnya.</div>
           {error ? <div style={{ color: 'var(--red)', fontSize: 12 }}>{error}</div> : null}
         </div>
         <div className="tw-modal-actions">
-          <button type="button" style={secondaryButtonStyle} onClick={onClose} disabled={busy}>Batal</button>
+          <button type="button" style={secondaryButtonStyle} data-dialog-close disabled={busy}>Batal</button>
           <button type="button" style={{ ...primaryButtonStyle, background: 'var(--yellow-solid)' }} disabled={busy} onClick={() => void run(async () => { const result = await clearTaxPaymentNtpn({ id: record.id, version: record.updated_at }); return `NTPN dihapus; ${result.slipsReverted} bukti potong kembali dilaporkan.`; })}>Hapus NTPN</button>
         </div>
       </ModalShell>
@@ -137,14 +140,14 @@ export function PaymentModal({ entityId, year, target, onClose, onDone }: {
 
   if (mode === 'ntpn' && record) {
     return (
-      <ModalShell title="Catat NTPN" subtitle={subtitle} onClose={onClose} maxWidth={520}>
+      <ModalShell title="Catat NTPN" subtitle={subtitle} onClose={onClose} busy={busy} dirty={dirty} maxWidth={520}>
         <div className="tw-modal-body" style={{ display: 'grid', gap: 12 }}>
           <div style={{ fontSize: 13, color: 'var(--text-secondary)' }}>ID Billing <span className="tw-mono">{record.billing_id}</span> · {formatMoney(record.billing_amount)}. Setelah NTPN tercatat, bukti potong dilaporkan di kelompok ini berstatus dibayar.</div>
           <label style={labelStyle}>
             NTPN
             <input value={ntpn} onChange={(event) => setNtpn(event.target.value)} style={{ ...inputStyle, fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace', textTransform: 'uppercase' }} placeholder="16 huruf/angka" />
           </label>
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+          <div className="tw-grid-2">
             <label style={labelStyle}>
               Tanggal setor
               <input type="date" value={paidAt} onChange={(event) => setPaidAt(event.target.value)} style={inputStyle} />
@@ -158,7 +161,7 @@ export function PaymentModal({ entityId, year, target, onClose, onDone }: {
           {error ? <div style={{ color: 'var(--red)', fontSize: 12 }}>{error}</div> : null}
         </div>
         <div className="tw-modal-actions">
-          <button type="button" style={secondaryButtonStyle} onClick={onClose} disabled={busy}>Batal</button>
+          <button type="button" style={secondaryButtonStyle} data-dialog-close disabled={busy}>Batal</button>
           <button type="button" style={primaryButtonStyle} disabled={busy || !ntpnValid || !paidAt || !paidAmount} onClick={() => void run(async () => {
             const result = await recordTaxPaymentNtpn({ id: record.id, version: record.updated_at, ntpn, paidAt, paidAmount });
             return `NTPN dicatat; ${result.slipsPaid} bukti potong berstatus dibayar.`;
@@ -169,14 +172,14 @@ export function PaymentModal({ entityId, year, target, onClose, onDone }: {
   }
 
   return (
-    <ModalShell title={record ? 'Ubah ID Billing' : 'Buat ID Billing'} subtitle={subtitle} onClose={onClose} maxWidth={520}>
+    <ModalShell title={record ? 'Ubah ID Billing' : 'Catat ID Billing'} subtitle={subtitle} onClose={onClose} busy={busy} dirty={dirty} maxWidth={520}>
       <div className="tw-modal-body" style={{ display: 'grid', gap: 12 }}>
         <div style={{ fontSize: 13, color: 'var(--text-secondary)' }}>Catat kode billing yang dibuat di DJP Online / Coretax untuk kelompok ini. Jumlah diisi dari PPh terutang; ubah bila setoran dipecah atau ada pembetulan.</div>
         <label style={labelStyle}>
           ID Billing (15 digit)
           <input value={billingId} onChange={(event) => setBillingId(event.target.value)} style={{ ...inputStyle, fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace' }} placeholder="012345678901234" />
         </label>
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+        <div className="tw-grid-2">
           <label style={labelStyle}>
             Jumlah (Rp)
             <input inputMode="numeric" value={amount} onChange={(event) => setAmount(event.target.value.replace(/[^\d]/g, ''))} style={inputStyle} />
@@ -198,7 +201,7 @@ export function PaymentModal({ entityId, year, target, onClose, onDone }: {
         {error ? <div style={{ color: 'var(--red)', fontSize: 12 }}>{error}</div> : null}
       </div>
       <div className="tw-modal-actions">
-        <button type="button" style={secondaryButtonStyle} onClick={onClose} disabled={busy}>Batal</button>
+        <button type="button" style={secondaryButtonStyle} data-dialog-close disabled={busy}>Batal</button>
         <button type="button" style={primaryButtonStyle} disabled={busy || !billingValid || !amount || !createdAt || group.kap === null || group.kjs === null} onClick={() => void run(async () => {
           await saveTaxPaymentRecord({
             id: record?.id ?? null, version: record?.updated_at ?? null, entityId, year, month, article: group.article,
