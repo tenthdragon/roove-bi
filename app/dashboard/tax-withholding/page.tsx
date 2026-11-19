@@ -354,7 +354,7 @@ function TaxWithholdingContent({ subTab, setSubTab }: { subTab: SubTab; setSubTa
               <RekapanImportSection key={`rekapan-${activeWorkspace.id}`} entities={data.entities} workspaceId={activeWorkspace.id} canManage={data.canManage} notify={setMessage} onImported={() => { void load(); }} />
             </>
           ) : null}
-          {creatingCounterparty && data.canManage ? <CounterpartyModal counterparty={null} today={today} onClose={() => setCreatingCounterparty(false)} onSaved={async (text) => { await load(); setMessage({ type: 'success', text }); setCreatingCounterparty(false); }} notify={setMessage} /> : null}
+          {creatingCounterparty && data.canManage ? <CounterpartyModal counterparty={null} today={today} onClose={() => setCreatingCounterparty(false)} onSaved={async (text) => { await load(); setMessage({ type: 'success', text }); }} notify={setMessage} /> : null}
         </>
       ) : null}
 

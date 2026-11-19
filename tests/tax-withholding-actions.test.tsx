@@ -188,6 +188,26 @@ test('two tabs: page workspace is sent before preview and commit; switching the 
   }
 });
 
+test('inline counterparty save keeps its editor mounted so facilities can be added before closing', async () => {
+  const priorWindow = Object.getOwnPropertyDescriptor(globalThis, 'window');
+  Object.defineProperty(globalThis, 'window', { configurable: true, value: { setTimeout, clearTimeout, addEventListener() {}, removeEventListener() {} } });
+  let renderer: any;
+  try {
+    await act(async () => { renderer = create(<Page />); });
+    await act(async () => renderer.root.find((node: any) => node.type?.name === 'SlipsSection').props.onCreateCounterparty());
+    const editor = renderer.root.find((node: any) => node.type?.name === 'CounterpartyModal');
+    await act(async () => editor.props.onSaved('Lawan transaksi ditambahkan. Anda bisa menambah fasilitas sekarang.'));
+    assert.equal(renderer.root.findAll((node: any) => node.type?.name === 'CounterpartyModal').length, 1);
+    await act(async () => editor.props.onSaved('Fasilitas ditambahkan.'));
+    assert.equal(renderer.root.findAll((node: any) => node.type?.name === 'CounterpartyModal').length, 1);
+    await act(async () => editor.props.onClose());
+    assert.equal(renderer.root.findAllByType('dialog').length, 0);
+  } finally {
+    if (renderer) await act(async () => renderer.unmount());
+    if (priorWindow) Object.defineProperty(globalThis, 'window', priorWindow); else Reflect.deleteProperty(globalThis, 'window');
+  }
+});
+
 test('a failed master refresh preserves the mounted form and its unsaved inputs', async () => {
   const priorWindow = Object.getOwnPropertyDescriptor(globalThis, 'window');
   Object.defineProperty(globalThis, 'window', { configurable: true, value: { setTimeout, clearTimeout, addEventListener() {}, removeEventListener() {} } });
