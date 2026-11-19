@@ -35,7 +35,7 @@ export async function archiveSource(input:{workspace:string;actorId:string;actor
 }
 export async function archiveExport(input:{workspace:string;batch:BatchRow;actorId:string;actorName:string;csv:string;projection:Projection;catalogVersion:string;decisions:unknown},db=createServiceSupabase()){
   const id=randomUUID(),prefix=`${input.workspace}/${input.batch.id}/${id}`;
-  const snapshot=JSON.stringify({parserVersion:4,batchId:input.batch.id,sourceSha256:input.batch.source_sha256,catalogVersion:input.catalogVersion,decisions:input.decisions,...input.projection});
+  const snapshot=JSON.stringify({parserVersion:5,batchId:input.batch.id,sourceSha256:input.batch.source_sha256,catalogVersion:input.catalogVersion,decisions:input.decisions,...input.projection});
   const objects=[{path:`${prefix}/output.csv`,body:input.csv,type:'text/csv'},{path:`${prefix}/snapshot.json`,body:snapshot,type:'application/json'}];
   const uploaded:string[]=[];
   try {

@@ -1,5 +1,5 @@
 import { COURIER_SERVICE_OPTIONS, normalizeCourierText, validateParserConfig } from './config';
-import { centsText } from './money';
+import { allocateUnitPrices, centsText } from './money';
 import { orderAddress } from './address';
 import { resolveStore } from './routing';
 import { CSV_HEADERS, type Catalog, type CsvRow, type Edits, type ParsedFile, type ParserConfig, type PreviewLine, type PreviewOrder, type Projection } from './types';
@@ -64,15 +64,23 @@ export function projectMarketplace(input: { file: ParsedFile; account: string; d
       const sku = line.sku, classified = classifySku(sku,account,config);
       const lineErrors = [...line.errors];
       const q = line.quantity, unit = line.unitCents;
-      if (q === null || !Number.isSafeInteger(q) || q <= 0) lineErrors.push('Quantity harus berupa bilangan bulat positif.');
-      if (unit === null) lineErrors.push(line.totalCents !== null ? 'Harga per unit membutuhkan pecahan di bawah Rp0,01; lengkapi nilai yang menjaga total.' : 'Harga satuan belum tersedia.');
+      const validQuantity = q !== null && Number.isSafeInteger(q) && q > 0 && q <= 1000000;
+      const validUnit = unit !== null && Number.isSafeInteger(unit) && unit >= 0;
+      let priceAllocations: PreviewLine['priceAllocations'] = validQuantity && validUnit ? [{ quantity: q, unitCents: unit }] : [];
+      // Also handles immutable batches archived before price allocation existed.
+      if (validQuantity && unit === null && source.platform === 'tiktokshop' && line.totalCents !== null && Number.isSafeInteger(line.totalCents) && line.totalCents >= 0) {
+        priceAllocations = allocateUnitPrices(line.totalCents, q);
+      }
+      if (!validQuantity) lineErrors.push('Quantity harus berupa bilangan bulat positif, maksimal 1.000.000.');
+      if (unit === null && !priceAllocations.length) lineErrors.push('Harga satuan belum tersedia atau total sumber tidak valid.');
       if (unit !== null && (!Number.isSafeInteger(unit) || unit < 0)) lineErrors.push('Harga harus berupa angka yang valid dan tidak negatif.');
       if (!sku) lineErrors.push('Nomor Referensi SKU kosong. Lengkapi kode pada file marketplace; nama produk tidak digunakan untuk menebak bundle.');
       else if (!skuIndex.has(sku)) lineErrors.push(`Kode ${sku} tidak ditemukan pada bundle di Business ${business}. Selesaikan identifier code/ketersediaan bundle di Scalev lalu sinkronkan.`);
-      const total = q !== null && unit !== null ? q * unit : null;
+      const total = priceAllocations.length ? priceAllocations.reduce((sum, part) => sum + part.quantity * part.unitCents, 0) : null;
       if (total !== null && !Number.isSafeInteger(total)) lineErrors.push('Total item di luar batas angka eksak.');
       if (line.totalCents !== null && total !== line.totalCents) lineErrors.push('Total item berbeda dari sumber.');
-      return { source: line, sku, productIds: classified.productIds, bundleId: null, bundleName: '', quantity: q, unitCents: unit, totalCents: total, mappingRule: classified.rule, errors: lineErrors, reason: '' };
+      if (priceAllocations.length > 1) warnings.push(`Harga ${sku} dibagi ke dua baris CSV agar quantity dan total tetap sama dengan sumber.`);
+      return { source: line, sku, productIds: classified.productIds, bundleId: null, bundleName: '', quantity: q, unitCents: priceAllocations.length === 1 ? priceAllocations[0].unitCents : unit, totalCents: total, priceAllocations, mappingRule: classified.rule, errors: lineErrors, reason: '' };
     });
     for (const line of lines) {
       const bundles = skuIndex.get(line.sku) || [];
@@ -106,9 +114,9 @@ export function projectMarketplace(input: { file: ParsedFile; account: string; d
     if (!username.trim()) errors.push('Nama/username pembeli belum tersedia.');
     if (!source.tracking.trim()) errors.push('Resi kosong. Lengkapi file sumber.');
     for (const value of [source.externalId,source.tracking,username,...Object.values(destination),store?.name || '',warehouse?.name || '',courier,service,...lines.map(l => l.sku)]) if (/^[\s]*[=+@-]|[\u0000\t]/.test(value)) errors.push('Teks mengandung awalan formula/karakter kontrol. Periksa sumber sebelum ekspor CSV.');
-    const rows: CsvRow[] = lines.map((line,index) => {
+    const rows: CsvRow[] = lines.flatMap(line => (line.priceAllocations.length ? line.priceAllocations : [{ quantity: line.quantity, unitCents: line.unitCents }]).map(part => ({line, part}))).map(({line,part},index) => {
       const row = Object.fromEntries(CSV_HEADERS.map(h => [h,''])) as CsvRow;
-      Object.assign(row,{ id: source.key, item_type: 'bundle', sku: line.sku, price: line.unitCents === null ? '' : centsText(line.unitCents), quantity: line.quantity === null ? '' : String(line.quantity), shipping_cost: '0', other_income: '0', weight_bump: '0' });
+      Object.assign(row,{ id: source.key, item_type: 'bundle', sku: line.sku, price: part.unitCents === null ? '' : centsText(part.unitCents), quantity: part.quantity === null ? '' : String(part.quantity), shipping_cost: '0', other_income: '0', weight_bump: '0' });
       if (index === 0) Object.assign(row,{ external_id: source.externalId, platform: source.platform, timestamp: date, store: store?.name || '', name: username, username, ...destination, payment_method: 'marketplace', bank: source.platform, courier, courier_service: service, warehouse: warehouse?.exportName || '', shipment_receipt: source.tracking });
       return row;
     });

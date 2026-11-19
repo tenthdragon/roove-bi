@@ -19,6 +19,19 @@ export function centsText(cents: number): string {
   const abs=Math.abs(cents);const whole=Math.floor(abs/100);const remainder=abs%100;
   return `${cents<0?'-':''}${whole}${remainder?'.'+String(remainder).padStart(2,'0').replace(/0$/,''):''}`;
 }
+// At most two price groups preserve both the source quantity and exact subtotal.
+// BigInt also keeps division/remainders exact near Number.MAX_SAFE_INTEGER.
+export function allocateUnitPrices(totalCents: number, quantity: number) {
+  if (!Number.isSafeInteger(totalCents) || totalCents < 0 || !Number.isSafeInteger(quantity) || quantity <= 0 || quantity > 1000000) {
+    throw new Error('Total dan quantity tidak valid untuk pembagian harga.');
+  }
+  const total = BigInt(totalCents), count = BigInt(quantity);
+  const base = total / count, remainder = Number(total % count);
+  return [
+    { quantity: quantity - remainder, unitCents: Number(base) },
+    ...(remainder ? [{ quantity: remainder, unitCents: Number(base + BigInt(1)) }] : []),
+  ];
+}
 export function quantity(value: unknown): number | null {
   if (value == null || String(value).trim() === '') return null;
   const n=Number(value);

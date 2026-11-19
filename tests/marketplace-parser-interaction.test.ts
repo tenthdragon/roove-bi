@@ -4,7 +4,7 @@ import { createRequire } from 'node:module';
 import React from 'react';
 import { create,act,type ReactTestInstance } from 'react-test-renderer';
 import * as XLSX from 'xlsx';
-import { contextFixture,book,shopee } from './marketplace-parser-fixtures';
+import { contextFixture,book,shopee,tiktok } from './marketplace-parser-fixtures';
 import { parseWorkbook,readMarketplaceFile } from '../lib/marketplace-parser/read';
 import { projectMarketplace,exportBusinessCsv } from '../lib/marketplace-parser/project';
 import type { ParserConfig } from '../lib/marketplace-parser/types';
@@ -48,6 +48,22 @@ test('upload automatically fills Business/Store/bundle and server-validates the 
   const intercepted = interceptDownload(), rendered = create(React.createElement(Tool,p));
   try { await upload(rendered.root); assert.ok(content(rendered.root).includes('Bundle # 101')); assert.ok(content(rendered.root).includes('Roove Main Store - Marketplace')); assert.ok(buttons(rendered.root,'Download CSV')[0].props.disabled); await review(rendered.root); await click(rendered.root,'Download CSV'); assert.equal(validated,1); assert.ok((await intercepted.blob()!.text()).includes('ORDER-TEST-1')); }
   finally { rendered.unmount(); intercepted.restore(); }
+});
+test('non-divisible TikTok price shows both allocations and downloads the same exact CSV after review',async () => {
+  const p=props(), intercepted=interceptDownload(), rendered=create(React.createElement(Tool,p));
+  try {
+    const account=rendered.root.findAllByType('label').find(l=>content(l).startsWith('Akun marketplace asal'))!.findByType('select');
+    await act(async()=>account.props.onChange({target:{value:'tiktok-roove'}}));
+    const bytes=XLSX.write(book({TikTok:[tiktok({Quantity:3,'SKU Unit Original Price':590000,'SKU Subtotal Before Discount':1770000,'SKU Seller Discount':275000})]}),{type:'buffer',bookType:'xlsx'});
+    await uploadData(rendered.root,{name:'synthetic-tiktok.xlsx',size:bytes.length,arrayBuffer:async()=>bytes.buffer.slice(bytes.byteOffset,bytes.byteOffset+bytes.byteLength)});
+    const allocation=content(rendered.root.findByProps({'aria-label':'Pembagian harga satuan'}));
+    assert.match(allocation,/2 × Rp\s*498\.333,33/); assert.match(allocation,/1 × Rp\s*498\.333,34/);
+    assert.ok(!content(rendered.root).includes('Download diblokir'));
+    assert.equal(rendered.root.findByProps({'aria-label':'Konfirmasi hasil parsing'}).props.disabled,false);
+    await click(rendered.root,'Detail');assert.match(content(rendered.root),/quantity dan total tetap sama/);
+    await review(rendered.root);await click(rendered.root,'Download CSV');
+    const csv=await intercepted.blob()!.text();assert.match(csv,/,498333\.33,2,/);assert.match(csv,/,498333\.34,1,/);
+  } finally {rendered.unmount();intercepted.restore();}
 });
 test('unresolved bundle blocks review and download and has no manual SKU or destination override',async () => {
   const rendered = create(React.createElement(Tool,props()));

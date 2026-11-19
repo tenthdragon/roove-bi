@@ -53,7 +53,7 @@ export type OrderEdit = { courier?: string; service?: string; username?: string;
 export type Edits = { lines: Record<string, LineEdit>; orders: Record<string, OrderEdit> };
 export const CSV_HEADERS = ['external_id','platform','id','timestamp','store','name','username','phone','email','address','subdistrict','city','payment_method','bank','account_holder','account_number','item_type','sku','price','quantity','shipping_cost','other_income','weight_bump','courier','courier_service','warehouse','shipment_receipt','notes'] as const;
 export type CsvRow = Record<typeof CSV_HEADERS[number], string>;
-export type PreviewLine = { source: SourceLine; sku: string; productIds: string[]; bundleId: number | null; bundleName: string; quantity: number | null; unitCents: number | null; totalCents: number | null; mappingRule: string; errors: string[]; reason: string };
+export type PreviewLine = { source: SourceLine; sku: string; productIds: string[]; bundleId: number | null; bundleName: string; quantity: number | null; unitCents: number | null; totalCents: number | null; priceAllocations: { quantity: number; unitCents: number }[]; mappingRule: string; errors: string[]; reason: string };
 export type PreviewOrder = {
   source: SourceOrder; business: string; storeId: number | null; store: string; warehouse: string; courier: string; service: string;
   lines: PreviewLine[]; errors: string[]; warnings: string[]; totalCents: number; routeIds: string[]; rows: CsvRow[];
