@@ -51,7 +51,8 @@ export function parseWorkbook(book: XLSX.WorkBook, filename='marketplace.xlsx'):
             const before=moneyCents(raw['SKU Subtotal Before Discount']);const discount=moneyCents(raw['SKU Seller Discount']);const original=moneyCents(raw['SKU Unit Original Price']);
             if (before!==null && discount!==null && source.quantity!==null) {
               source.totalCents=before-discount;
-              // Reject sub-cent unit prices rather than silently rounding the order total.
+              // Keep non-divisible source prices unset. Projection allocates the
+              // exact subtotal across two unit prices without changing the source.
               if (source.totalCents % source.quantity === 0) source.unitCents=source.totalCents/source.quantity;
               if (original!==null && original*source.quantity!==before) source.errors.push('Subtotal TikTok tidak cocok dengan harga awal × quantity.');
             }

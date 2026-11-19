@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import * as XLSX from 'xlsx';
 import {archiveSource,archiveExport,assertBatchAccount,digest,readBatch} from '../lib/marketplace-parser/archive';
-import {book,shopee,configFixture,catalogFixture} from './marketplace-parser-fixtures';
+import {book,shopee,tiktok,configFixture,catalogFixture} from './marketplace-parser-fixtures';
 import {projectMarketplace,exportBusinessCsv} from '../lib/marketplace-parser/project';
 function fixture(){
  const objects=new Map<string,Uint8Array>(),tables:Record<string,any[]>={};let fail='';
@@ -14,3 +14,15 @@ test('upload keeps original bytes/hash and parsed source; scoped reads reject an
 test('reprocessing creates separate export objects and keeps prior output and original intact',async()=>{const f=fixture(),i=input(),batch=await archiveSource(i,f.db),row=f.tables.marketplace_parser_batches[0];const projection=projectMarketplace({file:batch.file,account:batch.account,date:batch.date,config:i.config,revision:3,catalog:catalogFixture()});const args={workspace:i.workspace,batch:row,actorId:i.actorId,actorName:i.actorName,csv:exportBusinessCsv(projection,'RTI'),projection,catalogVersion:'test',decisions:[]};const first=await archiveExport(args,f.db),second=await archiveExport(args,f.db);assert.notEqual(first,second);assert.equal(f.objects.size,5);assert.equal(f.tables.marketplace_parser_exports.length,2);assert.deepEqual(Buffer.from(f.objects.get(row.source_path)!),i.bytes);const snapshot=JSON.parse(Buffer.from(f.objects.get(f.tables.marketplace_parser_exports[0].snapshot_path)!).toString());assert.equal(snapshot.sourceSha256,batch.sourceSha256);assert.equal(snapshot.configRevision,3);});
 test('failed metadata writes clean only their unregistered objects and never claim archival success',async()=>{const f=fixture();f.fail('marketplace_parser_batches');await assert.rejects(archiveSource(input(),f.db),/belum berhasil disimpan/);assert.equal(f.objects.size,0);});
 test('wrong marketplace account never archives a source',async()=>{const f=fixture();await assert.rejects(archiveSource({...input(),account:'tiktok-roove'},f.db),/tidak sesuai/);assert.equal(f.objects.size,0);});
+test('reopened TikTok batch exports a versioned allocation snapshot while retaining source bytes and parsed values',async()=>{
+ const f=fixture(),i={...input(),account:'tiktok-roove',bytes:XLSX.write(book({TikTok:[tiktok({Quantity:3,'SKU Unit Original Price':590000,'SKU Subtotal Before Discount':1770000,'SKU Seller Discount':275000})]}),{type:'buffer',bookType:'xlsx'})};
+ const batch=await archiveSource(i,f.db),stored=structuredClone(f.tables.marketplace_parser_batches[0]);
+ const row=await readBatch(f.db,i.workspace,batch.id);
+ assert.equal(row.parsed_file.orders[0].lines[0].unitCents,null);
+ const projection=projectMarketplace({file:row.parsed_file,account:batch.account,date:batch.date,config:i.config,revision:3,catalog:catalogFixture()});
+ await archiveExport({workspace:i.workspace,batch:row,actorId:i.actorId,actorName:i.actorName,csv:exportBusinessCsv(projection,'RTI'),projection,catalogVersion:'test',decisions:[]},f.db);
+ const snapshot=JSON.parse(Buffer.from(f.objects.get(f.tables.marketplace_parser_exports[0].snapshot_path)!).toString());
+ assert.equal(snapshot.parserVersion,5);assert.equal(snapshot.orders[0].totalCents,149500000);
+ assert.deepEqual(snapshot.orders[0].lines[0].priceAllocations,[{quantity:2,unitCents:49833333},{quantity:1,unitCents:49833334}]);
+ assert.deepEqual(f.tables.marketplace_parser_batches[0],stored);assert.deepEqual(Buffer.from(f.objects.get(row.source_path)!),i.bytes);
+});

@@ -4,7 +4,7 @@ import * as XLSX from 'xlsx';
 import { defaultParserConfig, migrateParserConfig, validateParserConfig, validateCatalogConfig } from '../lib/marketplace-parser/config';
 import { parseWorkbook } from '../lib/marketplace-parser/read';
 import { projectMarketplace, exportBusinessCsv, orderReady } from '../lib/marketplace-parser/project';
-import { centsText, moneyCents } from '../lib/marketplace-parser/money';
+import { allocateUnitPrices, centsText, moneyCents } from '../lib/marketplace-parser/money';
 import { CSV_HEADERS, type Catalog, type ParserConfig, type ParsedFile, type Edits } from '../lib/marketplace-parser/types';
 import { buildVisibleTabs } from '../lib/dashboard-navigation';
 import { dashboardTabPermissionKeys } from '../lib/dashboard-permissions';
@@ -149,10 +149,62 @@ test('zero-priced items stay zero; SKU suffix never sets price',() => {
   const p = projection(file('SMini-0')); assert.equal(p.orders[0].rows[0].price,'295000');
   const free = projection(parseWorkbook(book({ orders: [shopee({ 'Harga Setelah Diskon': 0 })] }))); assert.ok(orderReady(free.orders[0])); assert.equal(free.orders[0].rows[0].price,'0');
 });
-test('decimal cents are exact; partial TikTok unit cents and missing quantity block',() => {
+test('decimal cents are exact and missing quantity still blocks',() => {
   assert.equal(moneyCents('Rp 1.234,56'),123456); assert.equal(centsText(123456),'1234.56');
-  blocked(projection(parseWorkbook(book({ TikTok: [tiktok({ Quantity: 3,'SKU Unit Original Price': 100,'SKU Subtotal Before Discount': 300,'SKU Seller Discount': 100 })] }))));
   blocked(projection(parseWorkbook(book({ orders: [shopee({ Jumlah: '' })] }))));
+});
+test('TikTok non-divisible seller discounts export exact two-price groups without changing archived source',() => {
+  const f = parseWorkbook(book({ TikTok: [tiktok({ Quantity: 3,'SKU Unit Original Price': 590000,'SKU Subtotal Before Discount': 1770000,'SKU Seller Discount': 275000,'SKU Platform Discount': 598000 })] }));
+  // This is also the shape of batches archived by the prior parser version.
+  const archived = JSON.parse(JSON.stringify(f)), original = structuredClone(archived);
+  const p = projection(archived), o = p.orders[0], line = o.lines[0];
+  assert.ok(orderReady(o)); assert.equal(line.quantity,3); assert.equal(line.unitCents,null);
+  assert.equal(line.totalCents,149500000); assert.equal(o.totalCents,149500000);
+  assert.deepEqual(line.priceAllocations,[{quantity:2,unitCents:49833333},{quantity:1,unitCents:49833334}]);
+  assert.deepEqual(o.rows.map(r=>[r.quantity,r.price]),[['2','498333.33'],['1','498333.34']]);
+  assert.equal(o.rows[0].external_id,f.orders[0].externalId); assert.equal(o.rows[1].external_id,'');
+  assert.deepEqual(o.rows.map(r=>r.id),['1','1']); assert.equal(o.rows[1].shipment_receipt,'');
+  assert.deepEqual(o.routing?.items,[{bundleId:101,sku:'ROV20-295',quantity:1}]);
+  assert.match(o.warnings.join(' '),/quantity dan total tetap sama/);
+  const csv = exportBusinessCsv(p,'RTI');
+  const rows = XLSX.utils.sheet_to_json<Record<string,string>>(XLSX.read(csv,{type:'string',raw:true}).Sheets.Sheet1);
+  assert.equal(rows.reduce((sum,r)=>sum+Number(r.quantity),0),3);
+  assert.equal(rows.reduce((sum,r)=>sum+moneyCents(r.price)!*Number(r.quantity),0),149500000);
+  assert.deepEqual(archived,original); assert.deepEqual(projection(archived).orders[0].rows,o.rows);
+});
+test('price allocation preserves quantity and subtotal for zero, small remainders and safe-integer boundaries',() => {
+  for (const q of [1,2,3,7,100,999999,1000000]) for (const total of [0,1,2,3,99,100,149500000,Number.MAX_SAFE_INTEGER-1,Number.MAX_SAFE_INTEGER]) {
+    const parts=allocateUnitPrices(total,q);
+    assert.ok(parts.length>=1&&parts.length<=2);
+    assert.equal(parts.reduce((sum,p)=>sum+p.quantity,0),q);
+    assert.equal(parts.reduce((sum,p)=>sum+BigInt(p.quantity)*BigInt(p.unitCents),BigInt(0)),BigInt(total));
+    assert.ok(parts.every(p=>Number.isSafeInteger(p.unitCents)&&p.unitCents>=0&&p.quantity>0));
+    if(parts.length===2)assert.equal(parts[1].unitCents-parts[0].unitCents,1);
+  }
+  assert.deepEqual(allocateUnitPrices(1,3),[{quantity:2,unitCents:0},{quantity:1,unitCents:1}]);
+  for(const total of [-1,NaN,Infinity,0.1,Number.MAX_SAFE_INTEGER+1])assert.throws(()=>allocateUnitPrices(total,3));
+  for(const q of [0,-1,NaN,Infinity,1.1,1000001])assert.throws(()=>allocateUnitPrices(100,q));
+});
+test('split pricing preserves multi-item routing, continuation fields and separate orders',() => {
+  const f=parseWorkbook(book({TikTok:[
+    tiktok({Quantity:3,'SKU Unit Original Price':100,'SKU Subtotal Before Discount':300,'SKU Seller Discount':100}),
+    tiktok({'Seller SKU':'ROV10-150'}),
+    tiktok({'Order ID':'OTHER','Tracking ID':'OTHER-TRACK'}),
+  ]}));
+  const p=projection(f), first=p.orders[0]; assert.ok(p.orders.every(orderReady));
+  assert.equal(first.lines.length,2); assert.equal(first.rows.length,3);
+  assert.deepEqual(first.routing?.items,[{bundleId:101,sku:'ROV20-295',quantity:3},{bundleId:105,sku:'ROV10-150',quantity:2}]);
+  assert.deepEqual(first.rows.map(r=>r.id),['1','1','1']); assert.equal(p.orders[1].rows[0].id,'2');
+  for(const r of first.rows.slice(1))for(const key of ['external_id','platform','timestamp','store','shipment_receipt','username','name','address','warehouse'])assert.equal(r[key as keyof typeof r],'');
+  assert.equal(first.totalCents,49020000); assert.equal(p.orders[1].totalCents,49000000);
+});
+test('allocation cannot rescue negative, malformed or inconsistent prices, or missing bundles',() => {
+  const base=tiktok({Quantity:3,'SKU Unit Original Price':100,'SKU Subtotal Before Discount':300,'SKU Seller Discount':100});
+  for(const extra of [{'SKU Seller Discount':301},{'SKU Seller Discount':'bad'},{'SKU Subtotal Before Discount':299},{Quantity:''},{'Seller SKU':'MISSING'}])blocked(projection(parseWorkbook(book({TikTok:[{...base,...extra}]}))));
+  const f=parseWorkbook(book({TikTok:[base]})); f.orders[0].lines[0].unitCents=1;
+  blocked(projection(f)); // An existing unit/subtotal mismatch is never silently corrected.
+  const shopeeFile=file('ROV20-295');shopeeFile.orders[0].lines[0].unitCents=null;
+  blocked(projection(shopeeFile));
 });
 test('Advance Fulfilment incomplete item remains present; empty auxiliary sheet does not hide valid orders',() => {
   const w = book({ 'Advance Fulfilment': [{ 'Booking SN': 'BOOK','No. Resi': 'ADV','Nama Produk': 'Roove' }],orders: [shopee()] });

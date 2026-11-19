@@ -90,6 +90,16 @@ row shows username, resi, source courier and mapped Scalev courier. Inline Store
 search lists at most six Stores, never the bundle universe. **Detail** exposes raw
 source fields and validation without edit inputs.
 
+TikTok prices use the SKU subtotal before discount minus the seller discount;
+platform subsidies remain separate. When that subtotal cannot be divided evenly
+into unit prices with two decimal places, the parser allocates the remainder to
+at most two CSV rows for the same SKU and order. For example, Rp1,495,000 for three
+units becomes two units at Rp498,333.33 and one at Rp498,333.34. The original
+quantity, subtotal, routing case and source record stay intact. Preview shows both
+price groups and export snapshots (parser version 5) record the allocation.
+Existing archived batches use the same calculation when reopened; no re-upload
+or database migration is needed. Invalid source prices and totals still block export.
+
 Missing or duplicate bundle codes show inline Scalev links. A verified foreign
 bundle retains explicit Business sharing; unknown/incomplete snapshots direct the
 operator to sync instead of claiming a bundle must be created. Diagnosis reads only
