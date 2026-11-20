@@ -56,7 +56,7 @@ export async function POST(req: NextRequest) {
       'marketing_api_reviewer',
       'advertiser',
       'direktur_ops', 'staf_ops',
-      'direktur_finance', 'staf_finance',
+      'direktur_finance', 'staf_finance', 'tax_manager',
       'brand_manager', 'sales_manager',
       'warehouse_manager', 'ppic_manager',
       // legacy
