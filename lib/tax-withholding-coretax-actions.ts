@@ -24,7 +24,7 @@ import { xmlDocumentNumber } from './tax-withholding-xml';
 
 const TAB_ID = 'tax-withholding';
 const TAB_LABEL = 'Bukti Potong (PPh)';
-const MANAGE_ROLES = ['owner', 'admin', 'direktur_finance', 'staf_finance'];
+const MANAGE_ROLES = ['owner', 'admin', 'direktur_finance', 'staf_finance', 'tax_manager'];
 const PAGE_SIZE = 1000;
 const MAX_RECORD_SLIPS = 2000;
 const MAX_UPLOAD_BYTES = 15 * 1024 * 1024;
@@ -48,7 +48,7 @@ async function requireTaxAccess() {
 }
 async function requireTaxManageAccess() {
   const ctx = await requireTaxAccess();
-  if (!ctx.canManage) throw new Error('Hanya role finance yang dapat mencatat nomor bukti potong.');
+  if (!ctx.canManage) throw new Error('Hanya role finance atau Tax Manager yang dapat mencatat nomor bukti potong.');
   return ctx;
 }
 

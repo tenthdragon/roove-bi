@@ -26,7 +26,7 @@ import { BPNR_BULK_SCHEMA_VERSION, bpnrFileNamePrefix, buildBpnrBulkXml, validat
 
 const TAB_ID = 'tax-withholding';
 const TAB_LABEL = 'Bukti Potong (PPh)';
-const MANAGE_ROLES = ['owner', 'admin', 'direktur_finance', 'staf_finance'];
+const MANAGE_ROLES = ['owner', 'admin', 'direktur_finance', 'staf_finance', 'tax_manager'];
 const PAGE_SIZE = 1000;
 const MAX_BATCH_SLIPS = 2000;
 
@@ -48,7 +48,7 @@ async function requireTaxAccess() {
 }
 async function requireTaxManageAccess() {
   const ctx = await requireTaxAccess();
-  if (!ctx.canManage) throw new Error('Hanya role finance yang dapat meng-export bukti potong.');
+  if (!ctx.canManage) throw new Error('Hanya role finance atau Tax Manager yang dapat meng-export bukti potong.');
   return ctx;
 }
 

@@ -476,6 +476,7 @@ export default function AdminPage() {
       case 'staf_ops':           return { text: 'Staf Ops',          bg: 'var(--accent-subtle)',    color: 'var(--tone-sky)' };
       case 'direktur_finance':   return { text: 'Direktur Finance',  bg: 'var(--accent-subtle)',    color: 'var(--tone-blue)' };
       case 'staf_finance':       return { text: 'Staf Finance',      bg: 'var(--accent-subtle)',    color: 'var(--tone-blue)' };
+      case 'tax_manager':        return { text: 'Tax Manager',       bg: 'var(--accent-subtle)',    color: 'var(--tone-blue)' };
       case 'brand_manager':      return { text: 'Brand Manager',     bg: 'var(--badge-yellow-bg)',  color: 'var(--yellow)' };
       case 'sales_manager':      return { text: 'Sales Manager',     bg: 'var(--accent-subtle)',    color: 'var(--tone-purple)' };
       case 'warehouse_manager':  return { text: 'WH Manager',        bg: 'var(--accent-subtle)',    color: 'var(--tone-cyan)' };
@@ -1423,6 +1424,7 @@ export default function AdminPage() {
               { r: 'staf_ops',          desc: 'akses via matrix' },
               { r: 'direktur_finance',  desc: 'finance + laporan' },
               { r: 'staf_finance',      desc: 'akses via matrix' },
+              { r: 'tax_manager',       desc: 'kelola Bukti Potong (PPh), akses via matrix' },
               { r: 'brand_manager',     desc: 'marketing & brand' },
               { r: 'sales_manager',     desc: 'channel & sales' },
               { r: 'warehouse_manager', desc: 'gudang ops' },

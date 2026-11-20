@@ -65,6 +65,17 @@ function form(rows: unknown[][], workspace: string | null = A) {
 const vendor = (overrides = {}) => ({ id: 1, workspace_id: A, name: 'VENDOR', identity_type: 'npwp', identity_number: '0210893970035000', is_pkp: false, country_code: 'IDN', address: null, notes: null, ...overrides });
 beforeEach(() => { activeWorkspace = A; displayedWorkspace = A; role = 'admin'; denied = false; failBootstrap = false; reads = 0; writes = 0; db = { tax_counterparties: [], tax_counterparty_facilities: [] }; });
 
+test('Tax Manager can manage tax master data but still needs the workspace tab permission', async () => {
+  role = 'tax_manager';
+  assert.equal((await actions.getTaxWithholdingBootstrap()).canManage, true);
+  const rows = [['VENDOR', '0210893970035000']];
+  assert.equal((await actions.commitCounterpartyImport(form(rows))).inserted, 1);
+  const before = structuredClone(db);
+  denied = true;
+  await assert.rejects(actions.commitCounterpartyImport(form(rows)), /Forbidden/);
+  assert.deepEqual(db, before);
+});
+
 test('import preserves renewed certificates and repeated imports remain idempotent', async () => {
   db.tax_counterparties = [vendor()];
   db.tax_counterparty_facilities = [{ id: 1, workspace_id: A, counterparty_id: 1, facility_code: 'TaxExAr23', document_number: 'CERT', valid_from: '2026-01-01' }];
