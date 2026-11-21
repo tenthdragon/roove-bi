@@ -21,6 +21,7 @@ import {
   type TaxObjectCodeInput,
   type WithholdingEntityInput,
 } from './tax-withholding-domain';
+import { isBpnrObjectCode } from './tax-withholding-bpnr';
 import {
   parseCounterpartyMaster,
   type ImportIssue,
@@ -619,18 +620,40 @@ export async function saveTaxObjectCode(input: TaxObjectCodeInput & { mode: 'cre
   const value = normalized.value;
   const svc = createServiceSupabase();
 
-  const existing = await svc.from('tax_object_codes').select('code').eq('code', value.code);
+  // Every PPh 26 slip is exported through BPNR, whose validator and Deemed/Rate
+  // resolution read the Coretax BPNR reference bundled with the app. A PPh 26
+  // code outside that reference would be selectable yet never exportable.
+  if (value.pph_article === 'pph26' && !isBpnrObjectCode(value.code)) {
+    throw new Error(`Kode ${value.code} belum ada di referensi BPNR Coretax (norma dan tarif) yang dibawa aplikasi, sehingga bukti potong PPh 26 dengan kode ini tidak akan bisa di-export. Minta pembaruan referensi BPNR dahulu.`);
+  }
+
+  const existing = await svc.from('tax_object_codes').select(OBJECT_CODE_SELECT).eq('code', value.code);
   if (existing.error) throw existing.error;
-  const exists = (existing.data ?? []).length > 0;
+  const current = ((existing.data ?? []) as TaxObjectCodeRecord[])[0];
 
   if (input.mode === 'create') {
-    if (exists) throw new Error(`Kode objek ${value.code} sudah ada. Ubah kode yang ada atau pakai kode lain.`);
+    if (current) throw new Error(`Kode objek ${value.code} sudah ada. Ubah kode yang ada atau pakai kode lain.`);
     const result = await svc.from('tax_object_codes').insert(value).select(OBJECT_CODE_SELECT).single();
     if (result.error) throw result.error;
     return toObjectCodeRecord(result.data as TaxObjectCodeRecord);
   }
 
-  if (!exists) throw new Error(`Kode objek ${value.code} tidak ditemukan.`);
+  if (!current) throw new Error(`Kode objek ${value.code} tidak ditemukan.`);
+
+  // Payment groups (Rekap Setor, tax_record_payment_ntpn, tax_clear_payment_ntpn)
+  // resolve KAP/KJS and the pasal through the live reference, so changing them on
+  // a code that slips already use would silently regroup historical slips and
+  // detach recorded billings. Such codes are deactivated and replaced instead.
+  const mappingChanged = current.pph_article !== value.pph_article
+    || (current.kap ?? null) !== value.kap || (current.kjs ?? null) !== value.kjs;
+  if (mappingChanged) {
+    const used = await svc.from('tax_withholding_slips').select('id').eq('object_code', value.code).range(0, 0);
+    if (used.error) throw used.error;
+    if ((used.data ?? []).length > 0) {
+      throw new Error(`Kode objek ${value.code} sudah dipakai bukti potong, sehingga pasal, KAP, dan KJS-nya tidak bisa diubah (rekap dan catatan setoran mengelompokkan bupot lewat nilai ini). Nonaktifkan kode ini dan tambahkan kode baru.`);
+    }
+  }
+
   const { code: _code, ...payload } = value;
   const result = await svc.from('tax_object_codes').update(payload).eq('code', value.code).select(OBJECT_CODE_SELECT).single();
   if (result.error) throw result.error;

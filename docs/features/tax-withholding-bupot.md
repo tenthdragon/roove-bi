@@ -643,6 +643,13 @@ Dua workbook per PT (RTI dan PT lain) diimpor terpisah; `entity` dipilih di UI.
   menyimpan tarifnya sendiri. Semua role finance (`MANAGE_ROLES`) boleh mengubah, lewat service role.
 - Kode tidak dapat diganti atau dihapus dari UI: `tax_withholding_slips.object_code` merujuknya.
   Kode yang salah dinonaktifkan dan kode baru ditambahkan.
+- Pasal, KAP, dan KJS kode yang sudah dipakai bukti potong juga dibekukan (`saveTaxObjectCode` menolak):
+  Rekap Setor dan fungsi `tax_record_payment_ntpn`/`tax_clear_payment_ntpn` mengelompokkan bupot lewat
+  nilai referensi saat itu, sehingga mengubahnya akan memindahkan bupot lama ke kelompok lain dan
+  melepas catatan ID Billing/NTPN yang sudah ada. Nama, tarif dasar, deskripsi, dasar hukum, status tetap bebas.
+- Kode PPh 26 hanya diterima bila ada di referensi BPNR yang dibawa aplikasi
+  (`lib/tax-withholding-bpnr-ref.ts`), karena `validateSlipForBpnr` dan `resolveBpnrRate` memakai norma dan
+  tarif dari referensi itu; kode PPh 26 di luar referensi butuh pembaruan referensi (rilis), bukan sekadar baris.
 - Tarif kode BPNR dengan norma disimpan sebagai tarif efektif (27-100-08/09: norma 25% × 20% = 5%),
   sehingga `resolveBpnrRate` mengembalikan pasangan Deemed/Rate referensi tanpa override.
 - Validasi di `normalizeObjectCodeInput`: format 7 digit, nama wajib, pasal wajib dan cocok dengan

@@ -259,3 +259,24 @@ test('object codes: finance creates a code once, edits keep the code fixed, othe
   await assert.rejects(actions.saveTaxObjectCode({ mode: 'create', code: '24-104-71', name: 'X', pphArticle: 'pph23', ratePercent: '2' }), /Hanya role finance/);
   assert.equal(writes, writesBefore);
 });
+
+test('object codes: pasal/KAP/KJS stay fixed once slips use the code, and PPh 26 codes must exist in the BPNR reference', async () => {
+  db.tax_object_codes = [{ code: '24-104-24', name: 'Jasa Software', pph_article: 'pph23', rate_percent: '2.000', kap: '411124', kjs: '104', description: null, legal_basis: null, is_active: true, updated_at: '2026-01-01T00:00:00Z' }];
+  db.tax_withholding_slips = [{ id: 1, workspace_id: A, object_code: '24-104-24' }];
+  const base = { mode: 'update' as const, code: '24-104-24', name: 'Jasa Software', pphArticle: 'pph23', ratePercent: '2', kap: '411124', kjs: '104' };
+  await assert.rejects(actions.saveTaxObjectCode({ ...base, kjs: '100' }), /sudah dipakai bukti potong/);
+  await assert.rejects(actions.saveTaxObjectCode({ ...base, kap: '', kjs: '' }), /sudah dipakai bukti potong/);
+  await assert.rejects(actions.saveTaxObjectCode({ ...base, pphArticle: 'pph4_2', code: '24-104-24' }), /Awalan kode 24-/);
+  assert.equal(db.tax_object_codes[0].kjs, '104');
+  const renamed = await actions.saveTaxObjectCode({ ...base, name: 'Jasa Software (PMK 141)', ratePercent: '3', description: 'Cakupan', isActive: false });
+  assert.deepEqual([renamed.name, renamed.rate_percent, renamed.kjs, renamed.is_active], ['Jasa Software (PMK 141)', 3, '104', false]);
+
+  db.tax_withholding_slips = [];
+  const regrouped = await actions.saveTaxObjectCode({ ...base, kjs: '100' });
+  assert.equal(regrouped.kjs, '100', 'unused codes may still be corrected');
+
+  await assert.rejects(actions.saveTaxObjectCode({ mode: 'create', code: '27-100-99', name: 'Belum ada di BPNR', pphArticle: 'pph26', ratePercent: '20' }), /referensi BPNR/);
+  assert.equal(db.tax_object_codes.length, 1);
+  const bpnr = await actions.saveTaxObjectCode({ mode: 'create', code: '27-100-02', name: 'Bunga (PPh Pasal 26)', pphArticle: 'pph26', ratePercent: '20', kap: '411127', kjs: '100' });
+  assert.equal(bpnr.code, '27-100-02');
+});
