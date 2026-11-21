@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import test, { beforeEach } from 'node:test';
+import test, { beforeEach, describe } from 'node:test';
 import { createRequire } from 'node:module';
 import * as XLSX from 'xlsx';
 
@@ -141,7 +141,8 @@ async function rpc(name: string, args: Record<string, any>) {
 }
 
 require.cache[require.resolve('../lib/supabase-server')] = { exports: { createServiceSupabase: () => ({ from, rpc }) } } as any;
-require.cache[require.resolve('../lib/dashboard-access')] = { exports: { requireDashboardTabAccess: async () => ({ workspaceId: A, profile: { id: 'synthetic-user', role: 'staf_finance' } }) } } as any;
+let currentRole = 'staf_finance';
+require.cache[require.resolve('../lib/dashboard-access')] = { exports: { requireDashboardTabAccess: async () => ({ workspaceId: A, profile: { id: 'synthetic-user', role: currentRole } }) } } as any;
 const slipActions = require('../lib/tax-withholding-slip-actions') as typeof import('../lib/tax-withholding-slip-actions');
 const exportActions = require('../lib/tax-withholding-export-actions') as typeof import('../lib/tax-withholding-export-actions');
 const coretaxActions = require('../lib/tax-withholding-coretax-actions') as typeof import('../lib/tax-withholding-coretax-actions');
@@ -167,7 +168,9 @@ const readySlip = (overrides: Record<string, unknown> = {}) => ({
   export_batch_id: null, voided_from_batch_id: null, void_reason: null, ...overrides,
 });
 
+for (const role of ['staf_finance', 'tax_manager']) describe(`tax workflow as ${role}`, () => {
 beforeEach(() => {
+  currentRole = role;
   clock = 0;
   onRead = null;
   db = {
@@ -565,4 +568,5 @@ test('a PPh 4(2) slip for a foreign-TIN recipient with a BPNR-listed code is exp
   assert.match(batch.xml, /<TaxObjectCode>28-405-02<\/TaxObjectCode>\n\s+<GrossIncome>1000000<\/GrossIncome>\n\s+<Deemed>100<\/Deemed>\n\s+<Rate>25<\/Rate>/);
   assert.equal(db.tax_withholding_slips[1].status, 'exported');
   assert.equal(db.tax_withholding_slips[2].status, 'ready');
+});
 });

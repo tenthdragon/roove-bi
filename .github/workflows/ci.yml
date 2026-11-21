@@ -44,6 +44,9 @@ jobs:
       - name: Check financial correction actions and historical cache refresh
         run: node --import tsx --test tests/scalev-financial-correction-actions.test.ts tests/scalev-line-persistence.test.ts
 
+      - name: Check Tax Manager navigation and authorization
+        run: npm run test:tax-manager
+
       - name: Check user access request boundaries
         run: npm run test:access-requests
 
@@ -98,6 +101,8 @@ jobs:
         run: node tests/marketplace-parser-config-database.mjs --ci
       - name: Check tax master read access is limited to finance roles
         run: node tests/tax-withholding-access-database.mjs --ci
+      - name: Check Tax Manager migration and workspace boundaries
+        run: node tests/tax-manager-role-database.mjs --ci
       - name: Remove disposable database container
         if: always()
         run: docker rm -f roove-access-requests-test

@@ -13,6 +13,7 @@ export type UserRole =
   | 'staf_ops'
   | 'direktur_finance'
   | 'staf_finance'
+  | 'tax_manager'
   | 'brand_manager'
   | 'sales_manager'
   | 'warehouse_manager'
@@ -33,6 +34,7 @@ export const MATRIX_ROLES: { id: string; label: string }[] = [
   { id: 'staf_ops',          label: 'Staf Ops' },
   { id: 'direktur_finance',  label: 'Direktur Finance' },
   { id: 'staf_finance',      label: 'Staf Finance' },
+  { id: 'tax_manager',       label: 'Tax Manager' },
   { id: 'brand_manager',     label: 'Brand Manager' },
   { id: 'sales_manager',     label: 'Sales Manager' },
   { id: 'warehouse_manager', label: 'WH Manager' },

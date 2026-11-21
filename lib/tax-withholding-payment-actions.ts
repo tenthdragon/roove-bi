@@ -18,7 +18,7 @@ import {
 const PAGE_SIZE = 1000;
 const TAB_ID = 'tax-withholding';
 const TAB_LABEL = 'Bukti Potong (PPh)';
-const MANAGE_ROLES = ['owner', 'admin', 'direktur_finance', 'staf_finance'];
+const MANAGE_ROLES = ['owner', 'admin', 'direktur_finance', 'staf_finance', 'tax_manager'];
 
 async function requireTaxAccess() {
   const ctx = await requireDashboardTabAccess(TAB_ID, TAB_LABEL);
@@ -26,7 +26,7 @@ async function requireTaxAccess() {
 }
 async function requireTaxManageAccess() {
   const ctx = await requireTaxAccess();
-  if (!ctx.canManage) throw new Error('Hanya role finance yang dapat mencatat setoran.');
+  if (!ctx.canManage) throw new Error('Hanya role finance atau Tax Manager yang dapat mencatat setoran.');
   return ctx;
 }
 

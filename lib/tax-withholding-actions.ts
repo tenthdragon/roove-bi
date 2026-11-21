@@ -38,7 +38,7 @@ export type {
 
 const TAB_ID = 'tax-withholding';
 const TAB_LABEL = 'Bukti Potong (PPh)';
-const MANAGE_ROLES = ['owner', 'admin', 'direktur_finance', 'staf_finance'];
+const MANAGE_ROLES = ['owner', 'admin', 'direktur_finance', 'staf_finance', 'tax_manager'];
 const MAX_IMPORT_BYTES = 15 * 1024 * 1024;
 // PostgREST caps a single response (1,000 rows by default), so every
 // whole-workspace read pages until a short page comes back.
@@ -115,7 +115,7 @@ async function requireTaxAccess() {
 
 async function requireTaxManageAccess() {
   const ctx = await requireTaxAccess();
-  if (!ctx.canManage) throw new Error('Hanya role finance yang dapat mengubah data bukti potong.');
+  if (!ctx.canManage) throw new Error('Hanya role finance atau Tax Manager yang dapat mengubah data bukti potong.');
   return ctx;
 }
 
