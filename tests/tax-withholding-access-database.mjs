@@ -4,7 +4,7 @@ import { randomBytes } from 'node:crypto';
 import { promisify } from 'node:util';
 import assert from 'node:assert/strict';
 
-// Migrations 247 to 254 run in a disposable database with the minimal
+// Migrations 247 to 256 run in a disposable database with the minimal
 // workspace foundation they depend on. Direct reads then run as `authenticated`
 // users with a JWT subject, exactly as PostgREST would issue them, and two
 // concurrent imports race on the facility identity constraint. The shared
@@ -42,6 +42,7 @@ const exportMigration = read('../supabase/migrations/252_tax_export_batches.sql'
 const coretaxMigration = read('../supabase/migrations/253_tax_coretax_recording.sql');
 const paymentMigration = read('../supabase/migrations/254_tax_payment_records.sql');
 const formsMigration = read('../supabase/migrations/255_tax_export_forms.sql');
+const objectCodeMigration = read('../supabase/migrations/256_tax_object_code_management.sql');
 
 // Two imports insert the same certificate at the same time; the constraint must
 // leave exactly one row and neither side may fail.
@@ -138,6 +139,8 @@ ${readAccessMigration}
   psql(paymentMigration);
   psql(formsMigration);
   psql(formsMigration);
+  psql(objectCodeMigration);
+  psql(objectCodeMigration);
   process.stdout.write(psql(`DO $$ DECLARE target regclass; BEGIN
     FOREACH target IN ARRAY ARRAY['public.tax_object_codes'::regclass,'public.tax_withholding_entities'::regclass,
       'public.tax_counterparties'::regclass,'public.tax_counterparty_facilities'::regclass] LOOP
@@ -162,6 +165,7 @@ ${readAccessMigration}
   process.stdout.write(psql(read('./tax-withholding-export-db.sql')));
   process.stdout.write(psql(read('./tax-withholding-coretax-db.sql')));
   process.stdout.write(psql(read('./tax-withholding-payment-db.sql')));
+  process.stdout.write(psql(read('./tax-withholding-object-codes-db.sql')));
 
   // Two connections clear the NTPNs of two records of one payment group. The
   // first holds its transaction open after clearing; the second must wait for

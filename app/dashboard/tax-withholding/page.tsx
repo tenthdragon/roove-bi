@@ -38,9 +38,10 @@ import { TaxWorkProvider } from '@/components/TaxWithholdingContext';
 import { useWorkspace } from '@/lib/WorkspaceContext';
 import { RekapanImportSection, SlipsSection } from '@/components/TaxWithholdingSlips';
 import { TaxRecapSection } from '@/components/TaxWithholdingRecap';
+import { ObjectCodesSection } from '@/components/TaxWithholdingObjectCodes';
 import { listExpiringFacilities } from '@/lib/tax-withholding-payment';
 
-type SubTab = 'slips' | 'recap' | 'counterparties' | 'entities' | 'import';
+type SubTab = 'slips' | 'recap' | 'counterparties' | 'entities' | 'codes' | 'import';
 type PageMessage = { type: 'success' | 'error'; text: string };
 
 type CounterpartyForm = {
@@ -301,6 +302,7 @@ function TaxWithholdingContent({ subTab, setSubTab }: { subTab: SubTab; setSubTa
             ['recap', 'Rekap Setor'],
             ['counterparties', 'Lawan Transaksi'],
             ['entities', 'Pemotong'],
+            ['codes', 'Kode Objek'],
             ['import', 'Impor'],
           ] as Array<[SubTab, string]>).map(([id, label]) => (
             <button key={id} type="button" role="tab" id={`tax-tab-${id}`} aria-controls="tax-panel" tabIndex={subTab === id ? 0 : -1} aria-selected={subTab === id} className="tw-tab" onClick={() => setSubTab(id)}
@@ -348,6 +350,7 @@ function TaxWithholdingContent({ subTab, setSubTab }: { subTab: SubTab; setSubTa
             </>
           ) : null}
           {subTab === 'entities' ? <EntitiesSection data={data} onChanged={load} notify={setMessage} /> : null}
+          {subTab === 'codes' ? <ObjectCodesSection canManage={data.canManage} notify={setMessage} /> : null}
           {subTab === 'import' ? (
             <>
               <ImportSection key={activeWorkspace.id} workspaceId={activeWorkspace.id} workspaceName={activeWorkspace.name} canManage={data.canManage} onChanged={load} notify={setMessage} />

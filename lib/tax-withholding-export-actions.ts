@@ -22,7 +22,7 @@ import {
   type ExportSlip,
   type TaxExportForm,
 } from './tax-withholding-xml';
-import { BPNR_BULK_SCHEMA_VERSION, bpnrFileNamePrefix, buildBpnrBulkXml, validateSlipForBpnr, type BpnrSlip } from './tax-withholding-bpnr';
+import { BPNR_BULK_SCHEMA_VERSION, bpnrFileNamePrefix, buildBpnrBulkXml, exportFormForSlip, validateSlipForBpnr, type BpnrSlip } from './tax-withholding-bpnr';
 
 const TAB_ID = 'tax-withholding';
 const TAB_LABEL = 'Bukti Potong (PPh)';
@@ -133,8 +133,8 @@ function toBpnrSlip(slip: SlipRow, details: Map<number, { country_code: string; 
 }
 
 /** Which form a slip belongs to: PPh 26 is always BPNR, everything else BPPU. */
-function formOfSlip(slip: Pick<SlipRow, 'pph_article'>): TaxExportForm {
-  return slip.pph_article === 'pph26' ? 'BPNR' : 'BPPU';
+function formOfSlip(slip: Pick<SlipRow, 'pph_article' | 'counterparty_identity_type' | 'object_code'>): TaxExportForm {
+  return exportFormForSlip(slip);
 }
 
 async function loadActiveObjectCodes(): Promise<Set<string>> {
@@ -348,7 +348,7 @@ export async function createTaxExportBatch(input: TaxExportPeriodInput & { slipI
   if (slips.length !== ids.length) throw new Error('Sebagian bukti potong tidak ditemukan di masa ini; muat ulang pratinjau.');
   const period = { year: input.year, month: input.month };
   const misplaced = slips.find((slip) => formOfSlip(slip) !== form);
-  if (misplaced) throw new Error(`Bukti potong ${misplaced.invoice_number} bukan formulir ${form} (PPh 26 lewat BPNR, pasal lain lewat BPPU). Muat ulang pratinjau.`);
+  if (misplaced) throw new Error(`Bukti potong ${misplaced.invoice_number} bukan formulir ${form} (PPh 26 dan penerima ber-TIN asing lewat BPNR, lainnya lewat BPPU). Muat ulang pratinjau.`);
   const details = form === 'BPNR' ? await loadCounterpartyDetails(workspaceId, slips) : new Map<number, { country_code: string; address: string | null }>();
   const bpnrSlips = slips.map((slip) => toBpnrSlip(slip, details));
   const blocked = (form === 'BPNR'
