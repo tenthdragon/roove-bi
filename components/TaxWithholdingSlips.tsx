@@ -339,7 +339,7 @@ export function SlipsSection({ entities, counterparties, canManage, notify, onCr
 
 const EXPORT_FORM_OPTIONS: ReadonlyArray<{ value: TaxExportForm; label: string }> = [
   { value: 'BPPU', label: 'BPPU · residen (NPWP/NIK)' },
-  { value: 'BPNR', label: 'BPNR · non-residen (PPh 26)' },
+  { value: 'BPNR', label: 'BPNR · non-residen (PPh 26 / TIN asing)' },
 ];
 
 function ExportModal({ entity, year, month, onClose, onChanged, notify }: {
@@ -439,8 +439,8 @@ function ExportModal({ entity, year, month, onClose, onChanged, notify }: {
             </div>
             <div style={{ fontSize: 12, color: 'var(--text-secondary)' }}>
               {isBpnr
-                ? 'Bukti potong PPh 26 berstatus siap yang lolos validasi masuk ke satu file BPNR (bukti potong non-residen). Negara dan alamat diambil dari master lawan transaksi; fasilitas SKD menjadi COD dengan nomor SKD WPLN.'
-                : 'Semua bukti potong berstatus siap yang lolos validasi masuk ke satu file. Baris terblokir tetap di luar batch; perbaiki lalu buat batch berikutnya. Bukti potong PPh 26 dilaporkan lewat formulir BPNR.'}
+                ? 'Bukti potong PPh 26 dan bukti potong penerima ber-TIN asing berstatus siap yang lolos validasi masuk ke satu file BPNR (bukti potong non-residen). Negara dan alamat diambil dari master lawan transaksi; fasilitas SKD menjadi COD dengan nomor SKD WPLN.'
+                : 'Semua bukti potong berstatus siap yang lolos validasi masuk ke satu file. Baris terblokir tetap di luar batch; perbaiki lalu buat batch berikutnya. Bukti potong PPh 26 dan penerima ber-TIN asing dilaporkan lewat formulir BPNR.'}
               {preview.otherFormPending > 0 ? ` ${preview.otherFormPending} bukti potong draft/siap di masa ini milik formulir ${isBpnr ? 'BPPU' : 'BPNR'}.` : ''}
             </div>
             {deferredCount > 0 ? <div className="tw-notice">Satu file memuat maksimal {preview.maxBatchSlips} bukti potong. Batch ini mengambil {batchIds.length} bukti potong pertama; {deferredCount} sisanya tetap berstatus siap untuk batch berikutnya.</div> : null}
@@ -450,7 +450,7 @@ function ExportModal({ entity, year, month, onClose, onChanged, notify }: {
             </label>
             {rows.length === 0 ? (
               <div style={{ padding: 18, textAlign: 'center', color: 'var(--text-secondary)', fontSize: 13 }}>
-                {preview.rows.length === 0 ? (isBpnr ? 'Tidak ada bukti potong PPh 26 draft atau siap di masa ini.' : 'Tidak ada bukti potong draft atau siap di masa ini.') : 'Tidak ada baris terblokir.'}
+                {preview.rows.length === 0 ? (isBpnr ? 'Tidak ada bukti potong PPh 26 atau penerima ber-TIN asing draft atau siap di masa ini.' : 'Tidak ada bukti potong draft atau siap di masa ini.') : 'Tidak ada baris terblokir.'}
               </div>
             ) : (
               <div className="table-scroll" style={{ maxHeight: 360 }}>

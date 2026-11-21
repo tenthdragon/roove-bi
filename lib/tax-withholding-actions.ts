@@ -21,7 +21,7 @@ import {
   type TaxObjectCodeInput,
   type WithholdingEntityInput,
 } from './tax-withholding-domain';
-import { isBpnrObjectCode } from './tax-withholding-bpnr';
+import { bpnrReferenceRates, isBpnrObjectCode } from './tax-withholding-bpnr';
 import {
   parseCounterpartyMaster,
   type ImportIssue,
@@ -625,6 +625,16 @@ export async function saveTaxObjectCode(input: TaxObjectCodeInput & { mode: 'cre
   // code outside that reference would be selectable yet never exportable.
   if (value.pph_article === 'pph26' && !isBpnrObjectCode(value.code)) {
     throw new Error(`Kode ${value.code} belum ada di referensi BPNR Coretax (norma dan tarif) yang dibawa aplikasi, sehingga bukti potong PPh 26 dengan kode ini tidak akan bisa di-export. Minta pembaruan referensi BPNR dahulu.`);
+  }
+
+  // Without a facility the exporter only accepts a slip whose rate is one of the
+  // reference Deemed × Rate pairs, so the default rate new slips inherit must be
+  // one of them. Treaty or facility rates belong on the slip (SKD/override).
+  if (isBpnrObjectCode(value.code)) {
+    const allowed = bpnrReferenceRates(value.code);
+    if (!allowed.some((rate) => Number(rate) === value.rate_percent)) {
+      throw new Error(`Tarif dasar ${value.rate_percent}% tidak cocok dengan referensi BPNR kode ${value.code} (pilihan: ${allowed.map((rate) => `${rate}%`).join(', ')}). Tarif SKD atau tarif khusus dicatat sebagai fasilitas/override pada bukti potong.`);
+    }
   }
 
   const existing = await svc.from('tax_object_codes').select(OBJECT_CODE_SELECT).eq('code', value.code);

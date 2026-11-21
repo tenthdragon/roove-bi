@@ -629,6 +629,8 @@ Dua workbook per PT (RTI dan PT lain) diimpor terpisah; `entity` dipilih di UI.
   desimal diterima; bila ditolak, pembulatan ke rupiah menjadi keputusan lanjutan.
 - Field orang pribadi (tanggal/tempat lahir, paspor, KITAS) tidak dilacak Roove dan ditulis `xsi:nil`;
   penerima non-residen orang pribadi belum didukung.
+- Routing per bukti potong, bukan per pasal saja (sejak migration 256): PPh 26 → BPNR; pasal lain → BPNR
+  hanya bila penerima ber-TIN asing dan kodenya ada di referensi BPNR; sisanya BPPU.
 - Penomoran batch per entity+masa+**form** (`BPNR - EBUPOT - RTI - 09 2026 - 01.xml`), riwayat batch
   di dialog difilter per formulir, `schema_version` `BPNRBulk-v1`.
 - Kompatibilitas rilis: signature lama `tax_create_export_batch` (11 argumen, tanpa `p_form`) dipertahankan
@@ -647,6 +649,14 @@ Dua workbook per PT (RTI dan PT lain) diimpor terpisah; `entity` dipilih di UI.
   Rekap Setor dan fungsi `tax_record_payment_ntpn`/`tax_clear_payment_ntpn` mengelompokkan bupot lewat
   nilai referensi saat itu, sehingga mengubahnya akan memindahkan bupot lama ke kelompok lain dan
   melepas catatan ID Billing/NTPN yang sudah ada. Nama, tarif dasar, deskripsi, dasar hukum, status tetap bebas.
+- Routing formulir export (`exportFormForSlip`, `lib/tax-withholding-bpnr.ts`, dan guard
+  `tax_create_export_batch` yang diperbarui di migration 256): BPNR untuk semua PPh 26 **atau** bukti potong
+  penerima ber-TIN asing dengan kode yang ada di referensi BPNR (template BPNR memuat kode PPh 4(2)
+  28-405-02 dan 28-409-08 s.d. 14 untuk non-residen); selain itu BPPU. Kode 28-… itu tetap `pph4_2`
+  (KAP 411128) sehingga rekap setoran benar; untuk penerima residen ia tetap lewat BPPU.
+- Tarif dasar kode yang ada di referensi BPNR harus salah satu hasil Deemed × Rate referensi
+  (`bpnrReferenceRates`; 27-104-01 hanya 20%, 27-100-06 1/2/5%), karena validator BPNR menolak tarif
+  lain tanpa fasilitas; tarif SKD/khusus tetap lewat fasilitas atau override pada bukti potong.
 - Kode PPh 26 hanya diterima bila ada di referensi BPNR yang dibawa aplikasi
   (`lib/tax-withholding-bpnr-ref.ts`), karena `validateSlipForBpnr` dan `resolveBpnrRate` memakai norma dan
   tarif dari referensi itu; kode PPh 26 di luar referensi butuh pembaruan referensi (rilis), bukan sekadar baris.

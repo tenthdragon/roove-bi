@@ -63,3 +63,56 @@ BEGIN
   END IF;
 END $$;
 SELECT 'PASS: object code reference gains description/legal_basis, audit trigger, and 13 BPNR codes idempotently';
+
+-- Export routing after migration 256: a PPh 4(2) slip of a foreign-TIN
+-- recipient with a BPNR-listed code belongs to BPNR; the same code for a
+-- resident stays in BPPU.
+DO $$
+DECLARE
+  v_alpha UUID := '00000000-0000-4000-8000-000000000101';
+  v_entity BIGINT := (SELECT id FROM public.tax_withholding_entities WHERE workspace_id = '00000000-0000-4000-8000-000000000101' ORDER BY id LIMIT 1);
+  v_vendor BIGINT := (SELECT id FROM public.tax_counterparties WHERE workspace_id = '00000000-0000-4000-8000-000000000101' ORDER BY id LIMIT 1);
+  v_foreign BIGINT;
+  v_resident BIGINT;
+  v_batch RECORD;
+BEGIN
+  INSERT INTO public.tax_withholding_slips (
+    workspace_id, entity_id, counterparty_id, counterparty_name, counterparty_identity_type, counterparty_identity_number,
+    period_month, period_year, invoice_date, invoice_number, object_code, pph_article,
+    gross_input_mode, gross_input_amount, gross_amount, rate_percent, rate_source,
+    withholding_amount, total_amount, document_date, withholding_date, status
+  ) VALUES
+    (v_alpha, v_entity, v_vendor, 'PEMENANG ASING', 'foreign_tin', 'TIN-PRIZE', 11, 2026, DATE '2026-11-05', 'INV-PRIZE-FOREIGN', '28-405-02', 'pph4_2',
+     'dpp', 1000000, 1000000, 25, 'object_code', 250000, 1000000, DATE '2026-11-05', DATE '2026-11-05', 'ready'),
+    (v_alpha, v_entity, v_vendor, 'PEMENANG LOKAL', 'npwp', '0012345678901234', 11, 2026, DATE '2026-11-05', 'INV-PRIZE-LOCAL', '28-405-02', 'pph4_2',
+     'dpp', 1000000, 1000000, 25, 'object_code', 250000, 1000000, DATE '2026-11-05', DATE '2026-11-05', 'ready');
+  SELECT id INTO v_resident FROM public.tax_withholding_slips WHERE invoice_number = 'INV-PRIZE-LOCAL';
+  SELECT id INTO v_foreign FROM public.tax_withholding_slips WHERE invoice_number = 'INV-PRIZE-FOREIGN';
+
+  BEGIN
+    PERFORM * FROM public.tax_create_export_batch(v_alpha, v_entity, 'BPPU', 2026, 11, ARRAY[v_foreign], (SELECT array_agg(updated_at) FROM public.tax_withholding_slips WHERE id = v_foreign),
+      'BPPU - EBUPOT - ALPHA - 11 2026 - ', 'BpuBulk-v3', '<BpuBulk/>', repeat('a', 64), NULL);
+    RAISE EXCEPTION 'foreign-TIN slip must not enter a BPPU batch';
+  EXCEPTION WHEN SQLSTATE 'P0003' THEN NULL;
+  END;
+  BEGIN
+    PERFORM * FROM public.tax_create_export_batch(v_alpha, v_entity, 'BPNR', 2026, 11, ARRAY[v_resident], (SELECT array_agg(updated_at) FROM public.tax_withholding_slips WHERE id = v_resident),
+      'BPNR - EBUPOT - ALPHA - 11 2026 - ', 'BPNRBulk-v1', '<BPNRBulk/>', repeat('b', 64), NULL);
+    RAISE EXCEPTION 'resident slip must not enter a BPNR batch';
+  EXCEPTION WHEN SQLSTATE 'P0003' THEN NULL;
+  END;
+  SELECT * INTO v_batch FROM public.tax_create_export_batch(v_alpha, v_entity, 'BPNR', 2026, 11, ARRAY[v_foreign], (SELECT array_agg(updated_at) FROM public.tax_withholding_slips WHERE id = v_foreign),
+    'BPNR - EBUPOT - ALPHA - 11 2026 - ', 'BPNRBulk-v1', '<BPNRBulk>prize</BPNRBulk>', repeat('c', 64), NULL);
+  IF v_batch.file_name <> 'BPNR - EBUPOT - ALPHA - 11 2026 - 01.xml' THEN
+    RAISE EXCEPTION 'Foreign-TIN PPh 4(2) slip must open the BPNR sequence of its masa: %', v_batch.file_name;
+  END IF;
+  SELECT * INTO v_batch FROM public.tax_create_export_batch(v_alpha, v_entity, 'BPPU', 2026, 11, ARRAY[v_resident], (SELECT array_agg(updated_at) FROM public.tax_withholding_slips WHERE id = v_resident),
+    'BPPU - EBUPOT - ALPHA - 11 2026 - ', 'BpuBulk-v3', '<BpuBulk>prize</BpuBulk>', repeat('d', 64), NULL);
+  IF v_batch.file_name <> 'BPPU - EBUPOT - ALPHA - 11 2026 - 01.xml' THEN
+    RAISE EXCEPTION 'Resident PPh 4(2) slip must stay in BPPU: %', v_batch.file_name;
+  END IF;
+  IF (SELECT count(*) FROM public.tax_withholding_slips WHERE id IN (v_foreign, v_resident) AND status = 'exported') <> 2 THEN
+    RAISE EXCEPTION 'Both prize slips must be exported through their own form';
+  END IF;
+END $$;
+SELECT 'PASS: export guard routes foreign-TIN non-resident codes to BPNR and resident slips to BPPU';

@@ -12,7 +12,7 @@
 
 import { digitsOnly, type DocumentType, type FacilityCode, type TaxArticle } from './tax-withholding-domain';
 import { fromMicro, periodStartIso, toMicro } from './tax-withholding-rules';
-import { entityShortCode, escapeXml, formatXmlDecimal, xmlDocumentNumber, type ExportEntity, type ExportPeriod, type ExportSlip } from './tax-withholding-xml';
+import { entityShortCode, escapeXml, formatXmlDecimal, xmlDocumentNumber, type ExportEntity, type ExportPeriod, type ExportSlip, type TaxExportForm } from './tax-withholding-xml';
 import { BPNR_COUNTRIES, BPNR_OBJECT_CODES } from './tax-withholding-bpnr-ref';
 
 export const BPNR_BULK_SCHEMA_VERSION = 'BPNRBulk-v1';
@@ -61,6 +61,27 @@ const OBJECT_CODE_OPTIONS = (() => {
 
 export function isBpnrObjectCode(code: string): boolean {
   return OBJECT_CODE_OPTIONS.has(code);
+}
+
+/**
+ * Effective slip rates (Deemed × Rate ÷ 100) the BPNR reference allows for a
+ * code without a facility; the base rate of such a code must be one of them.
+ */
+export function bpnrReferenceRates(objectCode: string): string[] {
+  const rates = new Set<string>();
+  for (const option of OBJECT_CODE_OPTIONS.get(objectCode) ?? []) rates.add(fromMicro(toMicro(option.rate) * BigInt(option.deemed) / 100n, 3));
+  return [...rates];
+}
+
+/**
+ * Which Coretax form reports a slip. Every PPh 26 slip is non-resident by
+ * definition; a slip of another pasal is non-resident when its recipient is
+ * identified by a foreign TIN and the code exists in the BPNR reference (the
+ * template lists 28-405-02 and the 28-409 construction codes for that case).
+ */
+export function exportFormForSlip(slip: Pick<ExportSlip, 'pph_article' | 'counterparty_identity_type' | 'object_code'>): TaxExportForm {
+  if (slip.pph_article === 'pph26') return 'BPNR';
+  return slip.counterparty_identity_type === 'foreign_tin' && isBpnrObjectCode(slip.object_code) ? 'BPNR' : 'BPPU';
 }
 
 export type BpnrRateResolution = { deemed: number; rate: string; error: null } | { deemed: null; rate: null; error: string };
@@ -127,7 +148,7 @@ export function validateSlipForBpnr(slip: BpnrSlip, period: ExportPeriod, active
   const errors: string[] = [];
   if (slip.status !== 'ready') errors.push(`Status ${slip.status}; hanya bukti potong siap yang di-export.`);
   if (slip.period_year !== period.year || slip.period_month !== period.month) errors.push('Masa pajak bukti potong berbeda dari masa batch.');
-  if (slip.pph_article !== 'pph26') errors.push('Bukan PPh 26; bukti potong residen dilaporkan lewat BPPU.');
+  if (slip.pph_article !== 'pph26' && slip.counterparty_identity_type !== 'foreign_tin') errors.push('Bukan PPh 26 dan lawan transaksi bukan TIN asing; bukti potong residen dilaporkan lewat BPPU.');
   if (slip.counterparty_identity_type === 'unknown') errors.push('Lawan transaksi belum punya NPWP/TIN.');
   else if (slip.counterparty_identity_type === 'nik') errors.push('Lawan transaksi ber-NIK adalah residen; laporkan lewat BPPU.');
   else if (!slip.counterparty_identity_number.trim()) errors.push('NPWP/TIN lawan transaksi kosong.');

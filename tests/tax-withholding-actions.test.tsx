@@ -280,3 +280,17 @@ test('object codes: pasal/KAP/KJS stay fixed once slips use the code, and PPh 26
   const bpnr = await actions.saveTaxObjectCode({ mode: 'create', code: '27-100-02', name: 'Bunga (PPh Pasal 26)', pphArticle: 'pph26', ratePercent: '20', kap: '411127', kjs: '100' });
   assert.equal(bpnr.code, '27-100-02');
 });
+
+test('object codes: the base rate of a BPNR-listed code must be one of the reference Deemed x Rate results', async () => {
+  db.tax_object_codes = [{ code: '27-104-01', name: 'Imbalan jasa (PPh 26)', pph_article: 'pph26', rate_percent: '20.000', kap: '411127', kjs: '104', description: null, legal_basis: null, is_active: true, updated_at: '2026-01-01T00:00:00Z' }];
+  const base = { mode: 'update' as const, code: '27-104-01', name: 'Imbalan jasa (PPh 26)', pphArticle: 'pph26', kap: '411127', kjs: '104' };
+  await assert.rejects(actions.saveTaxObjectCode({ ...base, ratePercent: '10' }), /tidak cocok dengan referensi BPNR kode 27-104-01 \(pilihan: 20%\)/);
+  assert.equal(db.tax_object_codes[0].rate_percent, '20.000');
+  assert.equal((await actions.saveTaxObjectCode({ ...base, ratePercent: '20', description: 'Jasa, pekerjaan, kegiatan' })).description, 'Jasa, pekerjaan, kegiatan');
+
+  await assert.rejects(actions.saveTaxObjectCode({ mode: 'create', code: '27-100-06', name: 'Premi asuransi (PPh 26)', pphArticle: 'pph26', ratePercent: '3' }), /pilihan: 1%, 2%, 5%/);
+  const premium = await actions.saveTaxObjectCode({ mode: 'create', code: '27-100-06', name: 'Premi asuransi (PPh 26)', pphArticle: 'pph26', ratePercent: '5' });
+  assert.equal(premium.rate_percent, 5);
+  await assert.rejects(actions.saveTaxObjectCode({ mode: 'create', code: '28-405-02', name: 'Hadiah Undian', pphArticle: 'pph4_2', ratePercent: '20' }), /pilihan: 25%/);
+  assert.equal((await actions.saveTaxObjectCode({ mode: 'create', code: '28-405-02', name: 'Hadiah Undian', pphArticle: 'pph4_2', ratePercent: '25' })).code, '28-405-02');
+});
