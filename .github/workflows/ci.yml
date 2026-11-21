@@ -69,6 +69,11 @@ jobs:
         run: npm run lint
 
       - name: Build app
+        # The Next.js build worker has twice hit Node's default ~2 GB heap limit
+        # on ubuntu-latest (one of two runs for the same commit); the runner has
+        # 7 GB, so give the build room instead of retrying.
+        env:
+          NODE_OPTIONS: --max-old-space-size=4096
         run: npm run build
 
   access-request-database:
