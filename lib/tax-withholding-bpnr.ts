@@ -69,8 +69,27 @@ export function isBpnrObjectCode(code: string): boolean {
  */
 export function bpnrReferenceRates(objectCode: string): string[] {
   const rates = new Set<string>();
-  for (const option of OBJECT_CODE_OPTIONS.get(objectCode) ?? []) rates.add(fromMicro(toMicro(option.rate) * BigInt(option.deemed) / 100n, 3));
+  for (const micro of referenceRateMicros(objectCode)) rates.add(fromMicro(micro));
   return [...rates];
+}
+
+function referenceRateMicros(objectCode: string): bigint[] {
+  return (OBJECT_CODE_OPTIONS.get(objectCode) ?? []).map((option) => toMicro(option.rate) * BigInt(option.deemed) / 100n);
+}
+
+/**
+ * True when a base rate equals one of the code's reference effective rates
+ * exactly (micro precision, the same comparison the exporter makes), so a slip
+ * that inherits it passes validateSlipForBpnr without a facility.
+ */
+export function isBpnrReferenceDefaultRate(objectCode: string, ratePercent: number | string): boolean {
+  let rate: bigint;
+  try {
+    rate = toMicro(ratePercent);
+  } catch {
+    return false;
+  }
+  return referenceRateMicros(objectCode).some((micro) => micro === rate);
 }
 
 /**

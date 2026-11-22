@@ -654,9 +654,16 @@ Dua workbook per PT (RTI dan PT lain) diimpor terpisah; `entity` dipilih di UI.
   penerima ber-TIN asing dengan kode yang ada di referensi BPNR (template BPNR memuat kode PPh 4(2)
   28-405-02 dan 28-409-08 s.d. 14 untuk non-residen); selain itu BPPU. Kode 28-… itu tetap `pph4_2`
   (KAP 411128) sehingga rekap setoran benar; untuk penerima residen ia tetap lewat BPPU.
-- Tarif dasar kode yang ada di referensi BPNR harus salah satu hasil Deemed × Rate referensi
-  (`bpnrReferenceRates`; 27-104-01 hanya 20%, 27-100-06 1/2/5%), karena validator BPNR menolak tarif
-  lain tanpa fasilitas; tarif SKD/khusus tetap lewat fasilitas atau override pada bukti potong.
+- Tarif dasar kode yang ada di referensi BPNR, saat dibuat atau **diubah**, harus salah satu hasil
+  Deemed × Rate referensi, dibandingkan pada presisi mikro yang sama dengan exporter
+  (`isBpnrReferenceDefaultRate`; 27-104-01 hanya 20%, 27-100-06 1/2/5%), karena validator BPNR menolak
+  tarif lain tanpa fasilitas; tarif SKD/khusus tetap lewat fasilitas atau override pada bukti potong.
+  Tarif seed yang tidak diubah tidak menghalangi edit metadata. Catatan seed: 27-100-05 dan 27-100-06
+  tersimpan 20% (tarif nominal) padahal referensi BPNR memakai norma (efektif 5% dan 1/2/5%); bupot yang
+  mewarisinya tanpa SKD tetap diblokir saat export sampai finance mengoreksi tarif dasarnya ke nilai referensi.
+- Referensi BPNR 28-409-25 diperbaiki ke 2,65% (sheet REF template menyimpan "2.65" sebagai waktu Excel
+  00:02:65 = 0,0021487…); unit test memastikan semua tarif efektif referensi muat di NUMERIC(6,3) dan lolos
+  validasi export tanpa fasilitas.
 - Kode PPh 26 hanya diterima bila ada di referensi BPNR yang dibawa aplikasi
   (`lib/tax-withholding-bpnr-ref.ts`), karena `validateSlipForBpnr` dan `resolveBpnrRate` memakai norma dan
   tarif dari referensi itu; kode PPh 26 di luar referensi butuh pembaruan referensi (rilis), bukan sekadar baris.

@@ -305,3 +305,16 @@ test('object codes: the base rate of a BPNR-listed code must be one of the refer
   await assert.rejects(actions.saveTaxObjectCode({ mode: 'create', code: '28-405-02', name: 'Hadiah Undian', pphArticle: 'pph4_2', ratePercent: '20' }), /pilihan: 25%/);
   assert.equal((await actions.saveTaxObjectCode({ mode: 'create', code: '28-405-02', name: 'Hadiah Undian', pphArticle: 'pph4_2', ratePercent: '25' })).code, '28-405-02');
 });
+
+test('object codes: an unchanged seeded rate never blocks metadata edits; a changed or new rate must match the reference exactly', async () => {
+  const seeded = (code: string, rate: string, article = 'pph4_2') => ({ code, name: `Objek ${code}`, pph_article: article, rate_percent: rate, kap: '411128', kjs: '409', description: null, legal_basis: null, is_active: true, updated_at: '2026-01-01T00:00:00Z' });
+  db.tax_object_codes = [seeded('28-409-25', '2.650'), seeded('27-100-05', '20.000', 'pph26')];
+  const edit = (code: string, ratePercent: string, article = 'pph4_2') => actions.saveTaxObjectCode({ mode: 'update', code, name: `Objek ${code}`, pphArticle: article, ratePercent, kap: '411128', kjs: '409', description: 'Catatan' });
+  assert.equal((await edit('28-409-25', '2.65')).description, 'Catatan', 'the corrected reference accepts the seeded 2.65');
+  assert.equal((await edit('28-409-25', '2.650')).rate_percent, 2.65);
+  assert.equal((await edit('27-100-05', '20', 'pph26')).description, 'Catatan', 'a seeded off-reference rate left unchanged still allows metadata edits');
+  await assert.rejects(edit('27-100-05', '10', 'pph26'), /pilihan: 5%/);
+  await assert.rejects(edit('28-409-25', '0.002'), /pilihan: 2.65%/);
+  assert.equal((await edit('27-100-05', '5', 'pph26')).rate_percent, 5);
+  await assert.rejects(edit('27-100-05', '20', 'pph26'), /pilihan: 5%/, 'once corrected the old off-reference rate cannot come back');
+});
