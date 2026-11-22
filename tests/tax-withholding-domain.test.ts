@@ -10,6 +10,8 @@ import {
   normalizeFacilityInput,
   normalizeIsoDate,
   normalizeNpwp,
+  normalizeObjectCode,
+  normalizeObjectCodeInput,
   tkuFromNpwp,
 } from '../lib/tax-withholding-domain';
 import { parseCounterpartyMaster } from '../lib/tax-withholding-import';
@@ -230,4 +232,44 @@ test('blank country defaults to IDN, ISO-3 is preserved and malformed nonblank c
     assert.equal(result.issues[0].level, 'error');
     assert.ok(result.issues[0].message.includes(country));
   }
+});
+
+test('object codes are normalised to the Coretax XX-XXX-XX form', () => {
+  assert.equal(normalizeObjectCode('24.104.24'), '24-104-24');
+  assert.equal(normalizeObjectCode(' 2410424 '), '24-104-24');
+  assert.equal(normalizeObjectCode('24-104'), null);
+});
+
+test('object code input validates format, pasal prefix, rate precision and KAP/KJS pairing', () => {
+  const valid = normalizeObjectCodeInput({
+    code: '24-104-70', name: '  Jasa Baru  ', pphArticle: 'pph23', ratePercent: '2', kap: '411124', kjs: '104',
+    legalBasis: ' PER-12/PJ/2026 ', description: '', isActive: undefined,
+  });
+  assert.deepEqual(valid, { value: {
+    code: '24-104-70', name: 'Jasa Baru', pph_article: 'pph23', rate_percent: 2, kap: '411124', kjs: '104',
+    description: null, legal_basis: 'PER-12/PJ/2026', is_active: true,
+  }, errors: [] });
+
+  const decimalComma = normalizeObjectCodeInput({ code: '28-409-29', name: 'Konstruksi', pphArticle: 'pph4_2', ratePercent: '1,75' });
+  assert.equal(decimalComma.value?.rate_percent, 1.75);
+  assert.deepEqual([decimalComma.value?.kap, decimalComma.value?.kjs], [null, null]);
+
+  const wrong = normalizeObjectCodeInput({ code: '24-104', name: '', pphArticle: 'pph26', ratePercent: '2.0001', kap: '4111', kjs: '' });
+  assert.deepEqual(wrong.value, null);
+  assert.deepEqual(wrong.errors, [
+    'Kode objek harus 7 digit dengan format 24-104-24.',
+    'Nama objek pajak wajib diisi.',
+    'Tarif harus angka 0 sampai 100 dengan maksimal 3 desimal.',
+    'KAP harus 6 digit angka.',
+    'KAP dan KJS harus diisi bersama agar rekap setoran bisa dikelompokkan.',
+  ]);
+
+  const prefix = normalizeObjectCodeInput({ code: '24-104-70', name: 'X', pphArticle: 'pph26', ratePercent: '20' });
+  assert.deepEqual(prefix.errors, ['Awalan kode 24- dipakai untuk PPh 23, bukan PPh 26.']);
+  const unknownPrefix = normalizeObjectCodeInput({ code: '21-100-39', name: 'Hadiah perlombaan', pphArticle: 'pph23', ratePercent: '5' });
+  assert.match(unknownPrefix.errors[0], /Awalan kode 21- belum dikenal/);
+  assert.deepEqual(normalizeObjectCodeInput({ code: '28-411-02', name: 'Pelayaran', pphArticle: 'pph15', ratePercent: '1.2' }).errors, []);
+  assert.deepEqual(normalizeObjectCodeInput({ code: '28-499-09', name: 'Lain', pphArticle: 'pph4_2', ratePercent: '0' }).errors, []);
+  assert.deepEqual(normalizeObjectCodeInput({ code: '28-499-09', name: 'Lain', pphArticle: '', ratePercent: '101' }).errors,
+    ['Pasal PPh wajib dipilih.', 'Tarif harus angka 0 sampai 100 dengan maksimal 3 desimal.']);
 });

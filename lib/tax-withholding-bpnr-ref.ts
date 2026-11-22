@@ -35,7 +35,9 @@ export const BPNR_OBJECT_CODES: readonly BpnrObjectCodeRef[] = [
   { code: '28-409-22', deemed: 100, rate: '1.75', name: 'Pekerjaan Konstruksi yang Dilakukan oleh Penyedia Jasa yang Memiliki Sertifikat Badan Usaha Kualifikasi Kecil atau Sertifikat Kompetensi Kerja untuk Usaha Orang Perseorangan' },
   { code: '28-409-23', deemed: 100, rate: '4', name: 'Pekerjaan Konstruksi yang Dilakukan oleh Penyedia Jasa yang Tidak Memiliki Sertifikat Badan Usaha Atau Sertifikat Kompetensi Kerja untuk Usaha Orang Perseorangan' },
   { code: '28-409-24', deemed: 100, rate: '2.65', name: 'Pekerjaan Konstruksi yang Dilakukan oleh Penyedia Jasa yang Memiliki Sertifikat Selain Sertifikat Badan Usaha Kualifikasi Kecil atau Sertifikat Kompetensi Kerja untuk Usaha Orang Perseorangan' },
-  { code: '28-409-25', deemed: 100, rate: '0.0021487268518518518', name: 'Pekerjaan Konstruksi Terintegrasi yang Dilakukan oleh Penyedia Jasa yang Memiliki Sertifikat Badan Usaha' },
+  // The template REF sheet stored this rate as the Excel time 00:02:65 (185.65 s / 86400 =
+  // 0.0021487268518518518); PP 9/2022 and the BPPU seed (migration 247) give 2.65%.
+  { code: '28-409-25', deemed: 100, rate: '2.65', name: 'Pekerjaan Konstruksi Terintegrasi yang Dilakukan oleh Penyedia Jasa yang Memiliki Sertifikat Badan Usaha' },
   { code: '28-409-26', deemed: 100, rate: '4', name: 'Pekerjaan Konstruksi Terintegrasi yang Dilakukan oleh Penyedia Jasa yang Tidak Memiliki Sertifikat Badan Usaha' },
   { code: '28-409-27', deemed: 100, rate: '3.5', name: 'Jasa Konsultansi Konstruksi yang Dilakukan oleh Penyedia Jasa yang Memiliki Sertifikat Badan Usaha atau Sertifikat Kompetensi Kerja untuk Usaha Orang Perseorangan' },
   { code: '28-409-28', deemed: 100, rate: '6', name: 'Jasa Konsultansi Konstruksi yang Dilakukan oleh Penyedia Jasa yang Tidak Memiliki Sertifikat Badan Usaha atau Sertifikat Kompetensi Kerja untuk Usaha Orang Perseorangan' },

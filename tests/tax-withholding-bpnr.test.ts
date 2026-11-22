@@ -4,14 +4,17 @@ import {
   BPNR_BULK_SCHEMA_VERSION,
   BPNR_DOCUMENT_TYPES,
   bpnrFileNamePrefix,
+  bpnrReferenceRates,
   bpnrTaxCertificate,
   buildBpnrBulkXml,
+  exportFormForSlip,
   isBpnrCountry,
   isBpnrObjectCode,
+  isBpnrReferenceDefaultRate,
   isBpnrReferenceRate,
   resolveBpnrRate,
-  validateSlipForBpnr,
   type BpnrSlip,
+  validateSlipForBpnr,
 } from '../lib/tax-withholding-bpnr';
 import { BPNR_COUNTRIES, BPNR_OBJECT_CODES } from '../lib/tax-withholding-bpnr-ref';
 import { validateSlipForXml } from '../lib/tax-withholding-xml';
@@ -171,4 +174,39 @@ test('validateSlipForXml keeps PPh 26 out of BPPU even when the recipient has an
   const { counterparty_country_code: _country, counterparty_address: _address, facility_document_number: _doc, ...bppu } = slip();
   assert.deepEqual(validateSlipForXml(bppu, period, codes), ['PPh 26 dilaporkan lewat BPNR (bukti potong non-residen), bukan BPPU.']);
   assert.deepEqual(validateSlipForXml({ ...bppu, pph_article: 'pph23', object_code: '24-104-24' }, period, codes), []);
+});
+
+test('exportFormForSlip routes PPh 26 and foreign-TIN BPNR codes to BPNR; bpnrReferenceRates lists the effective base rates', () => {
+  assert.equal(exportFormForSlip({ pph_article: 'pph26', counterparty_identity_type: 'npwp', object_code: '27-104-01' }), 'BPNR');
+  assert.equal(exportFormForSlip({ pph_article: 'pph4_2', counterparty_identity_type: 'foreign_tin', object_code: '28-405-02' }), 'BPNR');
+  assert.equal(exportFormForSlip({ pph_article: 'pph4_2', counterparty_identity_type: 'npwp', object_code: '28-405-02' }), 'BPPU');
+  assert.equal(exportFormForSlip({ pph_article: 'pph23', counterparty_identity_type: 'foreign_tin', object_code: '24-104-24' }), 'BPPU', 'a code outside the BPNR reference cannot be routed there');
+  assert.deepEqual(bpnrReferenceRates('27-104-01'), ['20']);
+  assert.deepEqual(bpnrReferenceRates('27-100-06'), ['1', '2', '5']);
+  assert.deepEqual(bpnrReferenceRates('27-100-08'), ['5']);
+  assert.deepEqual(bpnrReferenceRates('28-409-11'), ['3']);
+  assert.deepEqual(bpnrReferenceRates('28-409-25'), ['2.65'], 'the template time artefact is corrected to the PP 9/2022 rate');
+  assert.deepEqual(bpnrReferenceRates('24-104-24'), []);
+  const prize = slip({ pph_article: 'pph4_2', object_code: '28-405-02', rate_percent: '25', counterparty_identity_type: 'foreign_tin', counterparty_identity_number: 'TIN-1' });
+  assert.deepEqual(validateSlipForBpnr(prize, period, new Set([...codes, '28-405-02'])), []);
+  assert.match(validateSlipForBpnr({ ...prize, counterparty_identity_type: 'npwp', counterparty_identity_number: '0012345678901234' }, period, new Set([...codes, '28-405-02'])).join(' '), /Bukan PPh 26 dan lawan transaksi bukan TIN asing/);
+});
+
+test('every BPNR reference default is storable at three decimals and passes the no-facility export check', () => {
+  const seen = new Set<string>();
+  for (const row of BPNR_OBJECT_CODES) {
+    for (const rate of bpnrReferenceRates(row.code)) {
+      const key = `${row.code}:${rate}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      assert.match(rate, /^\d+(\.\d{1,3})?$/, `${row.code} effective rate ${rate} does not fit NUMERIC(6,3)`);
+      assert.ok(isBpnrReferenceDefaultRate(row.code, rate) && isBpnrReferenceDefaultRate(row.code, Number(rate)));
+      const resolved = resolveBpnrRate(row.code, rate);
+      assert.equal(resolved.error, null, `${row.code} ${rate}: ${resolved.error}`);
+      assert.ok(isBpnrReferenceRate(row.code, resolved.deemed!, resolved.rate!), `${row.code} ${rate} must be a reference pair`);
+      assert.deepEqual(validateSlipForBpnr(slip({ pph_article: 'pph26', object_code: row.code, rate_percent: rate, counterparty_identity_type: 'foreign_tin', counterparty_identity_number: 'TIN-1' }), period, new Set([row.code])), []);
+    }
+  }
+  assert.ok(seen.size >= 38);
+  assert.ok(!isBpnrReferenceDefaultRate('27-104-01', '20.0001') && !isBpnrReferenceDefaultRate('27-104-01', 'abc') && !isBpnrReferenceDefaultRate('28-409-25', '0.002'));
 });

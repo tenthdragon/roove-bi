@@ -12,13 +12,16 @@ import {
   normalizeCounterpartyInput,
   normalizeEntityInput,
   normalizeFacilityInput,
+  normalizeObjectCodeInput,
   type CounterpartyInput,
   type FacilityCode,
   type FacilityInput,
   type IdentityType,
   type TaxArticle,
+  type TaxObjectCodeInput,
   type WithholdingEntityInput,
 } from './tax-withholding-domain';
+import { bpnrReferenceRates, isBpnrObjectCode, isBpnrReferenceDefaultRate } from './tax-withholding-bpnr';
 import {
   parseCounterpartyMaster,
   type ImportIssue,
@@ -29,6 +32,7 @@ import {
 export type {
   CounterpartyInput,
   FacilityInput,
+  TaxObjectCodeInput,
   WithholdingEntityInput,
 } from './tax-withholding-domain';
 
@@ -566,4 +570,103 @@ function translateDbError(error: { code?: string; message: string }, kind: 'enti
 export async function getTaxReferenceOptions(): Promise<{ facilityCodes: readonly FacilityCode[]; articles: readonly TaxArticle[] }> {
   await requireTaxAccess();
   return { facilityCodes: FACILITY_CODES, articles: TAX_ARTICLES };
+}
+
+// ---------------------------------------------------------------------------
+// Kode objek pajak: referensi global, dirawat dari layar Kode Objek tanpa migrasi
+// ---------------------------------------------------------------------------
+
+export type TaxObjectCodeRecord = {
+  code: string;
+  name: string;
+  pph_article: TaxArticle;
+  rate_percent: number;
+  kap: string | null;
+  kjs: string | null;
+  description: string | null;
+  legal_basis: string | null;
+  is_active: boolean;
+  updated_at: string;
+};
+
+const OBJECT_CODE_SELECT = 'code, name, pph_article, rate_percent, kap, kjs, description, legal_basis, is_active, updated_at';
+
+function toObjectCodeRecord(row: TaxObjectCodeRecord): TaxObjectCodeRecord {
+  return { ...row, rate_percent: Number(row.rate_percent) };
+}
+
+/** Every reference code, inactive ones included, for the maintenance screen. */
+export async function listTaxObjectCodes(): Promise<TaxObjectCodeRecord[]> {
+  await requireTaxAccess();
+  const svc = createServiceSupabase();
+  const rows = await fetchAllRows<TaxObjectCodeRecord>((from, to) => svc
+    .from('tax_object_codes')
+    .select(OBJECT_CODE_SELECT)
+    .order('code')
+    .range(from, to));
+  return rows.map(toObjectCodeRecord);
+}
+
+/**
+ * Create a new code or update an existing one. The code itself never changes
+ * (slips reference it); deactivate and add a new code instead. The reference is
+ * shared by every workspace, so only finance roles may edit and edits only
+ * affect the default rate proposed for future slips.
+ */
+export async function saveTaxObjectCode(input: TaxObjectCodeInput & { mode: 'create' | 'update' }): Promise<TaxObjectCodeRecord> {
+  await requireTaxManageAccess();
+  const normalized = normalizeObjectCodeInput(input);
+  if (!normalized.value) throw new Error(normalized.errors.join(' '));
+  const value = normalized.value;
+  const svc = createServiceSupabase();
+
+  // Every PPh 26 slip is exported through BPNR, whose validator and Deemed/Rate
+  // resolution read the Coretax BPNR reference bundled with the app. A PPh 26
+  // code outside that reference would be selectable yet never exportable.
+  if (value.pph_article === 'pph26' && !isBpnrObjectCode(value.code)) {
+    throw new Error(`Kode ${value.code} belum ada di referensi BPNR Coretax (norma dan tarif) yang dibawa aplikasi, sehingga bukti potong PPh 26 dengan kode ini tidak akan bisa di-export. Minta pembaruan referensi BPNR dahulu.`);
+  }
+
+  const existing = await svc.from('tax_object_codes').select(OBJECT_CODE_SELECT).eq('code', value.code);
+  if (existing.error) throw existing.error;
+  const current = ((existing.data ?? []) as TaxObjectCodeRecord[])[0];
+
+  // Without a facility the exporter only accepts a slip whose rate is one of the
+  // reference Deemed × Rate pairs (compared at micro precision), so a base rate
+  // being set or changed on a BPNR code must be one of them. A seeded rate that
+  // is left as it is does not block metadata edits; treaty or facility rates
+  // belong on the slip (SKD/override).
+  const rateChanged = !current || Number(current.rate_percent) !== value.rate_percent;
+  if (rateChanged && isBpnrObjectCode(value.code) && !isBpnrReferenceDefaultRate(value.code, value.rate_percent)) {
+    const allowed = bpnrReferenceRates(value.code);
+    throw new Error(`Tarif dasar ${value.rate_percent}% tidak cocok dengan referensi BPNR kode ${value.code} (pilihan: ${allowed.map((rate) => `${rate}%`).join(', ')}). Tarif SKD atau tarif khusus dicatat sebagai fasilitas/override pada bukti potong.`);
+  }
+
+  if (input.mode === 'create') {
+    if (current) throw new Error(`Kode objek ${value.code} sudah ada. Ubah kode yang ada atau pakai kode lain.`);
+    const result = await svc.from('tax_object_codes').insert(value).select(OBJECT_CODE_SELECT).single();
+    if (result.error) throw result.error;
+    return toObjectCodeRecord(result.data as TaxObjectCodeRecord);
+  }
+
+  if (!current) throw new Error(`Kode objek ${value.code} tidak ditemukan.`);
+
+  // Payment groups (Rekap Setor, tax_record_payment_ntpn, tax_clear_payment_ntpn)
+  // resolve KAP/KJS and the pasal through the live reference, so changing them on
+  // a code that slips already use would silently regroup historical slips and
+  // detach recorded billings. Such codes are deactivated and replaced instead.
+  const mappingChanged = current.pph_article !== value.pph_article
+    || (current.kap ?? null) !== value.kap || (current.kjs ?? null) !== value.kjs;
+  if (mappingChanged) {
+    const used = await svc.from('tax_withholding_slips').select('id').eq('object_code', value.code).range(0, 0);
+    if (used.error) throw used.error;
+    if ((used.data ?? []).length > 0) {
+      throw new Error(`Kode objek ${value.code} sudah dipakai bukti potong, sehingga pasal, KAP, dan KJS-nya tidak bisa diubah (rekap dan catatan setoran mengelompokkan bupot lewat nilai ini). Nonaktifkan kode ini dan tambahkan kode baru.`);
+    }
+  }
+
+  const { code: _code, ...payload } = value;
+  const result = await svc.from('tax_object_codes').update(payload).eq('code', value.code).select(OBJECT_CODE_SELECT).single();
+  if (result.error) throw result.error;
+  return toObjectCodeRecord(result.data as TaxObjectCodeRecord);
 }

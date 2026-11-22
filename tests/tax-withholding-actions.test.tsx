@@ -242,3 +242,79 @@ test('a failed master refresh preserves the mounted form and its unsaved inputs'
     if (priorWindow) Object.defineProperty(globalThis, 'window', priorWindow); else Reflect.deleteProperty(globalThis, 'window');
   }
 });
+
+test('object codes: finance creates a code once, edits keep the code fixed, other roles are rejected', async () => {
+  db.tax_object_codes = [{ code: '24-104-24', name: 'Jasa Software', pph_article: 'pph23', rate_percent: '2.000', kap: '411124', kjs: '104', description: null, legal_basis: null, is_active: true, updated_at: '2026-01-01T00:00:00Z' }];
+  const created = await actions.saveTaxObjectCode({ mode: 'create', code: '28.408.02', name: 'Hibah saham BUMN', pphArticle: 'pph4_2', ratePercent: '0', kap: '411128', kjs: '408', legalBasis: 'PER-12/PJ/2026', description: 'Restrukturisasi BUMN' });
+  assert.equal(created.code, '28-408-02');
+  assert.equal(created.rate_percent, 0);
+  assert.equal(created.is_active, true);
+  assert.equal(db.tax_object_codes.length, 2);
+
+  await assert.rejects(actions.saveTaxObjectCode({ mode: 'create', code: '24-104-24', name: 'Dup', pphArticle: 'pph23', ratePercent: '2' }), /sudah ada/);
+  await assert.rejects(actions.saveTaxObjectCode({ mode: 'update', code: '24-104-99', name: 'Hilang', pphArticle: 'pph23', ratePercent: '2' }), /tidak ditemukan/);
+  await assert.rejects(actions.saveTaxObjectCode({ mode: 'create', code: '24-104-70', name: 'Salah pasal', pphArticle: 'pph26', ratePercent: '20' }), /Awalan kode 24-/);
+  assert.equal(db.tax_object_codes.length, 2);
+
+  const updated = await actions.saveTaxObjectCode({ mode: 'update', code: '24-104-24', name: 'Jasa Software (PMK 141)', pphArticle: 'pph23', ratePercent: '2', kap: '411124', kjs: '104', description: 'Termasuk lisensi dan pemeliharaan.', isActive: false });
+  assert.equal(updated.code, '24-104-24');
+  assert.equal(updated.description, 'Termasuk lisensi dan pemeliharaan.');
+  assert.equal(updated.is_active, false);
+  assert.equal(db.tax_object_codes.find(row => row.code === '24-104-24').name, 'Jasa Software (PMK 141)');
+
+  const all = await actions.listTaxObjectCodes();
+  assert.deepEqual(all.map(row => [row.code, row.rate_percent, row.is_active]), [['24-104-24', 2, false], ['28-408-02', 0, true]]);
+
+  role = 'staf_marketing';
+  const writesBefore = writes;
+  await assert.rejects(actions.saveTaxObjectCode({ mode: 'create', code: '24-104-71', name: 'X', pphArticle: 'pph23', ratePercent: '2' }), /Hanya role finance/);
+  assert.equal(writes, writesBefore);
+});
+
+test('object codes: pasal/KAP/KJS stay fixed once slips use the code, and PPh 26 codes must exist in the BPNR reference', async () => {
+  db.tax_object_codes = [{ code: '24-104-24', name: 'Jasa Software', pph_article: 'pph23', rate_percent: '2.000', kap: '411124', kjs: '104', description: null, legal_basis: null, is_active: true, updated_at: '2026-01-01T00:00:00Z' }];
+  db.tax_withholding_slips = [{ id: 1, workspace_id: A, object_code: '24-104-24' }];
+  const base = { mode: 'update' as const, code: '24-104-24', name: 'Jasa Software', pphArticle: 'pph23', ratePercent: '2', kap: '411124', kjs: '104' };
+  await assert.rejects(actions.saveTaxObjectCode({ ...base, kjs: '100' }), /sudah dipakai bukti potong/);
+  await assert.rejects(actions.saveTaxObjectCode({ ...base, kap: '', kjs: '' }), /sudah dipakai bukti potong/);
+  await assert.rejects(actions.saveTaxObjectCode({ ...base, pphArticle: 'pph4_2', code: '24-104-24' }), /Awalan kode 24-/);
+  assert.equal(db.tax_object_codes[0].kjs, '104');
+  const renamed = await actions.saveTaxObjectCode({ ...base, name: 'Jasa Software (PMK 141)', ratePercent: '3', description: 'Cakupan', isActive: false });
+  assert.deepEqual([renamed.name, renamed.rate_percent, renamed.kjs, renamed.is_active], ['Jasa Software (PMK 141)', 3, '104', false]);
+
+  db.tax_withholding_slips = [];
+  const regrouped = await actions.saveTaxObjectCode({ ...base, kjs: '100' });
+  assert.equal(regrouped.kjs, '100', 'unused codes may still be corrected');
+
+  await assert.rejects(actions.saveTaxObjectCode({ mode: 'create', code: '27-100-99', name: 'Belum ada di BPNR', pphArticle: 'pph26', ratePercent: '20' }), /referensi BPNR/);
+  assert.equal(db.tax_object_codes.length, 1);
+  const bpnr = await actions.saveTaxObjectCode({ mode: 'create', code: '27-100-02', name: 'Bunga (PPh Pasal 26)', pphArticle: 'pph26', ratePercent: '20', kap: '411127', kjs: '100' });
+  assert.equal(bpnr.code, '27-100-02');
+});
+
+test('object codes: the base rate of a BPNR-listed code must be one of the reference Deemed x Rate results', async () => {
+  db.tax_object_codes = [{ code: '27-104-01', name: 'Imbalan jasa (PPh 26)', pph_article: 'pph26', rate_percent: '20.000', kap: '411127', kjs: '104', description: null, legal_basis: null, is_active: true, updated_at: '2026-01-01T00:00:00Z' }];
+  const base = { mode: 'update' as const, code: '27-104-01', name: 'Imbalan jasa (PPh 26)', pphArticle: 'pph26', kap: '411127', kjs: '104' };
+  await assert.rejects(actions.saveTaxObjectCode({ ...base, ratePercent: '10' }), /tidak cocok dengan referensi BPNR kode 27-104-01 \(pilihan: 20%\)/);
+  assert.equal(db.tax_object_codes[0].rate_percent, '20.000');
+  assert.equal((await actions.saveTaxObjectCode({ ...base, ratePercent: '20', description: 'Jasa, pekerjaan, kegiatan' })).description, 'Jasa, pekerjaan, kegiatan');
+
+  await assert.rejects(actions.saveTaxObjectCode({ mode: 'create', code: '27-100-06', name: 'Premi asuransi (PPh 26)', pphArticle: 'pph26', ratePercent: '3' }), /pilihan: 1%, 2%, 5%/);
+  const premium = await actions.saveTaxObjectCode({ mode: 'create', code: '27-100-06', name: 'Premi asuransi (PPh 26)', pphArticle: 'pph26', ratePercent: '5' });
+  assert.equal(premium.rate_percent, 5);
+  await assert.rejects(actions.saveTaxObjectCode({ mode: 'create', code: '28-405-02', name: 'Hadiah Undian', pphArticle: 'pph4_2', ratePercent: '20' }), /pilihan: 25%/);
+  assert.equal((await actions.saveTaxObjectCode({ mode: 'create', code: '28-405-02', name: 'Hadiah Undian', pphArticle: 'pph4_2', ratePercent: '25' })).code, '28-405-02');
+});
+
+test('object codes: an unchanged seeded rate never blocks metadata edits; a changed or new rate must match the reference exactly', async () => {
+  const seeded = (code: string, rate: string, article = 'pph4_2') => ({ code, name: `Objek ${code}`, pph_article: article, rate_percent: rate, kap: '411128', kjs: '409', description: null, legal_basis: null, is_active: true, updated_at: '2026-01-01T00:00:00Z' });
+  db.tax_object_codes = [seeded('28-409-25', '2.650'), seeded('27-100-05', '20.000', 'pph26')];
+  const edit = (code: string, ratePercent: string, article = 'pph4_2') => actions.saveTaxObjectCode({ mode: 'update', code, name: `Objek ${code}`, pphArticle: article, ratePercent, kap: '411128', kjs: '409', description: 'Catatan' });
+  assert.equal((await edit('28-409-25', '2.65')).description, 'Catatan', 'the corrected reference accepts the seeded 2.65');
+  assert.equal((await edit('28-409-25', '2.650')).rate_percent, 2.65);
+  assert.equal((await edit('27-100-05', '20', 'pph26')).description, 'Catatan', 'a seeded off-reference rate left unchanged still allows metadata edits');
+  await assert.rejects(edit('27-100-05', '10', 'pph26'), /pilihan: 5%/);
+  await assert.rejects(edit('28-409-25', '0.002'), /pilihan: 2.65%/);
+  assert.equal((await edit('27-100-05', '5', 'pph26')).rate_percent, 5);
+  await assert.rejects(edit('27-100-05', '20', 'pph26'), /pilihan: 5%/, 'once corrected the old off-reference rate cannot come back');
+});

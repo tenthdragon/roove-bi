@@ -229,10 +229,16 @@ Riwayat tersimpan; tidak ada overwrite ketika SKB diperbarui tahun berikutnya.
 | pph_article | TEXT | `pph22` `pph23` `pph4_2` `pph15` `pph26` `pph21` |
 | rate_percent | NUMERIC(6,3) | tarif dasar |
 | kap, kjs | TEXT | kode akun pajak & jenis setoran untuk ID Billing (dari sheet Ref) |
-| is_active | BOOLEAN | |
+| description | TEXT | cakupan kode: definisi PMK 141/2015, contoh transaksi, pengecualian (migration 256) |
+| legal_basis | TEXT | peraturan asal kode, mis. `PER-12/PJ/2026` (migration 256) |
+| is_active | BOOLEAN | nonaktif = tidak muncul di form bukti potong |
+| updated_at | TIMESTAMPTZ | trigger `set_updated_at_tax_object_codes` (migration 256) |
 
-Diseed dari sheet `REF` template BPPU (198 kode) digabung kolom KAP/KJS dari
-`Ref Daftar Kode Bukti Potong.`; seed dimasukkan di migration yang sama.
+Diseed dari sheet `REF` template BPPU (210 kode) digabung kolom KAP/KJS dari
+`Ref Daftar Kode Bukti Potong.`; seed dimasukkan di migration yang sama. Migration 256
+menambah 13 kode dari sheet REF template BPNR yang tidak ada di template BPPU (27-100-07/08/09,
+27-102-03, 27-107-01, 28-405-02, 28-409-08 s.d. 14). Kode berikutnya (mis. 7 kode PER-12/PJ/2026)
+ditambahkan lewat sub-tab **Kode Objek**, bukan migrasi.
 Tiga enum lain (fasilitas, jenis dokumen, opsi IP) cukup sebagai konstanta TypeScript.
 
 ### 5.5 `tax_withholding_slips` — bukti potong (inti)
@@ -394,6 +400,7 @@ exported ──(void dari batch, alasan wajib)──> draft   // kembali ke antr
 | `voidTaxSlipFromBatch(id, reason)` | kembali ke `draft` |
 | `listCounterparties`, `saveCounterparty`, `saveCounterpartyFacility`, `deactivateCounterparty` | master |
 | `saveWithholdingEntity(input)` | identitas pemotong per business |
+| `listTaxObjectCodes()`, `saveTaxObjectCode({ mode, code, ... })` | referensi kode objek global: semua kode termasuk nonaktif; tambah kode baru atau ubah nama/tarif/KAP/KJS/deskripsi/status (kode tidak bisa diganti, bukti potong merujuknya) |
 | `previewTaxExport({ entityId, year, month, form? })` | daftar bupot `ready` formulir itu (BPPU: non-PPh 26, BPNR: PPh 26) + hasil validasi + total; tidak menulis |
 | `createTaxExportBatch({ entityId, year, month, form?, slipIds })` | validasi ulang per formulir, buat batch (`form`, penomoran per formulir), set status `exported`, kembalikan `{ batchId, form, fileName, xml }` |
 | `getTaxExportBatchXml(batchId)` | unduh ulang |
@@ -433,6 +440,10 @@ Satu halaman dengan sub-tab, memakai konvensi tema `--tone-*`/`toneText`:
 5. **Lawan Transaksi**. CRUD master + fasilitas dengan masa berlaku; penanda
    fasilitas yang akan habis dalam 30 hari.
 6. **Pemotong** (owner). NPWP, TKU, penandatangan per PT.
+7. **Kode Objek**. Referensi kode objek pajak Coretax yang dipakai semua workspace: cari per kode/nama/deskripsi,
+   filter pasal, tampilkan nonaktif; role finance menambah kode baru dari lampiran PER DJP atau mengubah
+   nama, tarif dasar, KAP/KJS, dasar hukum, deskripsi cakupan, dan status aktif tanpa rilis aplikasi.
+   Awalan kode harus cocok dengan pasal (22→PPh 22, 24→PPh 23, 27→PPh 26, 28→PPh 4(2)/15, 29→PPh 15).
 
 Nilai NPWP ditampilkan dengan format `94.042.441.9-429.000` di UI, disimpan digit
 murni. Tidak ada NPWP yang dikirim ke layanan luar atau log.
@@ -618,12 +629,50 @@ Dua workbook per PT (RTI dan PT lain) diimpor terpisah; `entity` dipilih di UI.
   desimal diterima; bila ditolak, pembulatan ke rupiah menjadi keputusan lanjutan.
 - Field orang pribadi (tanggal/tempat lahir, paspor, KITAS) tidak dilacak Roove dan ditulis `xsi:nil`;
   penerima non-residen orang pribadi belum didukung.
+- Routing per bukti potong, bukan per pasal saja (sejak migration 256): PPh 26 → BPNR; pasal lain → BPNR
+  hanya bila penerima ber-TIN asing dan kodenya ada di referensi BPNR; sisanya BPPU.
 - Penomoran batch per entity+masa+**form** (`BPNR - EBUPOT - RTI - 09 2026 - 01.xml`), riwayat batch
   di dialog difilter per formulir, `schema_version` `BPNRBulk-v1`.
 - Kompatibilitas rilis: signature lama `tax_create_export_batch` (11 argumen, tanpa `p_form`) dipertahankan
   sebagai wrapper ke `'BPPU'`, karena runbook memasang migrasi sebelum aplikasi baru aktif dan rollback
   aplikasi tidak mencabut migrasi. PostgREST membedakan overload dari argumen bernama yang dikirim.
   Test DB menjalankan signature lama sesudah migrasi 255 (batch BPPU 03, PPh 26 tetap ditolak).
+
+## 10g. Keputusan implementasi: pengelolaan kode objek (migration 256)
+
+- Referensi kode objek tetap **global** (bukan per workspace) karena kode Coretax sama untuk semua
+  pemotong; perubahan tarif hanya mengubah usulan tarif bukti potong baru, bukti potong yang ada
+  menyimpan tarifnya sendiri. Semua role finance (`MANAGE_ROLES`) boleh mengubah, lewat service role.
+- Kode tidak dapat diganti atau dihapus dari UI: `tax_withholding_slips.object_code` merujuknya.
+  Kode yang salah dinonaktifkan dan kode baru ditambahkan.
+- Pasal, KAP, dan KJS kode yang sudah dipakai bukti potong juga dibekukan (`saveTaxObjectCode` menolak):
+  Rekap Setor dan fungsi `tax_record_payment_ntpn`/`tax_clear_payment_ntpn` mengelompokkan bupot lewat
+  nilai referensi saat itu, sehingga mengubahnya akan memindahkan bupot lama ke kelompok lain dan
+  melepas catatan ID Billing/NTPN yang sudah ada. Nama, tarif dasar, deskripsi, dasar hukum, status tetap bebas.
+- Routing formulir export (`exportFormForSlip`, `lib/tax-withholding-bpnr.ts`, dan guard
+  `tax_create_export_batch` yang diperbarui di migration 256): BPNR untuk semua PPh 26 **atau** bukti potong
+  penerima ber-TIN asing dengan kode yang ada di referensi BPNR (template BPNR memuat kode PPh 4(2)
+  28-405-02 dan 28-409-08 s.d. 14 untuk non-residen); selain itu BPPU. Kode 28-… itu tetap `pph4_2`
+  (KAP 411128) sehingga rekap setoran benar; untuk penerima residen ia tetap lewat BPPU.
+- Tarif dasar kode yang ada di referensi BPNR, saat dibuat atau **diubah**, harus salah satu hasil
+  Deemed × Rate referensi, dibandingkan pada presisi mikro yang sama dengan exporter
+  (`isBpnrReferenceDefaultRate`; 27-104-01 hanya 20%, 27-100-06 1/2/5%), karena validator BPNR menolak
+  tarif lain tanpa fasilitas; tarif SKD/khusus tetap lewat fasilitas atau override pada bukti potong.
+  Tarif seed yang tidak diubah tidak menghalangi edit metadata. Catatan seed: 27-100-05 dan 27-100-06
+  tersimpan 20% (tarif nominal) padahal referensi BPNR memakai norma (efektif 5% dan 1/2/5%); bupot yang
+  mewarisinya tanpa SKD tetap diblokir saat export sampai finance mengoreksi tarif dasarnya ke nilai referensi.
+- Referensi BPNR 28-409-25 diperbaiki ke 2,65% (sheet REF template menyimpan "2.65" sebagai waktu Excel
+  00:02:65 = 0,0021487…); unit test memastikan semua tarif efektif referensi muat di NUMERIC(6,3) dan lolos
+  validasi export tanpa fasilitas.
+- Kode PPh 26 hanya diterima bila ada di referensi BPNR yang dibawa aplikasi
+  (`lib/tax-withholding-bpnr-ref.ts`), karena `validateSlipForBpnr` dan `resolveBpnrRate` memakai norma dan
+  tarif dari referensi itu; kode PPh 26 di luar referensi butuh pembaruan referensi (rilis), bukan sekadar baris.
+- Tarif kode BPNR dengan norma disimpan sebagai tarif efektif (27-100-08/09: norma 25% × 20% = 5%),
+  sehingga `resolveBpnrRate` mengembalikan pasangan Deemed/Rate referensi tanpa override.
+- Validasi di `normalizeObjectCodeInput`: format 7 digit, nama wajib, pasal wajib dan cocok dengan
+  awalan kode, tarif 0–100 maksimal 3 desimal, KAP 6 digit dan KJS 3 digit diisi bersama.
+- Kode PER-12/PJ/2026 (6 kode restrukturisasi BUMN 28-408-02 s.d. 07 tarif 0%, 1 kode royalti buku)
+  belum di-seed karena teks resmi lampiran belum diverifikasi; dimasukkan finance lewat sub-tab Kode Objek.
 
 ## 11. Pertanyaan terbuka (perlu jawaban sebelum fase terkait)
 
@@ -651,6 +700,7 @@ Dua workbook per PT (RTI dan PT lain) diimpor terpisah; `entity` dipilih di UI.
 | 4 ✅ | Migration `253_tax_coretax_recording.sql` (fungsi `tax_record_coretax_numbers()`, indeks unik nomor per pemotong, kolom audit), parser/pencocok `lib/tax-withholding-coretax.ts`, action `lib/tax-withholding-coretax-actions.ts` (pratinjau, catat, hapus, rekap tahunan), dialog `components/TaxWithholdingCoretax.tsx`, tab Rekap Setor `components/TaxWithholdingRecap.tsx` | Total PPh per masa di Rekap Setor = jumlah kolom PPh REKAPAN per masa (2026 di produksi) |
 | 5a ✅ | Migration `254_tax_payment_records.sql` (tabel + fungsi NTPN), helper `lib/tax-withholding-payment.ts`, action `lib/tax-withholding-payment-actions.ts`, kolom Setoran di Rekap Setor (`components/TaxWithholdingPayment.tsx`), banner fasilitas kedaluwarsa | NTPN tercatat → bupot kelompok `paid`; hapus NTPN → kembali `reported`; DB test |
 | 5b ✅ | Migration `255_tax_export_forms.sql` (kolom `form`, penomoran per formulir, guard pasal di `tax_create_export_batch`), generator `lib/tax-withholding-bpnr.ts` + referensi `lib/tax-withholding-bpnr-ref.ts`, action export berparameter `form`, pilihan BPPU/BPNR di dialog Export XML | XML BPNR identik dengan elemen template Coretax (unit test); batch BPNR bernomor 01 terpisah dari BPPU (DB test) |
+| 5c ✅ | Migration `256_tax_object_code_management.sql` (kolom `description`/`legal_basis`, trigger `updated_at`, 13 kode BPNR), action `listTaxObjectCodes`/`saveTaxObjectCode`, sub-tab **Kode Objek** (`components/TaxWithholdingObjectCodes.tsx`) | Kode baru PER DJP ditambahkan dari UI tanpa migrasi; validasi awalan kode vs pasal (unit test); seed idempoten dan hak tulis tetap service-role (DB test) |
 
 Setiap fase: `npm run typecheck:app`, `npm run lint`, `npm run build`, dan unit
 test rule engine/generator XML. Migration hanya dijalankan di lokal sampai

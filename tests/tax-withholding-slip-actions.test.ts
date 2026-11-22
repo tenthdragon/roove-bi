@@ -122,7 +122,7 @@ async function rpc(name: string, args: Record<string, any>) {
   const versions = new Map((args.p_slip_ids as number[]).map((id, index) => [id, args.p_slip_versions[index]]));
   const locked = slips.filter((row) => ids.includes(row.id) && row.workspace_id === args.p_workspace_id && row.entity_id === args.p_entity_id
     && row.period_year === args.p_period_year && row.period_month === args.p_period_month && row.status === 'ready' && (row.export_batch_id ?? null) === null
-    && ((row.pph_article === 'pph26') === (args.p_form === 'BPNR')));
+    && ((row.pph_article === 'pph26' || row.counterparty_identity_type === 'foreign_tin') === (args.p_form === 'BPNR')));
   if (locked.length !== ids.length) return { data: null, error: { message: 'Sebagian bukti potong sudah berubah atau bukan status siap' } };
   if (locked.some((row) => row.updated_at !== versions.get(row.id))) return { data: null, error: { message: 'Sebagian bukti potong diubah setelah pratinjau' } };
   const batches = db.tax_export_batches ??= [];
@@ -549,4 +549,24 @@ test('BPNR export takes the masa\'s PPh 26 slips with country and address from t
   await assert.rejects(exportActions.previewTaxExport({ entityId: 1, year: 2026, month: 1, form: 'SPT' as never }), /Formulir export harus BPPU atau BPNR/);
 });
 
+test('a PPh 4(2) slip for a foreign-TIN recipient with a BPNR-listed code is exported through BPNR, not BPPU', async () => {
+  db.tax_object_codes.push({ code: '28-405-02', name: 'Hadiah Undian', pph_article: 'pph4_2', rate_percent: 25, is_active: true, kap: '411128', kjs: '405' });
+  db.tax_withholding_slips.push({ id: 1, ...readySlip(), updated_at: stamp() });
+  db.tax_withholding_slips.push({ id: 2, ...slip26({ invoice_number: 'INV-PRIZE', object_code: '28-405-02', pph_article: 'pph4_2', rate_percent: '25', withholding_amount: '250000' }), updated_at: stamp() });
+  db.tax_withholding_slips.push({ id: 3, ...readySlip({ invoice_number: 'INV-PRIZE-NPWP', object_code: '28-405-02', pph_article: 'pph4_2', rate_percent: '25', withholding_amount: '250000' }), updated_at: stamp() });
+
+  const bppu = await exportActions.previewTaxExport({ entityId: 1, year: 2026, month: 1 });
+  assert.deepEqual(bppu.rows.map((row) => row.id), [1, 3], 'the resident prize slip stays in BPPU');
+  assert.equal(bppu.otherFormPending, 1);
+  await assert.rejects(exportActions.createTaxExportBatch({ entityId: 1, year: 2026, month: 1, slipIds: [1, 2] }), /INV-PRIZE bukan formulir BPPU/);
+
+  const bpnr = await exportActions.previewTaxExport({ entityId: 1, year: 2026, month: 1, form: 'BPNR' });
+  assert.deepEqual(bpnr.rows.map((row) => [row.id, row.counterparty_country_code, row.errors]), [[2, 'IRL', []]]);
+  assert.equal(bpnr.otherFormPending, 2);
+  const batch = await exportActions.createTaxExportBatch({ entityId: 1, year: 2026, month: 1, form: 'BPNR', slipIds: bpnr.batchIds });
+  assert.equal(batch.form, 'BPNR');
+  assert.match(batch.xml, /<TaxObjectCode>28-405-02<\/TaxObjectCode>\n\s+<GrossIncome>1000000<\/GrossIncome>\n\s+<Deemed>100<\/Deemed>\n\s+<Rate>25<\/Rate>/);
+  assert.equal(db.tax_withholding_slips[1].status, 'exported');
+  assert.equal(db.tax_withholding_slips[2].status, 'ready');
+});
 });
