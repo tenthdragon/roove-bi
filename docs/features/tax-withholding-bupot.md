@@ -37,7 +37,7 @@ Aturan yang tertanam di rumus REKAPAN dan wajib dipertahankan oleh rule engine:
 | --- | --- |
 | NPWP/NIK, status PKP, negara, fasilitas diambil dari master lawan transaksi berdasarkan nama vendor | `VLOOKUP(... M_LWN_TRK ...)` |
 | PPh pasal dan tarif dasar diambil dari referensi kode objek pajak | sheet `Ref Daftar Kode Bukti Potong.` |
-| Tarif **dikali 2** jika penerima hanya punya NIK (tanpa NPWP), untuk PPh 23, 22, 15 | kolom `TARIF` |
+| ~~Tarif **dikali 2** jika penerima hanya punya NIK (tanpa NPWP), untuk PPh 23, 22, 15~~ — **dicabut**: sejak PMK 112/2022 NIK adalah NPWP orang pribadi dan Coretax mewajibkan NIK/NPWP, sehingga tambahan 100% Pasal 23 ayat (1a) tidak berlaku bagi penerima ber-NIK (arahan Tax Manager, Nov 2026). Rule engine memakai tarif dasar kode objek. | kolom `TARIF` (lama) |
 | Tarif **0** jika vendor punya SKB/fasilitas yang masih berlaku pada tanggal transaksi | kolom `SKB`, `TGL BERLAKU SKD/SKB/PP23` |
 | DPP sering dimasukkan sebagai total bayar ÷ 1,11 (strip PPN), menghasilkan desimal panjang | kolom `PENGHASILAN BRUTO` (`=7600/1.11`) |
 | PPN 11% dihitung hanya jika vendor PKP; 1,1% untuk jasa ekspedisi kode 24-104-56 | kolom `PPN` |
