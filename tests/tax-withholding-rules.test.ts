@@ -55,17 +55,19 @@ test('VAT applies to PKP only, with the freight exception', () => {
   assert.equal(resolveVatRatePercent(nonPkp, '24-104-24'), '0');
 });
 
-test('rate comes from the object code, is doubled for NIK, zeroed by an active facility, or overridden', () => {
+test('rate comes from the object code, is the same for NIK holders, zeroed by an active facility, or overridden', () => {
   const base = resolveRate({ objectCode: grabCode, counterparty: pkp, facilities: [], transactionDate: '2026-10-16' });
   assert.equal(base.ratePercent, '2');
   assert.equal(base.rateSource, 'object_code');
 
-  const doubled = resolveRate({ objectCode: grabCode, counterparty: person, facilities: [], transactionDate: '2026-10-16' });
-  assert.equal(doubled.ratePercent, '4');
-  assert.equal(doubled.rateSource, 'nik_double');
+  // NIK is the NPWP of a resident individual in Coretax: no Pasal 23 (1a) surcharge.
+  const individual = resolveRate({ objectCode: grabCode, counterparty: person, facilities: [], transactionDate: '2026-10-16' });
+  assert.equal(individual.ratePercent, '2');
+  assert.equal(individual.rateSource, 'object_code');
+  assert.ok(!individual.explanation.some((line) => /dikali 2/.test(line)), 'no doubling note for NIK recipients');
 
   const rent = resolveRate({ objectCode: rentCode, counterparty: person, facilities: [], transactionDate: '2026-10-16' });
-  assert.equal(rent.ratePercent, '10', 'PPh 4(2) is never doubled');
+  assert.equal(rent.ratePercent, '10');
 
   const exempt = resolveRate({ objectCode: grabCode, counterparty: pkp, facilities: [skb], transactionDate: '2026-10-16' });
   assert.equal(exempt.ratePercent, '0');

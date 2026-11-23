@@ -4,7 +4,11 @@
 //   * base rate comes from the tax object code;
 //   * an active facility (SKB/PP23/DTP/SKD) replaces the rate (0% unless the
 //     facility carries its own rate) and is reported as <TaxCertificate>;
-//   * a counterparty identified by NIK (no NPWP) pays double for PPh 23/22/15;
+//   * a counterparty identified by NIK is an NPWP holder (PMK 112/2022: NIK is
+//     the NPWP of resident individuals, mandatory in Coretax), so the 100%
+//     surcharge of Pasal 23 ayat (1a) is never applied; the REKAPAN workbook's
+//     "x2 for NIK" column predates Coretax and was retired on the tax team's
+//     instruction;
 //   * DPP may be entered directly or as a total that includes VAT, in which
 //     case DPP = total / (1 + VAT rate), kept with 6 decimals;
 //   * PPh = round-half-up(DPP × rate), whole rupiah;
@@ -26,9 +30,10 @@ export const MICRO = 1_000_000n;
 const PERCENT_SCALE = 1000n; // rates carry 3 decimals: 2.500% → 2500
 
 export type GrossInputMode = 'dpp' | 'total_incl_vat';
+// 'nik_double' is no longer produced (see the header); it stays in the type and
+// in the slips CHECK constraint so historical rows, if any, keep loading.
 export type RateSource = 'object_code' | 'facility' | 'nik_double' | 'override';
 
-export const DOUBLE_RATE_ARTICLES: readonly TaxArticle[] = ['pph23', 'pph22', 'pph15'];
 export const FREIGHT_OBJECT_CODE = '24-104-56';
 export const VAT_RATE_PERCENT = '11';
 export const VAT_RATE_FREIGHT_PERCENT = '1.1';
@@ -230,11 +235,6 @@ export function resolveRate(input: {
   if (article === 'pph26' && scaled === 0n) {
     scaled = percentToScaled(PPH26_DEFAULT_RATE_PERCENT);
     explanation.push(`PPh 26 tanpa SKD: tarif ${PPH26_DEFAULT_RATE_PERCENT}%.`);
-  }
-  if (input.counterparty.identity_type === 'nik' && DOUBLE_RATE_ARTICLES.includes(article)) {
-    scaled *= 2n;
-    explanation.push(`Penerima tanpa NPWP (NIK): tarif dikali 2 menjadi ${scaledToPercent(scaled)}%.`);
-    return { ratePercent: scaledToPercent(scaled), rateSource: 'nik_double', facilityCode: 'N/A', facilityDocumentNumber: null, explanation };
   }
   return { ratePercent: scaledToPercent(scaled), rateSource: 'object_code', facilityCode: 'N/A', facilityDocumentNumber: null, explanation };
 }
